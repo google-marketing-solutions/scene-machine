@@ -1,0 +1,59 @@
+{
+  "workflowDefinition": {
+    "root": {
+      "action": "pass",
+      "input": {
+        "image": null
+      },
+      "types": {
+        "image": "image"
+      }
+    },
+    "n_0": {
+      "action": "outpaint_image",
+      "input": {
+        "image": {
+          "node": "root",
+          "output": "image"
+        }
+      },
+      "parameters": {
+        "target_ratio": "9:16"
+      }
+    },
+    "sink": {
+      "action": "pass",
+      "input": {
+        "n_0.outpainted_image": {
+          "node": "n_0",
+          "output": "outpainted_image"
+        }
+      }
+    }
+  },
+  "nodeId": "root",
+  "workflowId": "1122",
+  "forceExecution": true,
+  "workflowParams": {
+    "gcpProject": "${PROJECT}",
+    "gcpLocation": "${REGION}",
+    "gcsBucket": "${GCS_BUCKET}",
+    "tasksQueuePrefix": "${TASKS_QUEUE_PREFIX}"
+  },
+  "inputFiles": {
+    "image": [
+      {
+        "file": "examples/CatSofa.png",
+        "image_id": "1",
+        "product_id": "CatSofa",
+        "image_instruction": "outpaint"
+      },
+      {
+        "file": "examples/Scene1.png",
+        "image_id": "2",
+        "product_id": "OtherSofa",
+        "image_instruction": "crop"
+      }
+    ]
+  }
+}

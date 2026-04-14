@@ -1,0 +1,86 @@
+{
+  "workflowDefinition": {
+    "root": {
+      "action": "pass",
+      "input": {
+        "prompt": null,
+        "image": null
+      },
+      "types": {
+        "prompt": "string",
+        "image": "image"
+      }
+    },
+    "n_0": {
+      "action": "outpaint_image",
+      "input": {
+        "image": {
+          "node": "root",
+          "output": "image"
+        }
+      },
+      "parameters": {
+        "target_ratio": "16:9"
+      }
+    },
+    "n_1": {
+      "action": "generate_video",
+      "input": {
+        "prompt": {
+          "node": "root",
+          "output": "prompt"
+        },
+        "image": {
+          "node": "n_0",
+          "output": "outpainted_image"
+        }
+      },
+      "parameters": {
+        "video_variant_quantity": 1,
+        "aspect_ratio": "16:9",
+        "resolution": "720p",
+        "duration_seconds": 4,
+        "model": "veo-3.1-fast-generate-001",
+        "generate_audio": true,
+        "gcp_project": "",
+        "gcp_location": "us-central1"
+      }
+    },
+    "sink": {
+      "action": "pass",
+      "input": {
+        "n_0.outpainted_image": {
+          "node": "n_0",
+          "output": "outpainted_image"
+        },
+        "n_1.video": {
+          "node": "n_1",
+          "output": "video"
+        }
+      }
+    }
+  },
+  "nodeId": "root",
+  "workflowId": "73454545",
+  "forceExecution": true,
+  "workflowParams": {
+    "gcpProject": "${PROJECT}",
+    "gcpLocation": "${REGION}",
+    "gcsBucket": "${GCS_BUCKET}",
+    "tasksQueuePrefix": "${TASKS_QUEUE_PREFIX}"
+  },
+  "inputFiles": {
+    "prompt": [
+      {
+        "file": "examples/prompt_CatSofa.txt"
+      }
+    ],
+    "image": [
+      {
+        "file": "examples/CatSofa.png",
+        "product_id": "CatSofa",
+        "image_instruction": "outpaint"
+      }
+    ]
+  }
+}
