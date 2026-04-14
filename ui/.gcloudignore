@@ -1,0 +1,48 @@
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Angular specific
+.angular/
+src/
+e2e/
+coverage/
+public/
+
+# TypeScript and sourcemaps (unless you specifically need sourcemaps in production)
+*.ts
+*.js.map
+
+# Editor and OS specific
+.agent/
+.gemini/
+.git/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Test configurations not needed for deployment
+karma.conf.js
+protractor.conf.js
+tsconfig.spec.json
+
+# Other configuration files generally not needed by the deployed static app
+.editorconfig
+.eslintrc.json
+.prettierignore
+.prettierrc.js
+angular.json
+eslint.ignores.js
+eslint.config.js
+package.json
+package-lock.json
+tsconfig.app.json
+tsconfig.json
+README.md
+
+# The gcloud configuration files themselves
+.gcloudignore
+
+.gitignore
