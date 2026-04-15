@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-import { Routes } from '@angular/router';
-import { Homepage } from './homepage/homepage';
+import {Routes} from '@angular/router';
+import {Homepage} from './homepage/homepage';
 /**
  * Application routes.
  */

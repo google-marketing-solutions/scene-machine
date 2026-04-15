@@ -19,18 +19,18 @@ import {
   LOCALE_ID,
   provideBrowserGlobalErrorListeners,
 } from '@angular/core';
-import { initializeApp, provideFirebaseApp } from '@angular/fire/app';
-import { getAuth, provideAuth } from '@angular/fire/auth';
-import { getFirestore, provideFirestore } from '@angular/fire/firestore';
-import { getStorage, provideStorage } from '@angular/fire/storage';
-import { provideRouter } from '@angular/router';
+import {initializeApp, provideFirebaseApp} from '@angular/fire/app';
+import {getAuth, provideAuth} from '@angular/fire/auth';
+import {getFirestore, provideFirestore} from '@angular/fire/firestore';
+import {getStorage, provideStorage} from '@angular/fire/storage';
+import {provideRouter} from '@angular/router';
 
-import { registerLocaleData } from '@angular/common';
-import { env } from '../env';
-import { routes } from './app.routes';
+import {registerLocaleData} from '@angular/common';
+import {env} from '../env';
+import {routes} from './app.routes';
 
 import locale from '@angular/common/locales/en-GB';
-import { MAT_FORM_FIELD_DEFAULT_OPTIONS } from '@angular/material/form-field';
+import {MAT_FORM_FIELD_DEFAULT_OPTIONS} from '@angular/material/form-field';
 
 registerLocaleData(locale, 'en-GB');
 

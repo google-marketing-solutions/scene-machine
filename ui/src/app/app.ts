@@ -22,12 +22,12 @@ import {
   signal,
   ViewChild,
 } from '@angular/core';
-import { Auth, GoogleAuthProvider, signInWithPopup } from '@angular/fire/auth';
-import { MatSidenavContainer, MatSidenavModule } from '@angular/material/sidenav';
-import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
-import { filter } from 'rxjs/operators';
-import { ConfigService } from './services/config/config';
-import { Sidebar } from './sidebar/sidebar';
+import {Auth, GoogleAuthProvider, signInWithPopup} from '@angular/fire/auth';
+import {MatSidenavContainer, MatSidenavModule} from '@angular/material/sidenav';
+import {NavigationEnd, Router, RouterOutlet} from '@angular/router';
+import {filter} from 'rxjs/operators';
+import {ConfigService} from './services/config/config';
+import {Sidebar} from './sidebar/sidebar';
 
 /**
  * Root component of the application.
