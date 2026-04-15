@@ -69,6 +69,7 @@ export class App implements OnInit {
           if (this.loggedIn()) {
             this.configService.loadProjectConfig(id);
           } else {
+            // Fixes a race condition where the Navigation event happens before the login.
             setTimeout(() => {
               this.configService.loadProjectConfig(id);
             }, 0);
