@@ -1,0 +1,217 @@
+/**
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+:host {
+  display: block;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.output-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+
+.project-title-header {
+  padding: 8px 24px;
+  background-color: var(--mat-sys-surface-container-lowest);
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  h1 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 500;
+    color: var(--mat-sys-on-surface);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    padding-right: 12px;
+  }
+
+  mat-chip-set {
+    --mdc-chip-label-text-size: 12px;
+    --mdc-chip-container-height: 28px;
+
+    ::ng-deep .mdc-evolution-chip-set__chips {
+      flex-flow: nowrap;
+    }
+
+    mat-chip {
+      --mdc-chip-container-color: var(--mat-sys-on-surface);
+      --mdc-chip-label-text-color: var(--mat-sys-on-surface);
+
+      mat-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+        opacity: 0.6;
+      }
+    }
+  }
+}
+
+.main-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+  width: 100%;
+}
+
+.content-wrapper {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  width: 100%;
+}
+
+.preview-area {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  .video-container {
+    width: auto;
+    position: relative;
+    background: black;
+    display: flex;
+    flex-direction: column;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+    max-width: 90%;
+    max-height: 90%;
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+  }
+}
+
+.actions-panel {
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 16px;
+  border-left: 1px solid var(--mat-sys-outline-variant);
+  overflow-y: auto;
+
+  .subtitle {
+    font-size: 0.75rem;
+    font-weight: 600;
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    display: block;
+  }
+
+  .render-runs-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    .render-run-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: var(--mat-sys-surface-container-low);
+      border: 1px solid var(--mat-sys-outline);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+
+      &:hover {
+        background: var(--mat-sys-surface-container-high);
+      }
+
+      &.selected {
+        border-color: var(--mat-sys-primary);
+        background: var(--mat-sys-primary-container);
+
+        .render-run-info mat-icon {
+          color: var(--mat-sys-on-primary-container);
+        }
+
+        .render-run-name {
+          color: var(--mat-sys-on-primary-container) !important;
+        }
+      }
+
+      .render-run-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        flex: 1;
+        min-width: 0;
+
+        mat-icon {
+          color: var(--mat-sys-on-surface);
+          flex-shrink: 0;
+        }
+
+        .render-run-text {
+          display: flex;
+          flex-direction: column;
+          flex: 1;
+          min-width: 0;
+
+          .render-run-name {
+            font-weight: 500;
+            font-size: 0.875rem;
+            color: var(--mat-sys-on-surface);
+            line-height: 1.2;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+
+          .render-run-subtitle {
+            font-size: 0.75rem;
+            color: var(--mat-sys-on-surface-variant);
+            margin-top: 2px;
+          }
+        }
+      }
+    }
+  }
+}
+
+.bottom-bar {
+  border-top: 1px solid var(--mat-sys-outline-variant);
+  padding: 24px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  background-color: var(--mat-sys-surface-container-lowest);
+}
+
+.scene-download-spinner {
+  margin-right: 16px;
+  display: inline-block;
+}
