@@ -1,0 +1,319 @@
+<!--
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+@if (configService.projectConfig.isLoading() || !configService.projectConfig.value().id) {
+  <div class="loading-state">
+    <mat-spinner diameter="40"></mat-spinner>
+    <p>Loading project...</p>
+  </div>
+} @else {
+  <div class="composition-layout">
+    <div class="project-title-header">
+      <h1 [title]="configService.projectConfig.value().name">
+        {{ configService.projectConfig.value().name }}
+      </h1>
+      <mat-chip-set>
+        <mat-chip class="aspect-ratio-chip">
+          <mat-icon matChipAvatar>aspect_ratio</mat-icon>
+          {{ configService.projectConfig.value().aspectRatio }}
+        </mat-chip>
+        <mat-chip class="resolution-chip">
+          <mat-icon matChipAvatar>
+            @if (configService.projectConfig.value().resolution === '4k') {
+              4k
+            } @else {
+              hd
+            }
+          </mat-icon>
+          {{
+            configService.projectConfig.value().resolution === '4k'
+              ? '4K'
+              : configService.projectConfig.value().resolution
+          }}
+        </mat-chip>
+      </mat-chip-set>
+    </div>
+
+    <div class="main-content">
+      <div class="content-wrapper">
+        <div class="preview-wrapper">
+          <div class="preview-area">
+            <div class="video-container" [style.aspect-ratio]="previewAspectRatio()">
+              <video
+                #mainVideo
+                class="preview-video"
+                [src]="currentVideoSrc()"
+                [muted]="isMuted()"
+                [volume]="videoVolume()"
+                (timeupdate)="onTimeUpdate()"
+                (loadedmetadata)="onVideoLoadedMetadata()"
+                (click)="togglePlay()"
+                [autoplay]="isPlaying()"
+                playsinline
+                preload="auto"
+              ></video>
+
+              @if (!isPlaying()) {
+                <div class="video-overlay" (click)="togglePlay()">
+                  <button mat-icon-button class="big-play-button">
+                    <mat-icon>play_circle_filled</mat-icon>
+                  </button>
+                </div>
+              }
+
+              <div class="controls-bar">
+                <button mat-icon-button (click)="togglePlay()">
+                  <mat-icon>{{ isPlaying() ? 'pause' : 'play_arrow' }}</mat-icon>
+                </button>
+
+                <div class="time-display current">{{ formatTime(totalCurrentTime()) }}</div>
+
+                <mat-slider
+                  class="timeline-slider"
+                  [min]="0"
+                  [max]="totalDuration() || 100"
+                  step="0.1"
+                >
+                  <input matSliderThumb [value]="totalCurrentTime()" (input)="seek($event)" />
+                </mat-slider>
+
+                <div class="time-display total">{{ formatTime(totalDuration()) }}</div>
+
+                <div class="volume-controls">
+                  <button mat-icon-button (click)="isMuted.set(!isMuted())">
+                    <mat-icon>{{
+                      isMuted() || videoVolume() == 0 ? 'volume_off' : 'volume_up'
+                    }}</mat-icon>
+                  </button>
+                  <div class="slider-popup">
+                    <mat-slider class="volume-slider" min="0" max="1" step="0.05">
+                      <input
+                        matSliderThumb
+                        [value]="isMuted() ? 0 : videoVolume()"
+                        (input)="changeVolume($event)"
+                      />
+                    </mat-slider>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="actions-panel">
+          <button
+            mat-flat-button
+            color="primary"
+            (click)="renderVideo()"
+            [disabled]="combiningScenes()"
+          >
+            <mat-icon>movie</mat-icon>
+            <span>{{ combiningScenes() ? 'Rendering...' : 'Render Video' }}</span>
+          </button>
+          <div class="overlays">
+            <div class="header">
+              <div class="subtitle">Audio Tracks</div>
+              <button
+                matIconButton
+                matTooltip="Upload Audio Track"
+                (click)="openAudioUploadDialog()"
+              >
+                <mat-icon>upload_file</mat-icon>
+              </button>
+            </div>
+            @if (configService.projectConfig.value().audioTracks.length > 0) {
+              <div class="audio-tracks-list">
+                @for (
+                  track of configService.projectConfig.value().audioTracks;
+                  track $index;
+                  let i = $index
+                ) {
+                  <div
+                    class="audio-track-item"
+                    style="cursor: pointer"
+                    (click)="openAudioUploadDialog(i)"
+                  >
+                    <div class="track-info">
+                      <mat-icon>audio_file</mat-icon>
+                      <div class="track-text">
+                        <span class="track-name">{{ track.name }}</span>
+                        <span class="track-subtitle">
+                          {{ track.startSeconds | formatTime }} -
+                          @if (track.durationSeconds !== -1) {
+                            {{
+                              getMinValue(
+                                track.startSeconds + track.durationSeconds,
+                                totalDuration()
+                              ) | formatTime
+                            }}
+                          } @else {
+                            {{ totalDuration() | formatTime }}
+                          }
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      mat-icon-button
+                      color="warn"
+                      matTooltip="Remove Track"
+                      (click)="$event.stopPropagation(); removeAudioTrack(i)"
+                    >
+                      <mat-icon>delete</mat-icon>
+                    </button>
+                  </div>
+                }
+              </div>
+            } @else {
+              <span>No uploaded audio tracks</span>
+            }
+            <div class="header">
+              <div class="subtitle">Visual Overlays</div>
+              <button matIconButton matTooltip="Upload Image" (click)="openImageUploadDialog()">
+                <mat-icon>upload_file</mat-icon>
+              </button>
+            </div>
+            @if (configService.projectConfig.value().visualOverlays.length > 0) {
+              <div class="audio-tracks-list">
+                @for (
+                  overlay of configService.projectConfig.value().visualOverlays;
+                  track $index;
+                  let i = $index
+                ) {
+                  <div
+                    class="audio-track-item"
+                    style="cursor: pointer"
+                    (click)="openImageUploadDialog(i)"
+                  >
+                    <div class="track-info">
+                      <mat-icon>image</mat-icon>
+                      <div class="track-text">
+                        <span class="track-name">{{ overlay.name }}</span>
+                        <span class="track-subtitle">
+                          {{ overlay.startSeconds | formatTime }} -
+                          @if (overlay.durationSeconds !== -1) {
+                            {{
+                              getMinValue(
+                                overlay.startSeconds + overlay.durationSeconds,
+                                totalDuration()
+                              ) | formatTime
+                            }}
+                          } @else {
+                            {{ totalDuration() | formatTime }}
+                          }
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      mat-icon-button
+                      color="warn"
+                      matTooltip="Remove Overlay"
+                      (click)="$event.stopPropagation(); removeVisualOverlay(i)"
+                    >
+                      <mat-icon>delete</mat-icon>
+                    </button>
+                  </div>
+                }
+              </div>
+            } @else {
+              <span>No uploaded visual overlays</span>
+            }
+          </div>
+        </div>
+      </div>
+
+      <div class="candidates-tray">
+        <div class="candidates-grid">
+          @for (scene of filmstripScenes(); track scene.id; let i = $index) {
+            @if (i > 0) {
+              <div
+                class="transition-icon"
+                (click)="openTransitionModal(i)"
+                [class.transition-set]="scene.transition"
+              >
+                @if (scene.transition) {
+                  <mat-icon>arrow_circle_right</mat-icon>
+                } @else {
+                  <mat-icon>add_circle_outline</mat-icon>
+                }
+              </div>
+            }
+            <div class="candidate-item">
+              @if (configService.isGeneratedScene(scene)) {
+                <div class="resolution">
+                  {{
+                    scene.candidates![scene.selectedCandidateIndex!].resolution === '4k'
+                      ? '4K'
+                      : scene.candidates![scene.selectedCandidateIndex!].resolution
+                  }}
+                </div>
+              }
+              <div class="video-thumbnail">
+                <video
+                  [src]="
+                    configService.isGeneratedScene(scene)
+                      ? scene.candidates![scene.selectedCandidateIndex!].video?.url
+                      : scene.video?.url
+                  "
+                ></video>
+              </div>
+              <div class="video-info">
+                <div class="video-chip" [title]="scene.name">{{ scene.name }}</div>
+                <div class="video-chip duration-chip">
+                  @if (configService.isGeneratedScene(scene)) {
+                    @let candidate = scene.candidates![scene.selectedCandidateIndex!];
+                    @if (
+                      candidate.trim &&
+                      candidate.trim.start !== undefined &&
+                      candidate.trim.end !== undefined
+                    ) {
+                      <mat-icon>content_cut</mat-icon>
+                      {{ candidate.trim.end - candidate.trim.start | number: '1.2-2' }}s
+                    } @else {
+                      <!-- Generated videos are whole seconds. -->
+                      {{ candidate.durationSeconds }}s
+                    }
+                  } @else if (configService.isProvidedVideoScene(scene)) {
+                    @if (
+                      scene.trim && scene.trim.start !== undefined && scene.trim.end !== undefined
+                    ) {
+                      <mat-icon>content_cut</mat-icon>
+                      {{ scene.trim.end - scene.trim.start | number: '1.2-2' }}s
+                    } @else {
+                      <!-- User uploaded videos can have any duration. -->
+                      {{ scene.durationSeconds | number: '1.2-2' }}s
+                    }
+                  }
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+}
+@if (isTransitionModalVisible()) {
+  <app-transition-modal
+    [transitions]="transitions"
+    [initialTransition]="{
+      id: filmstripScenes()[selectedCandidateIndex()!].transition,
+      overlap: filmstripScenes()[selectedCandidateIndex()!].transitionOverlap,
+    }"
+    [maxTransitionOverlap]="maxTransitionOverlap()"
+    (selectedTransition)="onTransitionSelected($event)"
+    (closed)="isTransitionModalVisible.set(false)"
+  ></app-transition-modal>
+}
