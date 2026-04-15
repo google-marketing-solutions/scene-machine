@@ -1,0 +1,13 @@
+config.txt
+config-*.txt
+ui/definitions/config.json
+*.pyc
+__pycache__
+.firebase
+venv
+.venv/
+ui/app/.vscode/
+ui/app/src/app/services/config/config.service.ts
+gcs-cors-config.json
+apispec.yaml
+deployed_version.txt

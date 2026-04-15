@@ -1,0 +1,412 @@
+{
+  "concat": {
+    "input": {
+      "text1": {
+        "type": "string"
+      },
+      "text2": {
+        "type": "string"
+      }
+    },
+    "parameters": {
+      "separator": {
+        "type": "string"
+      }
+    },
+    "output": {
+      "text": {
+        "type": "string"
+      }
+    }
+  },
+  "group_concat": {
+    "input": {
+      "text": {
+        "type": "string",
+        "multi": true
+      }
+    },
+    "parameters": {
+      "sorting_key": {
+        "type": "string"
+      },
+      "separator": {
+        "type": "string"
+      }
+    },
+    "output": {
+      "text": {
+        "type": "string"
+      }
+    }
+  },
+  "translate": {
+    "input": {
+      "text": {
+        "type": "string"
+      }
+    },
+    "parameters": {
+      "target_language": {
+        "type": "string"
+      }
+    },
+    "output": {
+      "text": {
+        "type": "string",
+        "dimensions": ["language"]
+      }
+    }
+  },
+  "describe_image": {
+    "input": {
+      "image": {
+        "type": "image"
+      },
+      "guidance": {
+        "type": "string"
+      }
+    },
+    "parameters": {
+      "gemini_model": {
+        "type": "string"
+      }
+    },
+    "output": {
+      "description": {
+        "type": "string"
+      }
+    },
+    "tasksClass": "Gemini"
+  },
+  "write_products_script": {
+    "input": {
+      "briefing": {
+        "type": "string"
+      },
+      "product_description": {
+        "type": "string",
+        "multi": true,
+        "dimensions": ["product_id", "image_id"]
+      },
+      "image_description": {
+        "type": "string",
+        "multi": true,
+        "dimensions": ["product_id", "image_id"]
+      }
+    },
+    "parameters": {
+      "story_variant_quantity": {
+        "type": "int"
+      },
+      "gemini_model": {
+        "type": "string"
+      }
+    },
+    "output": {
+      "script": {
+        "type": "string",
+        "multi": true,
+        "dimensions": ["story_variant_id", "product_id", "image_id", "scene_id"]
+      },
+      "style": {
+        "type": "string",
+        "multi": true,
+        "dimensions": ["story_variant_id"]
+      },
+      "post_production": {
+        "type": "string",
+        "multi": true,
+        "dimensions": ["story_variant_id", "product_id", "image_id", "scene_id"]
+      }
+    },
+    "tasksClass": "Gemini"
+  },
+  "outpaint_image": {
+    "input": {
+      "image": {
+        "type": "image"
+      }
+    },
+    "parameters": {
+      "target_ratio": {
+        "type": "string"
+      }
+    },
+    "output": {
+      "outpainted_image": {
+        "type": "image"
+      }
+    },
+    "tasksClass": "Gemini"
+  },
+  "generate_video": {
+    "input": {
+      "prompt": {
+        "type": "string"
+      },
+      "image": {
+        "type": "image"
+      }
+    },
+    "parameters": {
+      "video_variant_quantity": {
+        "type": "int"
+      },
+      "aspect_ratio": {
+        "type": "string"
+      },
+      "duration_seconds": {
+        "type": "int"
+      },
+      "gcp_project": {
+        "type": "string"
+      },
+      "gcp_location": {
+        "type": "string"
+      },
+      "model": {
+        "type": "string"
+      },
+      "generate_audio": {
+        "type": "bool"
+      },
+      "resolution": {
+        "type": "string"
+      }
+    },
+    "output": {
+      "video": {
+        "type": "video",
+        "multi": true,
+        "dimensions": ["video_variant_id"]
+      }
+    },
+    "tasksClass": "Veo"
+  },
+  "generate_arrangement": {
+    "input": {
+      "video": {
+        "type": "video",
+        "multi": true
+      },
+      "audio": {
+        "type": "audio",
+        "multi": true
+      },
+      "image": {
+        "type": "image",
+        "multi": true
+      }
+    },
+    "output": {
+      "arrangement": {
+        "type": "object"
+      }
+    }
+  },
+  "combine_video": {
+    "input": {
+      "arrangement": {
+        "type": "object",
+        "multi": false
+      }
+    },
+    "parameters": {
+      "resolution": {
+        "type": "string"
+      },
+      "encoding_speed": {
+        "type": "int"
+      },
+      "quality_level": {
+        "type": "int"
+      }
+    },
+    "output": {
+      "video": {
+        "type": "video"
+      }
+    }
+  },
+  "write_ad_script": {
+    "input": {
+      "briefing": {
+        "type": "string"
+      },
+      "theme": {
+        "type": "string",
+        "dimensions": ["theme_title"]
+      }
+    },
+    "parameters": {
+      "story_variant_quantity": {
+        "type": "int"
+      }
+    },
+    "output": {
+      "style": {
+        "type": "string",
+        "multi": true,
+        "dimensions": ["story_variant_id", "theme_title"]
+      },
+      "video_prompt": {
+        "type": "string",
+        "multi": true,
+        "dimensions": ["story_variant_id", "scene_id", "theme_title"]
+      },
+      "starting_image_description": {
+        "type": "string",
+        "multi": true,
+        "dimensions": ["story_variant_id", "scene_id", "theme_title"]
+      }
+    },
+    "tasksClass": "Gemini"
+  },
+  "generate_image": {
+    "input": {
+      "prompt": {
+        "type": "string"
+      }
+    },
+    "parameters": {
+      "variant_quantity": {
+        "type": "int"
+      },
+      "aspect_ratio": {
+        "type": "string"
+      }
+    },
+    "output": {
+      "image": {
+        "type": "image"
+      }
+    },
+    "tasksClass": "Gemini"
+  },
+  "convert_image": {
+    "input": {
+      "file": {
+        "type": "image",
+        "multi": true
+      }
+    },
+    "parameters": {
+      "output_mime_types": {
+        "type": "string"
+      }
+    },
+    "output": {
+      "image": {
+        "type": "image"
+      }
+    }
+  },
+  "convert_video": {
+    "input": {
+      "file": {
+        "type": "video"
+      }
+    },
+    "parameters": {
+      "output_file_extension": {
+        "type": "string"
+      },
+      "output_file_dimension": {
+        "type": "string"
+      }
+    },
+    "output": {
+      "video": {
+        "type": "video"
+      }
+    }
+  },
+  "devise_variants": {
+    "input": {
+      "briefing": {
+        "type": "string"
+      }
+    },
+    "parameters": {
+      "variants_min": {
+        "type": "int"
+      },
+      "variants_max": {
+        "type": "int"
+      }
+    },
+    "output": {
+      "variant": {
+        "type": "string",
+        "multi": true,
+        "dimensions": ["variant_name"]
+      }
+    }
+  },
+  "copy_web_to_gcs": {
+    "input": {
+      "urls": {
+        "type": "string"
+      }
+    },
+    "parameters": {},
+    "output": {
+      "file": {
+        "type": "string",
+        "multi": true,
+        "dimensions": ["image_id"]
+      }
+    }
+  },
+  "analyse_file": {
+    "input": {
+      "file": {
+        "type": "video"
+      },
+      "generation_prompt": {
+        "type": "string"
+      }
+    },
+    "parameters": {
+      "prompt": {
+        "type": "string"
+      },
+      "response_schema": {
+        "type": "object"
+      }
+    },
+    "output": {
+      "text": {
+        "type": "string"
+      }
+    },
+    "tasksClass": "Gemini"
+  },
+  "generate_storyboard": {
+    "input": {
+      "user_prompt": {
+        "type": "string"
+      },
+      "images": {
+        "type": "image",
+        "multi": true,
+        "dimensions": ["product_id", "image_id"]
+      }
+    },
+    "parameters": {
+      "gemini_model": {
+        "type": "string"
+      },
+      "gemini_model_location": {
+        "type": "string"
+      }
+    },
+    "output": {
+      "storyboard": {
+        "type": "string"
+      }
+    },
+    "tasksClass": "Gemini"
+  }
+}

@@ -1,0 +1,99 @@
+{
+  "workflowDefinition": {
+    "root": {
+      "action": "pass",
+      "input": {
+        "text": null
+      },
+      "types": {
+        "text": "string"
+      }
+    },
+    "translate_0": {
+      "action": "translate",
+      "parameters": {
+        "source_language": "en",
+        "target_language": ["de", "es", "la", "it", "nl", "pt", "hu", "se"]
+      },
+      "input": {
+        "text": {
+          "node": "root",
+          "output": "text"
+        }
+      }
+    },
+    "translate_1": {
+      "action": "translate",
+      "parameters": {
+        "source_language": "en",
+        "target_language": ["cs", "es", "la", "it", "nl", "pt", "hu", "se"]
+      },
+      "input": {
+        "text": {
+          "node": "root",
+          "output": "text"
+        }
+      }
+    },
+    "concat_0": {
+      "action": "concat",
+      "parameters": {
+        "separator": "+"
+      },
+      "input": {
+        "text1": {
+          "node": "translate_0",
+          "output": "text"
+        },
+        "text2": {
+          "node": "translate_1",
+          "output": "text"
+        }
+      }
+    },
+    "concat_group_0": {
+      "action": "group_concat",
+      "parameters": {
+        "sorting_key": "language",
+        "separator": " – "
+      },
+      "dimensionsConsumed": ["id"],
+      "input": {
+        "text": {
+          "node": "concat_0",
+          "output": "text"
+        }
+      }
+    },
+    "sink": {
+      "action": "pass",
+      "input": {
+        "concat_group_0.text": {
+          "node": "concat_group_0",
+          "output": "text"
+        }
+      }
+    }
+  },
+  "nodeId": "root",
+  "workflowId": "12354",
+  "forceExecution": true,
+  "workflowParams": {
+    "gcpProject": "${PROJECT}",
+    "gcpLocation": "${REGION}",
+    "gcsBucket": "${GCS_BUCKET}",
+    "tasksQueuePrefix": "${TASKS_QUEUE_PREFIX}"
+  },
+  "inputFiles": {
+    "text": [
+      {
+        "file": "examples/OldWorld.txt",
+        "id": "1"
+      },
+      {
+        "file": "examples/NewWorld.txt",
+        "id": "2"
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+export PROJECT=
+export REGION= # choose from: https://docs.cloud.google.com/tasks/docs/locations
+export GCS_BUCKET= # must be unique across projects
+FIRESTORE_DB=
+export FIRESTORE_DB_UI=
+ARTIFACT_REPO=
+API_GATEWAY=
+API_GATEWAY_REGION= # europe-west1 | europe-west2 | us-central1
+APP_ENGINE_REGION= # europe-west | europe-west2/3/6 | us-central
+export TASKS_QUEUE_PREFIX=
+export GEMINI_REGION=
+export GEMINI_MODEL= # remember that models may be discontinued by Google
+export VEO_REGION=
+export VEO_MODEL= # remember that models may be discontinued by Google

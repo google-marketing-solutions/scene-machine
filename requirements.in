@@ -1,0 +1,13 @@
+Flask
+Flask-Cors
+requests
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-cloud-firestore
+google-cloud-logging
+google-cloud-storage
+google-cloud-tasks
+firebase-admin
+google-genai
+Pillow
