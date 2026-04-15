@@ -1,0 +1,485 @@
+/**
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+:host {
+  display: block;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+  gap: 16px;
+
+  p {
+    font-size: 1rem;
+    opacity: 0.7;
+  }
+}
+
+.composition-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+
+.project-title-header {
+  padding: 8px 24px;
+  background-color: var(--mat-sys-surface-container-lowest);
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  h1 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 500;
+    color: var(--mat-sys-on-surface);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    padding-right: 12px;
+  }
+
+  mat-chip-set {
+    --mdc-chip-label-text-size: 12px;
+    --mdc-chip-container-height: 28px;
+
+    ::ng-deep .mdc-evolution-chip-set__chips {
+      flex-flow: nowrap;
+    }
+
+    mat-chip {
+      --mdc-chip-container-color: var(--mat-sys-on-surface);
+      --mdc-chip-label-text-color: var(--mat-sys-on-surface);
+
+      &.aspect-ratio-chip,
+      &.resolution-chip {
+        pointer-events: none;
+      }
+
+      mat-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+        opacity: 0.6;
+      }
+    }
+  }
+}
+
+.main-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.content-wrapper {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.preview-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+}
+
+.preview-area {
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+
+  .video-container {
+    border-radius: 8px;
+    width: 100%;
+    height: 100%;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+
+    .preview-video {
+      width: 100%;
+      height: 100%;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .video-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+
+      &:hover {
+        .big-play-button {
+          transform: scale(1.1);
+        }
+      }
+
+      .big-play-button {
+        width: 80px;
+        height: 80px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+
+        mat-icon {
+          font-size: 64px;
+          width: 64px;
+          height: 64px;
+          color: white;
+          opacity: 0.9;
+        }
+      }
+    }
+
+    .controls-bar {
+      height: 48px;
+      background: rgba(0, 0, 0, 0.85);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 16px;
+      color: white;
+      z-index: 20;
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+
+      button {
+        color: white;
+      }
+
+      mat-slider {
+        flex-grow: 1;
+        width: auto;
+      }
+
+      .time-display {
+        font-variant-numeric: tabular-nums;
+        font-size: 12px;
+        min-width: 40px;
+        text-align: center;
+        opacity: 0.9;
+
+        &.current {
+          text-align: right;
+        }
+
+        &.total {
+          text-align: left;
+        }
+      }
+
+      .volume-controls {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+
+        .slider-popup {
+          position: absolute;
+          bottom: 48px;
+          right: 0;
+          width: 160px;
+          height: 48px;
+          background: rgba(0, 0, 0, 0.85);
+          backdrop-filter: blur(4px);
+          border-radius: 8px;
+          padding: 0 16px;
+          display: flex;
+          align-items: center;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.2s ease-in-out;
+          z-index: 50;
+          flex-grow: 0;
+
+          // Pevent sliding out of background
+          &::before {
+            content: '';
+            position: absolute;
+            bottom: -12px;
+            left: 0;
+            right: 0;
+            height: 12px;
+            background: transparent;
+          }
+
+          .volume-slider {
+            width: 120px;
+          }
+        }
+
+        &:hover .slider-popup {
+          opacity: 1;
+          pointer-events: auto;
+        }
+      }
+    }
+  }
+}
+
+.actions-panel {
+  width: 280px;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+  gap: 16px;
+  border-left: 1px solid var(--mat-sys-outline-variant);
+  overflow: auto;
+
+  .subtitle {
+    font-size: 0.75rem;
+    font-weight: 600;
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    display: block;
+  }
+
+  button {
+    flex-shrink: 0;
+  }
+}
+
+.overlays {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+
+    .subtitle {
+      flex: 1;
+    }
+
+    button {
+      opacity: 0.7;
+    }
+  }
+
+  .audio-tracks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    .audio-track-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 4px 8px 4px 12px;
+      background: var(--mat-sys-surface-container-low);
+      border: 1px solid var(--mat-sys-outline);
+      border-radius: 8px;
+
+      .track-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+
+        mat-icon {
+          color: var(--mat-sys-on-surface);
+        }
+
+        .track-text {
+          display: flex;
+          flex-direction: column;
+
+          .track-name {
+            font-weight: 500;
+            font-size: 0.875rem;
+            color: var(--mat-sys-on-surface);
+            line-height: 1.2;
+          }
+
+          .track-subtitle {
+            font-size: 0.75rem;
+            color: var(--mat-sys-on-surface-variant);
+            margin-top: 2px;
+          }
+        }
+      }
+    }
+  }
+}
+
+.candidates-tray {
+  border-top: 1px solid var(--mat-sys-outline-variant);
+  padding: 16px;
+  overflow-x: auto;
+}
+
+.candidates-grid {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.candidates-grid::after {
+  content: '';
+  flex: 0 0 1px;
+  align-self: stretch;
+}
+
+.candidate-item {
+  border: 1px solid var(--mat-sys-outline);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--mat-sys-surface-container-lowest);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  width: 240px;
+  flex-shrink: 0;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  }
+
+  .resolution {
+    position: absolute;
+    top: 10px;
+    left: 12px;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    backdrop-filter: blur(4px);
+    padding: 2px 6px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    border-radius: 4px;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .video-thumbnail {
+    aspect-ratio: 16 / 9;
+    background: var(--mat-sys-surface-container-high);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+  }
+
+  .video-info {
+    padding: 10px 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--mat-sys-outline-variant);
+    gap: 12px;
+
+    .video-chip {
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--mat-sys-on-surface);
+      background: var(--mat-sys-surface-container-highest);
+      padding: 3px 8px;
+      border-radius: 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 14px;
+      align-items: center;
+
+      &.duration-chip {
+        flex-shrink: 0;
+        display: flex;
+        gap: 4px;
+      }
+
+      mat-icon {
+        font-size: 12px;
+        width: 12px;
+        height: 12px;
+      }
+    }
+  }
+}
+
+.transition-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 50%;
+  border: 1px dashed var(--mat-sys-on-surface);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+
+  mat-icon {
+    color: var(--mat-sys-on-surface);
+    transition: color 0.2s ease;
+  }
+
+  &:hover {
+    background: var(--mat-sys-surface-container-highest);
+    border-style: solid;
+  }
+
+  &.transition-set {
+    border-style: solid;
+    border-color: var(--mat-sys-primary);
+    background: var(--mat-sys-primary-container);
+
+    mat-icon {
+      color: var(--mat-sys-on-primary-container);
+    }
+  }
+}
