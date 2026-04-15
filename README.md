@@ -1,5 +1,5 @@
 # Scene Machine
 
-## Coming Soon
+## Coming Soon!
 
-This solution is current a work in progress. Please check back soon for more information.
+This solution is currently a work in progress. Please check back soon for more information.
