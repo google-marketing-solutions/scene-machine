@@ -1,0 +1,112 @@
+/**
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+:host {
+  display: block;
+  height: 100%;
+  overflow: hidden;
+  transition: width 0.3s ease-in-out;
+}
+
+.sidebar-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%; // Fill the host
+  box-sizing: border-box;
+  border-right: 1px solid var(--mat-sys-outline-variant);
+  background-color: var(--mat-sys-surface-container-lowest);
+  overflow: hidden;
+
+  &.collapsed {
+    // Width is handled by host binding now
+
+    .mat-list-item-content {
+      justify-content: center;
+    }
+    .sidebar-header {
+      justify-content: center;
+    }
+  }
+}
+
+.sidebar-header {
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 16px;
+  height: 64px; // Match toolbar height if possible or just fixed
+  box-sizing: border-box;
+  color: var(--mat-sys-on-surface);
+
+  .title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: bold;
+    font-size: 1.2rem;
+    text-decoration: none;
+    color: inherit;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+.mdc-list-item.mdc-list-item--disabled {
+  cursor: default;
+}
+
+.mdc-list-item.mdc-list-item--disabled::before {
+  background-color: transparent;
+}
+
+.main-nav {
+  flex-grow: 1;
+}
+
+.bottom-nav {
+  flex-grow: 0;
+}
+
+.toggle-nav {
+  .mat-list-item-content {
+    justify-content: center;
+  }
+}
+
+.route-active {
+  color: red;
+}
+
+.color-picker-container {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  justify-content: center;
+  border-radius: 8px;
+}
+
+.color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  background-color: var(--mat-sys-primary);
+}
