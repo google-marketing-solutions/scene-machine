@@ -51,7 +51,7 @@ def get_mime_type(uri: str) -> str:
     if file_extension in allowed_types:
         return mimetypes.types_map["." + file_extension]
 
-    assert False, f"File extension '{file_extension}' ({uri}) is not allowed."
+    raise ValueError(f"File extension '{file_extension}' ({uri}) is not allowed.")
 
 
 def remove_md_notation(s: str) -> str:
@@ -107,6 +107,25 @@ def prompt(
         )
     contents = [types.Content(role="user", parts=parts)]
 
+    safety_settings = [
+        types.SafetySetting(
+            category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH.value,
+            threshold=types.HarmBlockThreshold.OFF.value,
+        ),
+        types.SafetySetting(
+            category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT.value,
+            threshold=types.HarmBlockThreshold.OFF.value,
+        ),
+        types.SafetySetting(
+            category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT.value,
+            threshold=types.HarmBlockThreshold.OFF.value,
+        ),
+        types.SafetySetting(
+            category=types.HarmCategory.HARM_CATEGORY_HARASSMENT.value,
+            threshold=types.HarmBlockThreshold.OFF.value,
+        ),
+    ]
+
     generate_content_config = types.GenerateContentConfig(
         temperature=temperature,
         top_p=top_p,
@@ -116,24 +135,7 @@ def prompt(
         else None,
         response_mime_type="application/json" if response_schema else None,
         response_schema=response_schema,
-        safety_settings=[
-            types.SafetySetting(
-                category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH.value,
-                threshold=types.HarmBlockThreshold.OFF.value,
-            ),
-            types.SafetySetting(
-                category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT.value,
-                threshold=types.HarmBlockThreshold.OFF.value,
-            ),
-            types.SafetySetting(
-                category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT.value,
-                threshold=types.HarmBlockThreshold.OFF.value,
-            ),
-            types.SafetySetting(
-                category=types.HarmCategory.HARM_CATEGORY_HARASSMENT.value,
-                threshold=types.HarmBlockThreshold.OFF.value,
-            ),
-        ],
+        safety_settings=safety_settings,
         thinking_config=types.ThinkingConfig(thinking_budget=0)
         if model != "gemini-2.5-pro"
         else None,
