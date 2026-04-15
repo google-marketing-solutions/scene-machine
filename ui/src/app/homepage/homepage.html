@@ -1,0 +1,125 @@
+<!--
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+<div class="homepage-wrapper">
+  <div class="hero-section">
+    <h1 class="main-title">Scene Machine</h1>
+    <p class="subtitle">
+      Craft professional video storyboards with the power of artificial intelligence
+    </p>
+  </div>
+
+  <div class="homepage-container">
+    <a routerLink="/generate/ai" class="card-link">
+      <mat-card class="action-card" appearance="outlined">
+        <div class="card-glow"></div>
+        <mat-card-header>
+          <mat-icon class="card-icon">add_circle</mat-icon>
+          <mat-card-title>New Project</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>Start from scratch or use AI guidance to bring your next cinematic vision to life</p>
+        </mat-card-content>
+      </mat-card>
+    </a>
+
+    <a routerLink="/templates" class="card-link">
+      <mat-card class="action-card" appearance="outlined">
+        <div class="card-glow"></div>
+        <mat-card-header>
+          <mat-icon class="card-icon">feed</mat-icon>
+          <mat-card-title>Creative Templates</mat-card-title>
+        </mat-card-header>
+        <mat-card-content>
+          <p>
+            Browse, edit, and organize your creative templates for consistent and fast production
+          </p>
+        </mat-card-content>
+      </mat-card>
+    </a>
+  </div>
+
+  <div class="projects-section">
+    <div class="projects-header">
+      <h2>Projects</h2>
+      <mat-slide-toggle [checked]="myProjectsOnly()" (change)="toggleFilter($event.checked)">
+        My projects only
+      </mat-slide-toggle>
+    </div>
+
+    @if (projects().length > 0) {
+      <div class="projects-grid">
+        @for (project of projects(); track project.id) {
+          <a
+            [routerLink]="[project.id, 'storyboard']"
+            class="project-card-link"
+            [class.is-vertical]="getAspectRatio(project) === '9/16'"
+          >
+            <mat-card class="project-card" appearance="outlined">
+              <div class="project-thumbnail" [style.aspect-ratio]="getAspectRatio(project)">
+                @let thumb = getThumbnail(project);
+                @if (thumb?.type === 'video') {
+                  <video
+                    [src]="thumb?.url"
+                    muted
+                    loop
+                    onmouseover="this.play()"
+                    onmouseout="this.pause()"
+                  ></video>
+                } @else if (thumb?.type === 'image') {
+                  <img [src]="thumb?.url" alt="Project thumbnail" />
+                } @else {
+                  <div class="placeholder-thumbnail">
+                    <mat-icon>movie</mat-icon>
+                  </div>
+                }
+                <button
+                  mat-icon-button
+                  class="delete-project-btn"
+                  title="Delete Project"
+                  (click)="
+                    $event.preventDefault(); $event.stopPropagation(); deleteProject(project.id)
+                  "
+                >
+                  <mat-icon>delete</mat-icon>
+                </button>
+              </div>
+              <mat-card-content>
+                <h3 class="project-title">{{ project.name || 'Untitled Project' }}</h3>
+                <div class="last-edited">
+                  <span class="edit-date"
+                    >Last edit: {{ project.lastEdited | date: 'mediumDate' }}</span
+                  >
+                  @if (!myProjectsOnly() && project.createdBy) {
+                    <span class="avatar-wrapper">
+                      <mat-icon class="tiny-avatar">account_circle</mat-icon>
+                      <span class="username">{{ getUsername(project.createdBy) }}</span>
+                    </span>
+                  }
+                </div>
+              </mat-card-content>
+            </mat-card>
+          </a>
+        }
+      </div>
+    } @else {
+      <div class="empty-projects-state">
+        <h3>No projects found</h3>
+        <p>Try turning off the filter or creating a new project above!</p>
+      </div>
+    }
+  </div>
+</div>
