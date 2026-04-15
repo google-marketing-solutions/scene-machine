@@ -1,0 +1,148 @@
+{
+  "workflowDefinition": {
+    "root": {
+      "action": "pass",
+      "input": {
+        "joint_briefing": null,
+        "variant_briefing": null
+      },
+      "types": {
+        "joint_briefing": "string",
+        "variant_briefing": "string"
+      }
+    },
+    "n_0": {
+      "action": "devise_variants",
+      "input": {
+        "briefing": {
+          "node": "root",
+          "output": "variant_briefing"
+        }
+      },
+      "dimensionsMapping": {
+        "variant_name": "theme_title"
+      },
+      "parameters": {
+        "variants_min": 4,
+        "variants_max": 6
+      }
+    },
+    "n_1": {
+      "action": "write_ad_script",
+      "input": {
+        "briefing": {
+          "node": "root",
+          "output": "joint_briefing"
+        },
+        "theme": {
+          "node": "n_0",
+          "output": "variant"
+        }
+      },
+      "dimensionsMapping": {
+        "script_variant_id": "script_variant_id",
+        "theme_title": "theme_title"
+      },
+      "parameters": {
+        "story_variant_quantity": 1
+      }
+    },
+    "n_2": {
+      "action": "generate_image",
+      "input": {
+        "prompt": {
+          "node": "n_1",
+          "output": "starting_image_description"
+        }
+      },
+      "parameters": {
+        "variant_quantity": 1,
+        "aspect_ratio": "16:9"
+      },
+      "dimensionsMapping": {
+        "image_variant_id": "image_variant_id"
+      }
+    },
+    "n_3": {
+      "action": "generate_video",
+      "input": {
+        "prompt": {
+          "node": "n_1",
+          "output": "video_prompt"
+        },
+        "image": {
+          "node": "n_2",
+          "output": "image"
+        }
+      },
+      "parameters": {
+        "video_variant_quantity": 1,
+        "aspect_ratio": "16:9",
+        "resolution": "720p",
+        "duration_seconds": 4,
+        "model": "veo-3.1-fast-generate-001",
+        "generate_audio": true,
+        "gcp_project": "",
+        "gcp_location": "us-central1"
+      }
+    },
+    "n_4": {
+      "action": "generate_arrangement",
+      "input": {
+        "video": {
+          "node": "n_3",
+          "output": "video"
+        }
+      },
+      "parameters": {}
+    },
+    "n_5": {
+      "action": "combine_video",
+      "input": {
+        "arrangement": {
+          "node": "n_4",
+          "output": "arrangement"
+        }
+      },
+      "parameters": {
+        "resolution": "1280:720",
+        "encoding_speed": 6,
+        "quality_level": 20
+      },
+      "dimensionsConsumed": ["scene_id"],
+      "dimensionsMapping": {
+        "video_variant_id": "video_variant_id"
+      }
+    },
+    "sink": {
+      "action": "pass",
+      "input": {
+        "n_5.video": {
+          "node": "n_5",
+          "output": "video"
+        }
+      }
+    }
+  },
+  "nodeId": "root",
+  "workflowId": "343434",
+  "forceExecution": true,
+  "workflowParams": {
+    "gcpProject": "${PROJECT}",
+    "gcpLocation": "${REGION}",
+    "gcsBucket": "${GCS_BUCKET}",
+    "tasksQueuePrefix": "${TASKS_QUEUE_PREFIX}"
+  },
+  "inputFiles": {
+    "joint_briefing": [
+      {
+        "file": "examples/JointBriefing.txt"
+      }
+    ],
+    "variant_briefing": [
+      {
+        "file": "examples/VariantBriefing.txt"
+      }
+    ]
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "fields": {
+    "numberOfCandidates": {
+      "integerValue": "1"
+    },
+    "gcpProject": {
+      "stringValue": "${PROJECT}"
+    },
+    "encodingSpeed": {
+      "integerValue": "6"
+    },
+    "gcsBucket": {
+      "stringValue": "${GCS_BUCKET}"
+    },
+    "gatewayApiKey": {
+      "stringValue": "${API_KEY}"
+    },
+    "qualityLevel": {
+      "integerValue": "20"
+    },
+    "aspectRatio": {
+      "stringValue": "16:9"
+    },
+    "gcpLocation": {
+      "stringValue": "${REGION}"
+    },
+    "duration": {
+      "integerValue": "4"
+    },
+    "tasksQueuePrefix": {
+      "stringValue": "${TASKS_QUEUE_PREFIX}"
+    },
+    "veoModel": {
+      "stringValue": "${VEO_MODEL}"
+    },
+    "veoLocation": {
+      "stringValue": "${VEO_REGION}"
+    },
+    "generateAudio": {
+      "booleanValue": false
+    },
+    "resolution": {
+      "stringValue": "720p"
+    },
+    "geminiLocation": {
+      "stringValue": "${GEMINI_REGION}"
+    },
+    "geminiModel": {
+      "stringValue": "${GEMINI_MODEL}"
+    },
+    "gatewayBaseUrl": {
+      "stringValue": "https://${API_GATEWAY_HOST}"
+    }
+  }
+}

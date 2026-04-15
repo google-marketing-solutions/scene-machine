@@ -1,0 +1,29 @@
+# .dockerignore
+.git/
+.gitignore
+.firebase/
+.venv/
+.firebaserc
+.style.yapf
+.gcloudignore
+.pylintrc
+
+gcs-cors-config.json
+firebase_storage.rules
+firestore.indexes.json
+firestore.rules
+firestore.rules.auth
+firebase.json
+apispec.yaml
+
+ui/*
+!ui/definitions/
+test/
+examples/
+tools/
+
+# Editor and OS specific
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

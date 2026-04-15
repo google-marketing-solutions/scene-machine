@@ -1,0 +1,52 @@
+{
+  "workflowDefinition": {
+    "root": {
+      "action": "pass",
+      "input": {
+        "arrangement": null
+      },
+      "types": {
+        "arrangement": "object"
+      }
+    },
+    "n_0": {
+      "action": "combine_video",
+      "input": {
+        "arrangement": {
+          "node": "root",
+          "output": "arrangement"
+        }
+      },
+      "parameters": {
+        "resolution": "720:1280",
+        "encoding_speed": 6,
+        "quality_level": 20
+      }
+    },
+    "sink": {
+      "action": "pass",
+      "input": {
+        "video": {
+          "node": "n_0",
+          "output": "video"
+        }
+      }
+    }
+  },
+  "nodeId": "root",
+  "workflowId": "103",
+  "forceExecution": true,
+  "workflowParams": {
+    "gcpProject": "${PROJECT}",
+    "gcpLocation": "${REGION}",
+    "gcsBucket": "${GCS_BUCKET}",
+    "tasksQueuePrefix": "${TASKS_QUEUE_PREFIX}"
+  },
+  "inputFiles": {
+    "arrangement": [
+      {
+        "file": "examples/Test_arrangement.json"
+      }
+    ]
+  }
+}

@@ -1,0 +1,73 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+    swagger: "2.0"
+    info:
+      title: Scene Machine API
+      description: "API for managing and executing Scene Machine workflows."
+      version: "1.0.0"
+    schemes:
+      - "https"
+    host: ${API_MANAGED_SERVICE_HOST}
+    x-google-backend:
+      address: ${CLOUD_RUN_URL}
+    x-google-endpoints:
+    - name: ${API_MANAGED_SERVICE_HOST}
+      allowCors: True
+    securityDefinitions:
+      api_key:
+        type: "apiKey"
+        name: "api_key"
+        in: "query"
+    security:
+      - api_key: []
+    paths:
+      "/getStatus":
+        get:
+          description: "Get the status."
+          operationId: "getStatus"
+          parameters:
+            -
+              name: "executionId"
+              in: "query"
+              description: "The ID of the execution for which to retrieve the status."
+              required: true
+              type: string
+          responses:
+            200:
+              description: "Success."
+              schema:
+                type: string
+            400:
+              description: "Not working."
+      "/supplyNode":
+        post:
+          description: "Supply a workflow node with data needed for execution."
+          operationId: "supplyNode"
+          parameters:
+            -
+              name: "body"
+              in: "body"
+              description: "Data to supply to the workflow node."
+              required: true
+              schema:
+                type: object # You can define a more specific schema here if needed
+                # example: { "input_data": "value1", "config": { "param": "value2" } }
+          responses:
+            200:
+              description: "Success."
+              schema:
+                type: string
+            400:
+              description: "Not working."
