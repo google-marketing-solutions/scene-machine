@@ -1,0 +1,104 @@
+<!--
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+<div class="sidebar-container" [class.collapsed]="collapsed()">
+  <div class="sidebar-header">
+    <a routerLink="/" class="title">
+      @if (!collapsed()) {
+        Scene Machine
+      } @else {
+        SM
+      }
+    </a>
+  </div>
+  <mat-nav-list class="main-nav">
+    @for (item of navigationItems(); track $index) {
+      <a
+        mat-list-item
+        [routerLink]="item.disabled ? null : item.route"
+        routerLinkActive
+        #rla="routerLinkActive"
+        [activated]="rla.isActive"
+        [disabled]="item.disabled"
+      >
+        <mat-icon
+          [matBadge]="
+            item.route[1] === 'output-video' && newRenderRunCount() > 0 ? newRenderRunCount() : null
+          "
+          matListItemIcon
+          aria-hidden="false"
+          >{{ item.icon }}</mat-icon
+        >
+        @if (!collapsed()) {
+          <span matListItemTitle>{{ item.title }}</span>
+        }
+      </a>
+    }
+  </mat-nav-list>
+
+  <mat-nav-list class="bottom-nav">
+    <a mat-list-item [matMenuTriggerFor]="themeMenu">
+      <mat-icon matListItemIcon>palette</mat-icon>
+      @if (!collapsed()) {
+        <span matListItemTitle>Theme Picker</span>
+      }
+    </a>
+    <mat-menu #themeMenu="matMenu" yPosition="above" class="theme-picker-panel">
+      <div class="color-picker-container">
+        <button
+          class="color-swatch theme-azure"
+          (click)="primaryColor.set('theme-azure')"
+          title="Azure"
+        ></button>
+        <button
+          class="color-swatch theme-magenta"
+          (click)="primaryColor.set('theme-magenta')"
+          title="Magenta"
+        ></button>
+        <button
+          class="color-swatch theme-green"
+          (click)="primaryColor.set('theme-green')"
+          title="Green"
+        ></button>
+        <button
+          class="color-swatch theme-orange"
+          (click)="primaryColor.set('theme-orange')"
+          title="Orange"
+        ></button>
+        <button
+          class="color-swatch theme-violet"
+          (click)="primaryColor.set('theme-violet')"
+          title="Violet"
+        ></button>
+      </div>
+    </mat-menu>
+
+    <a mat-list-item (click)="theme.set(theme() === 'light-mode' ? 'dark-mode' : 'light-mode')">
+      <mat-icon matListItemIcon>{{
+        theme() === 'light-mode' ? 'dark_mode' : 'light_mode'
+      }}</mat-icon>
+      @if (!collapsed()) {
+        <span matListItemTitle>{{ theme() === 'light-mode' ? 'Dark Mode' : 'Light Mode' }}</span>
+      }
+    </a>
+    <a mat-list-item (click)="toggleCollapse()">
+      <mat-icon matListItemIcon>{{ collapsed() ? 'chevron_right' : 'chevron_left' }}</mat-icon>
+      @if (!collapsed()) {
+        <span matListItemTitle>Collapse</span>
+      }
+    </a>
+  </mat-nav-list>
+</div>
