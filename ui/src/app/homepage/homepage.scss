@@ -1,0 +1,353 @@
+/**
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+.homepage-wrapper {
+  min-height: 100vh;
+  background: var(--mat-sys-surface);
+  display: flex;
+  flex-direction: column;
+  padding: 80px 40px;
+  box-sizing: border-box;
+}
+
+.hero-section {
+  text-align: center;
+  margin-bottom: 64px;
+
+  .main-title {
+    font-size: 64px;
+    font-weight: 900;
+    margin: 0;
+    background: linear-gradient(
+      135deg,
+      var(--mat-sys-primary) 0%,
+      var(--mat-sys-secondary) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.02em;
+    padding: 10px 0;
+    line-height: 1.2;
+    margin-bottom: 4px;
+  }
+
+  .subtitle {
+    font-size: 20px;
+    color: var(--mat-sys-on-surface-variant);
+    max-width: 600px;
+    margin: 0 auto;
+    font-weight: 400;
+  }
+}
+
+.homepage-container {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  gap: 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.card-link {
+  text-decoration: none !important;
+  color: inherit !important;
+  display: block;
+  flex: 1;
+  max-width: 400px;
+}
+
+.action-card {
+  height: 100%;
+  padding: 40px;
+  background: var(--mat-sys-surface-container-lowest);
+  border-radius: 24px !important;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  position: relative;
+  overflow: hidden;
+
+  .card-glow {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--mat-sys-primary),
+      transparent
+    );
+    opacity: 0;
+    transition: opacity 0.4s ease;
+  }
+
+  &:hover {
+    transform: translateY(-12px);
+    border-color: var(--mat-sys-primary);
+    box-shadow: 0 20px 40px
+      color-mix(in srgb, var(--mat-sys-primary) 12%, transparent) !important;
+
+    .card-glow {
+      opacity: 1;
+    }
+
+    .card-icon {
+      color: var(--mat-sys-primary);
+    }
+  }
+
+  mat-card-header {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 0;
+    gap: 16px;
+
+    .card-icon {
+      font-size: 48px;
+      width: 48px;
+      height: 48px;
+      color: var(--mat-sys-primary);
+      transition: all 0.4s ease;
+    }
+
+    mat-card-title {
+      font-size: 24px;
+      font-weight: 800;
+      color: var(--mat-sys-on-surface);
+      margin: 0;
+    }
+  }
+
+  mat-card-content {
+    padding: 0;
+    text-align: center;
+    color: var(--mat-sys-on-surface-variant);
+    font-size: 16px;
+    line-height: 1.6;
+  }
+}
+
+.projects-section {
+  max-width: 1200px;
+  margin: 64px auto 0;
+  width: 100%;
+
+  .projects-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+
+    h2 {
+      margin: 0;
+    }
+  }
+
+  h2 {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--mat-sys-on-surface);
+    margin-bottom: 24px;
+  }
+}
+
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-auto-rows: min-content;
+  grid-auto-flow: dense;
+  gap: 24px;
+}
+
+.project-card-link {
+  text-decoration: none !important;
+  color: inherit !important;
+  display: block;
+
+  &.is-vertical {
+    grid-row: span 2;
+  }
+}
+
+.project-card {
+  height: 100%;
+  border-radius: 16px !important;
+  transition: all 0.3s ease;
+  overflow: hidden;
+  background: var(--mat-sys-surface-container-lowest);
+
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px
+      color-mix(in srgb, var(--mat-sys-primary) 8%, transparent) !important;
+    border-color: var(--mat-sys-primary);
+  }
+
+  .project-thumbnail {
+    width: 100%;
+    background: var(--mat-sys-surface-container);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    img,
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .placeholder-thumbnail {
+      color: var(--mat-sys-on-surface);
+      opacity: 0.5;
+      mat-icon {
+        font-size: 48px;
+        width: 48px;
+        height: 48px;
+      }
+    }
+  }
+
+  mat-card-content {
+    padding: 16px;
+    flex: 1;
+    align-content: center;
+
+    .project-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--mat-sys-on-surface);
+      margin: 0 0 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .last-edited {
+      font-size: 14px;
+      color: var(--mat-sys-on-surface-variant);
+      margin: 0;
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  .homepage-wrapper {
+    padding: 40px 20px;
+  }
+
+  .hero-section {
+    .main-title {
+      font-size: 40px;
+    }
+
+    .subtitle {
+      font-size: 16px;
+    }
+  }
+
+  .homepage-container {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .card-link {
+    max-width: 100%;
+  }
+}
+
+.empty-projects-state {
+  text-align: center;
+  padding: 64px 24px;
+  color: var(--mat-sys-on-surface-variant);
+
+  h3 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0 0 8px 0;
+    color: var(--mat-sys-on-surface);
+  }
+
+  p {
+    margin: 0;
+  }
+}
+
+.last-edited {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  color: var(--mat-sys-on-surface-variant);
+}
+
+.avatar-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tiny-avatar {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+  color: #9e9e9e;
+}
+
+.delete-project-btn {
+  position: absolute;
+  top: 8px; // Adjusted slightly for better visual balance with the 20x20 chip
+  right: 8px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  background: rgba(0, 0, 0, 0.6);
+  color: white;
+  border-radius: 4px;
+  backdrop-filter: blur(4px);
+  z-index: 2; // Ensure it's above other elements
+
+  mat-icon {
+    width: 24px;
+    font-size: 24px;
+    height: 24px;
+    margin: 0;
+  }
+
+  &:hover {
+    color: #f44336 !important;
+    background: transparent;
+  }
+
+  // Resize the touch target to match the visual button size
+  ::ng-deep .mat-mdc-button-touch-target {
+    width: 100%;
+    height: 100%;
+  }
+}
