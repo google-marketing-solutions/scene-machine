@@ -1,0 +1,133 @@
+/**
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+:host {
+  display: block;
+  height: 100%;
+}
+
+.template-card {
+  border: 1px solid var(--mat-sys-outline-variant);
+  background-color: var(--mat-sys-surface);
+  border-radius: 16px !important;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%; /* Ensure it fills container if needed */
+  min-height: 240px;
+  cursor: pointer;
+
+  &:hover {
+    box-shadow: 0 12px 24px color-mix(in srgb, var(--mat-sys-primary) 10%, transparent);
+    border-color: var(--mat-sys-primary);
+  }
+
+  &.selected {
+    border: 2px solid var(--mat-sys-primary);
+    position: relative; // For pseudo-element positioning
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--mat-sys-primary), var(--mat-sys-secondary));
+    }
+  }
+
+  mat-card-header {
+    padding: 20px 20px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    mat-card-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin: 0 !important;
+    }
+
+    .tags-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .template-tag {
+      align-self: flex-start;
+      background: var(--mat-sys-primary-container);
+      color: var(--mat-sys-on-primary-container);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+  }
+
+  mat-card-content {
+    padding: 0 20px 20px;
+    color: var(--mat-sys-on-surface);
+    font-size: 14px;
+    line-height: 1.5;
+    flex: 1;
+
+    p {
+      margin: 0;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      line-clamp: 3;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+
+  mat-card-actions {
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+
+    .action-btn {
+      flex: 1;
+      height: 36px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        margin-right: 4px;
+      }
+    }
+
+    .edit-btn {
+      background-color: var(--mat-sys-primary-container);
+      color: var(--mat-sys-on-primary-container);
+
+      &:hover {
+        background-color: var(--mat-sys-primary);
+        color: var(--mat-sys-on-primary);
+      }
+    }
+  }
+}

@@ -1,0 +1,212 @@
+/**
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+.templates-container {
+  min-height: 100vh;
+  box-sizing: border-box;
+
+  &.in-modal {
+    min-height: 100%;
+  }
+}
+
+.templates-inner {
+  padding: 40px;
+  max-width: 1200px;
+  margin: 0 auto;
+  box-sizing: border-box;
+
+  .in-modal & {
+    padding: 24px;
+  }
+}
+
+.templates-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 40px;
+  gap: 24px;
+
+  .header-main {
+    .header-title-row {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      margin-bottom: 8px;
+
+      .back-link {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--mat-sys-on-surface);
+        text-decoration: none;
+        font-size: 14px;
+        font-weight: 500;
+        transition: color 0.2s ease;
+
+        mat-icon {
+          font-size: 18px;
+          width: 18px;
+          height: 18px;
+        }
+
+        &:hover {
+          color: var(--mat-sys-primary);
+        }
+      }
+    }
+
+    h1 {
+      font-size: 32px;
+      font-weight: 800;
+      margin: 0;
+      color: var(--mat-sys-on-surface);
+    }
+
+    .subtitle {
+      color: var(--mat-sys-on-surface-variant);
+      margin: 4px 0 0;
+      font-size: 16px;
+    }
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+
+    .search-field {
+      width: 300px;
+      ::ng-deep .mat-mdc-form-field-subscript-wrapper {
+        display: none;
+      }
+    }
+
+    .create-btn {
+      height: 48px;
+      border-radius: 12px;
+      padding: 0 24px;
+      font-weight: 600;
+      background: linear-gradient(135deg, var(--mat-sys-primary) 0%, var(--mat-sys-secondary) 100%);
+      color: var(--mat-sys-on-primary);
+      &[disabled] {
+        color: color-mix(in srgb, var(--mat-sys-on-surface) 38%, transparent);
+        background: color-mix(in srgb, var(--mat-sys-primary) 12%, transparent);
+      }
+    }
+
+    .close-btn {
+      margin-left: 8px;
+    }
+  }
+}
+
+.templates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+@media (max-width: 768px) {
+  .templates-header {
+    flex-direction: column;
+    align-items: stretch;
+
+    .header-actions {
+      flex-direction: column;
+
+      .search-field {
+        width: 100%;
+      }
+    }
+  }
+}
+
+.skeleton-grid {
+  pointer-events: none;
+}
+
+.skeleton-card {
+  border: 1px solid var(--mat-sys-outline);
+  background-color: var(--mat-sys-surface);
+  border-radius: 16px;
+  padding: 20px;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: relative;
+  overflow: hidden;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(
+      90deg,
+      transparent 0,
+      rgba(255, 255, 255, 0.6) 50%,
+      transparent 100%
+    );
+    animation: shimmer 2s infinite;
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton-line {
+  height: 12px;
+  background: var(--mat-sys-on-surface);
+  border-radius: 4px;
+
+  &.title {
+    height: 18px;
+    width: 60%;
+    margin-bottom: 8px;
+  }
+
+  &.short {
+    width: 40%;
+  }
+}
+
+.skeleton-tags {
+  display: flex;
+  gap: 8px;
+}
+
+.skeleton-tag {
+  width: 50px;
+  height: 16px;
+  background: var(--mat-sys-on-surface);
+  border-radius: 12px;
+}
+
+.skeleton-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+}

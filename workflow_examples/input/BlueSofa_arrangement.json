@@ -1,0 +1,56 @@
+[
+  {
+    "file_type": "video",
+    "file_path": "examples/BlueSofaDog.mp4",
+    "start_time": -1
+  },
+  {
+    "file_type": "video",
+    "file_path": "examples/BlueSofaFabric.mp4",
+    "start_time": -1,
+    "transition": "wiperight",
+    "transition_overlap": 0.5
+  },
+  {
+    "file_type": "video",
+    "file_path": "examples/BlueSofaWoman.mp4",
+    "start_time": -1,
+    "transition": "wiperight",
+    "transition_overlap": 0.5
+  },
+  {
+    "file_type": "image",
+    "file_path": "examples/GenericBrandLogo.png",
+    "start_time": 1,
+    "duration": 4,
+    "offset_x": 80,
+    "offset_y": 80,
+    "width": 200
+  },
+  {
+    "file_type": "audio",
+    "file_path": "examples/LoungeVibe.m4a",
+    "start_time": 0,
+    "skip_time": 0
+  },
+  {
+    "file_type": "audio",
+    "file_path": "examples/LoungeVibe_lq.mp3",
+    "start_time": 5,
+    "skip_time": 0
+  },
+  {
+    "file_type": "video",
+    "file_path": "examples/GenericOutro_45Hz.mp4",
+    "transition": "horzclose",
+    "transition_overlap": 0.5,
+    "start_time": -1
+  },
+  {
+    "file_type": "video",
+    "file_path": "examples/GenericOutro.mp4",
+    "transition": "horzclose",
+    "transition_overlap": 0.5,
+    "start_time": -1
+  }
+]

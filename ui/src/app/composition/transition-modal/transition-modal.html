@@ -1,0 +1,59 @@
+<!--
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+<dialog #dialog (click)="close()">
+  <div class="modal-content" (click)="$event.stopPropagation()">
+    <h2>Select Transition</h2>
+    <mat-form-field appearance="outline">
+      <mat-label>Transition Type</mat-label>
+      <mat-select [(value)]="selectedTransitionValue">
+        @for (transition of transitions(); track transition.id) {
+          <mat-option [value]="transition.id">{{ transition.name }}</mat-option>
+        }
+      </mat-select>
+    </mat-form-field>
+    <mat-form-field appearance="outline">
+      <mat-label>Transition Duration (s)</mat-label>
+      <input
+        matInput
+        type="number"
+        [formControl]="transitionOverlap"
+        min="0"
+        step="0.005"
+        [max]="maxTransitionOverlap"
+      />
+      @if (transitionOverlap.hasError('max')) {
+        <mat-error>Transition duration cannot exceed {{ maxTransitionOverlap }} seconds</mat-error>
+      }
+    </mat-form-field>
+    <div class="actions">
+      @if (initialTransition()) {
+        <button mat-stroked-button color="warn" (click)="onRemove()">Remove</button>
+      }
+      <div class="spacer"></div>
+      <button mat-button (click)="close()">Cancel</button>
+      <button
+        autofocus
+        mat-flat-button
+        color="primary"
+        (click)="onSelect()"
+        [disabled]="!selectedTransitionValue || transitionOverlap.invalid"
+      >
+        Select
+      </button>
+    </div>
+  </div>
+</dialog>
