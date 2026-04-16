@@ -1,0 +1,50 @@
+[
+  {
+    "file_type": "video",
+    "file_path": "remix-input/sample_sofa.mp4",
+    "start_time": 0,
+    "skip_time": 0,
+    "duration": 4
+  },
+  {
+    "file_type": "video",
+    "file_path": "remix-input/sample_sofa.mp4",
+    "start_time": 0,
+    "skip_time": 0,
+    "duration": 2.043,
+    "transition": "wipeleft",
+    "transition_overlap": 0.9
+  },
+  {
+    "file_type": "video",
+    "file_path": "remix-input/sample_sofa.mp4",
+    "start_time": 0,
+    "skip_time": 0,
+    "duration": 4
+  },
+  {
+    "file_type": "video",
+    "file_path": "examples/GenericOutro.mp4",
+    "start_time": 0,
+    "skip_time": 0,
+    "duration": 4
+  },
+  {
+    "file_type": "audio",
+    "file_path": "remix-input/opera_short.mp3",
+    "start_time": 0,
+    "skip_time": 0,
+    "duration": 10.043
+  },
+  {
+    "file_type": "image",
+    "file_path": "remix-input/airfryer.png",
+    "start_time": 0,
+    "skip_time": 0,
+    "duration": 10.043,
+    "width": 300,
+    "height": 300,
+    "offset_x": 30,
+    "offset_y": 30
+  }
+]
