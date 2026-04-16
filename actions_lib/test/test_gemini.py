@@ -89,6 +89,15 @@ class TestGemini(unittest.TestCase):
         )
         self.assertEqual(output, {"result": "success"})
 
+        mock_client.models.generate_content.assert_called_once()
+        args, kwargs = mock_client.models.generate_content.call_args
+
+        # Verify prompt text is passed correctly in the complex structure
+        self.assertEqual(kwargs["contents"][0].parts[0].text, "get json")
+
+        # Verify schema was applied to config
+        self.assertEqual(kwargs["config"].response_schema, schema)
+
     @mock.patch("google.genai.Client")
     def test_prompt_with_files(self, mock_client_class):
         """Tests prompt with file URIs."""
@@ -107,6 +116,49 @@ class TestGemini(unittest.TestCase):
             file_uris=["gs://bucket/image.png"],
         )
         self.assertEqual(output, "analyzed")
+
+
+    @mock.patch("google.genai.Client")
+    def test_prompt_thinking_config_pro(self, mock_client_class):
+        """Tests prompt when model is gemini-2.5-pro."""
+        mock_client = mock_client_class.return_value
+        mock_response = mock.Mock()
+        mock_candidate = mock.Mock()
+        mock_part = mock.Mock()
+        mock_part.text = "success"
+        mock_candidate.content.parts = [mock_part]
+        mock_response.candidates = [mock_candidate]
+        mock_client.models.generate_content.return_value = mock_response
+
+        gemini.prompt(
+            gcp_project="test-proj",
+            text_prompt="hi",
+            model="gemini-2.5-pro",
+        )
+
+        args, kwargs = mock_client.models.generate_content.call_args
+        self.assertEqual(kwargs["config"].thinking_config.thinking_budget, 128)
+
+    @mock.patch("google.genai.Client")
+    def test_prompt_thinking_config_flash(self, mock_client_class):
+        """Tests prompt when model is gemini-2.5-flash."""
+        mock_client = mock_client_class.return_value
+        mock_response = mock.Mock()
+        mock_candidate = mock.Mock()
+        mock_part = mock.Mock()
+        mock_part.text = "success"
+        mock_candidate.content.parts = [mock_part]
+        mock_response.candidates = [mock_candidate]
+        mock_client.models.generate_content.return_value = mock_response
+
+        gemini.prompt(
+            gcp_project="test-proj",
+            text_prompt="hi",
+            model="gemini-2.5-flash",
+        )
+
+        args, kwargs = mock_client.models.generate_content.call_args
+        self.assertEqual(kwargs["config"].thinking_config.thinking_budget, 0)
 
 
 if __name__ == "__main__":
