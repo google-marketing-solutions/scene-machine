@@ -1,0 +1,111 @@
+<!--
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+<div class="dialog-content">
+  @if (imageDecision() === null) {
+    <div class="review-state">
+      <div class="header">
+        <h2><mat-icon>aspect_ratio</mat-icon> Review Input Images</h2>
+      </div>
+      <p>Some of the uploaded images do not adhere to the selected aspect ratio.</p>
+      <p>Please choose what you want to do with the invalid images.</p>
+      <div class="actions">
+        <button mat-button (click)="onCancel()">Cancel</button>
+        <button
+          mat-flat-button
+          (click)="imageDecision.set('none'); void generateStoryboard()"
+          matTooltip="The images will be sent to Veo as they are. This can have different outcomes per image."
+        >
+          <mat-icon>casino</mat-icon>
+          Use as is
+        </button>
+        <button
+          mat-flat-button
+          (click)="imageDecision.set('crop'); void generateStoryboard()"
+          matTooltip="The images will be cropped to the selected aspect ratio."
+        >
+          <mat-icon>crop</mat-icon> Crop
+        </button>
+        <button
+          mat-flat-button
+          (click)="imageDecision.set('outpaint'); void generateStoryboard()"
+          matTooltip="The images will be outpainted to the selected aspect ratio."
+        >
+          <mat-icon>brush</mat-icon> Outpaint
+        </button>
+      </div>
+    </div>
+  } @else {
+    @if (isLoading()) {
+      <div class="loading-state">
+        <mat-spinner diameter="48"></mat-spinner>
+        <h2>Generating Storyboard</h2>
+      </div>
+    } @else {
+      <div class="review-state">
+        <div class="header">
+          <h2>Review Storyboard</h2>
+          <p>Generated {{ generatedScenes.length }} scenes based on your inputs.</p>
+        </div>
+
+        <div class="scenes-list">
+          @for (scene of generatedScenes; track $index; let i = $index) {
+            <div class="scene-item">
+              <div class="timeline-column">
+                <div class="scene-number">{{ i + 1 }}</div>
+                <div class="timeline-line"></div>
+              </div>
+
+              <div class="scene-content-card">
+                <div class="thumbnail-placeholder" [style.aspect-ratio]="aspectRatio">
+                  @if (scene.referenceImage) {
+                    <img [src]="scene.referenceImage.url" class="reference-image" />
+                  } @else {
+                    <mat-icon>image</mat-icon>
+                  }
+                </div>
+
+                <div class="scene-details">
+                  <div class="scene-header">
+                    <h3>{{ scene.name }}</h3>
+                    <button mat-icon-button class="delete-scene-btn" (click)="removeScene(i)">
+                      <mat-icon>delete</mat-icon>
+                    </button>
+                  </div>
+                  <mat-form-field appearance="outline" class="scene-prompt">
+                    <textarea
+                      matInput
+                      [(ngModel)]="scene.prompt"
+                      placeholder="Enter scene prompt..."
+                    ></textarea>
+                  </mat-form-field>
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+
+        <div class="actions">
+          <button mat-button (click)="onCancel()">Cancel</button>
+          <button mat-flat-button class="generate-videos-btn" (click)="onGenerateVideos()">
+            <mat-icon>movie</mat-icon>
+            Generate Videos
+          </button>
+        </div>
+      </div>
+    }
+  }
+</div>
