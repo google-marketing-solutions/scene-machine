@@ -657,27 +657,20 @@ export class RemixEngineService {
       if (!storyboardJsonFile) {
         throw new Error('Storyboard JSON file not found');
       }
+      const storyboardJson = await runInInjectionContext(
+        this.injector,
+        async () => {
+          const reference = ref(this.storage, storyboardJsonFile);
+          const blob = await getBlob(reference);
+          return JSON.parse(await blob.text());
+        },
+      );
 
-      let storyboardJson;
-      try {
-        storyboardJson = await runInInjectionContext(
-          this.injector,
-          async () => {
-            const reference = ref(this.storage, storyboardJsonFile);
-            const blob = await getBlob(reference);
-            return JSON.parse(await blob.text());
-          },
-        );
-
-        if (
-          !('storyboard' in storyboardJson) ||
-          !Array.isArray(storyboardJson['storyboard'])
-        ) {
-          throw new Error('Storyboard JSON file is missing storyboard');
-        }
-      } catch (error) {
-        console.error('Failed to parse storyboard JSON:', error);
-        throw new Error('Failed to parse storyboard JSON');
+      if (
+        !('storyboard' in storyboardJson) ||
+        !Array.isArray(storyboardJson['storyboard'])
+      ) {
+        throw new Error('Storyboard JSON file is missing storyboard');
       }
 
       const outpaintedImages =
@@ -729,6 +722,8 @@ export class RemixEngineService {
       if (error instanceof ProjectChangedError) {
         console.info(error.message);
         return;
+      } else if (error instanceof SyntaxError) {
+        console.error('Failed to parse storyboard JSON:', error);
       } else if (error instanceof Error) {
         console.error('Storyboard generation error:', error);
         if (executionId) {
@@ -865,16 +860,14 @@ export class RemixEngineService {
     for (const scene of validScenes) {
       let gcsVideoPath;
       let skipTime = 0;
-      let duration = 0;
+      const duration = this.getSceneVideoDuration(scene, skipTime);
       if (this.configService.isProvidedVideoScene(scene)) {
         gcsVideoPath = scene.video?.path;
         skipTime = scene.trim?.start ?? 0;
-        duration = this.getSceneVideoDuration(scene, skipTime);
       } else if (this.configService.isGeneratedScene(scene)) {
         const candidate = scene.candidates![scene.selectedCandidateIndex!];
         gcsVideoPath = candidate.video?.path;
         skipTime = candidate.trim?.start ?? 0;
-        duration = this.getSceneVideoDuration(scene, skipTime);
       }
       if (!gcsVideoPath) {
         console.log(`No video for scene ${scene.id}`);

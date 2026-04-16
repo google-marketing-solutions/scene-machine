@@ -20,8 +20,8 @@ import {AspectRatio, Resolution} from '../config/config';
  * Represents a single scene item within a generated storyboard.
  */
 export interface StoryboardItem {
-  product_id: string | number;
-  image_id: string | number;
+  product_id: string;
+  image_id: string;
   scene_name: string;
   video_prompt: string;
 }
