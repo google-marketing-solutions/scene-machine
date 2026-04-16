@@ -1,0 +1,135 @@
+<!--
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+<h2 mat-dialog-title>{{ isEditMode() ? 'Edit' : 'Add' }} Image Overlay</h2>
+
+<mat-dialog-content>
+  <div class="file-upload-container">
+    @if (selectedFile() || existingFileName()) {
+      <div class="selected-file">
+        <span>{{ selectedFile()?.name || existingFileName() }}</span>
+      </div>
+      <button matButton="outlined" (click)="clearFile()">Remove File</button>
+    } @else {
+      <div
+        class="upload-area"
+        (click)="fileInput.click()"
+        (dragover)="onDragOver($event)"
+        (drop)="onDrop($event)"
+      >
+        <div class="upload-content">
+          <mat-icon class="upload-icon">image</mat-icon>
+          <p>Drag & drop or click to upload</p>
+        </div>
+        <input
+          type="file"
+          accept="image/*"
+          #fileInput
+          (change)="onFileSelected($event)"
+          style="display: none"
+        />
+      </div>
+    }
+    <img
+      class="preview-image"
+      [src]="imageUrl()"
+      [hidden]="!imageUrl()"
+      (load)="onImageLoad($event)"
+    />
+  </div>
+
+  <div class="row">
+    <app-scene-selector
+      label="Start time (s)"
+      [(value)]="startSeconds"
+      [sceneTimings]="data!.sceneTimings"
+      useSceneTiming="start"
+    ></app-scene-selector>
+    <app-scene-selector
+      label="End time (s)"
+      [(value)]="endSeconds"
+      [sceneTimings]="data!.sceneTimings"
+      useSceneTiming="end"
+    ></app-scene-selector>
+  </div>
+  @if (isInvalidTimeRange()) {
+    <div class="error-message">
+      End time should not be earlier than start time.
+    </div>
+  }
+  Overlay Dimensions
+  <div class="row">
+    <mat-form-field appearance="outline">
+      <mat-label>Width (pixels)</mat-label>
+      <input
+        matInput
+        type="number"
+        [ngModel]="imageWidthPixels()"
+        (ngModelChange)="onWidthChange($event)"
+        min="0"
+        step="1"
+      />
+    </mat-form-field>
+    <button
+      mat-icon-button
+      (click)="toggleLock()"
+      type="button"
+      matTooltip="Toggle Aspect Ratio Lock"
+    >
+      <mat-icon
+        [style.color]="
+          isAspectRatioLocked() ? 'var(--mat-sys-primary)' : 'var(--mat-sys-on-surface-variant)'
+        "
+      >
+        {{ isAspectRatioLocked() ? 'lock' : 'lock_open' }}
+      </mat-icon>
+    </button>
+    <mat-form-field appearance="outline">
+      <mat-label>Height (pixels)</mat-label>
+      <input
+        matInput
+        type="number"
+        [ngModel]="imageHeightPixels()"
+        (ngModelChange)="onHeightChange($event)"
+        min="0"
+        step="1"
+      />
+    </mat-form-field>
+  </div>
+  Overlay Position
+  <div class="row">
+    <mat-form-field appearance="outline">
+      <mat-label>Pixels from top</mat-label>
+      <input matInput type="number" [(ngModel)]="pixelsFromTop" min="0" step="1" />
+    </mat-form-field>
+    <mat-form-field appearance="outline">
+      <mat-label>Pixels from left</mat-label>
+      <input matInput type="number" [(ngModel)]="pixelsFromLeft" min="0" step="1" />
+    </mat-form-field>
+  </div>
+</mat-dialog-content>
+
+<mat-dialog-actions>
+  <button mat-button (click)="close()" [disabled]="isUploading()">Cancel</button>
+  <button
+    mat-flat-button
+    color="primary"
+    (click)="onAdd()"
+    [disabled]="(!selectedFile() && !existingFileName()) || isUploading() || isInvalidTimeRange()"
+  >
+    {{ isUploading() ? 'Uploading...' : isEditMode() ? 'Save Changes' : 'Add Overlay' }}
+  </button>
+</mat-dialog-actions>
