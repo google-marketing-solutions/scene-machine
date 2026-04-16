@@ -1,0 +1,238 @@
+/**
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+body {
+  font-family: sans-serif;
+  background-color: #f0f0f0;
+  margin: 0;
+  overflow: hidden;
+  /* Prevent scrollbars during node drag */
+}
+
+#canvas {
+  width: 100vw;
+  height: 100vh;
+  background-color: white;
+  position: relative;
+  /* Needed for absolute positioning of children */
+}
+
+.node {
+  position: absolute;
+  border: 2px solid #007bff;
+  border-radius: 5px;
+  background-color: #fff;
+  padding: 20px 10px;
+  /* Vertical padding for title, horizontal for content */
+  box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.2);
+  user-select: none;
+  cursor: move;
+  min-width: 100px;
+  overflow: visible;
+  /* Allow connectors to extend beyond node bounds */
+}
+
+.node.disconnected {
+  border-color: #808080;
+  /* Gray border for nodes without connections */
+}
+
+.node-title {
+  font-weight: bold;
+  text-align: center;
+  overflow-wrap: break-word;
+}
+
+.connector-box {
+  position: absolute;
+  border: 1px solid #007bff;
+  background-color: #e6f0ff;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-size: 0.8em;
+  white-space: nowrap;
+  cursor: pointer;
+  margin: 0;
+  /* Spacing handled by positionNodeConnectors via 'left' */
+  overflow: visible;
+  z-index: 2;
+  /* Ensure connectors are visually above nodes */
+}
+
+.connector-box.input {
+  top: -1px;
+  /* Position slightly above the node's top border */
+  transform: translateY(-100%);
+}
+
+.connector-box.output {
+  bottom: -1px;
+  /* Position slightly below the node's bottom border */
+  transform: translateY(100%);
+}
+
+.connection {
+  position: absolute;
+  border: 1px solid #007bff;
+  cursor: pointer;
+  z-index: 1;
+  /* Render below connectors but above basic node content if overlap occurs */
+}
+
+.connection.selected {
+  border-width: 3px;
+  border-color: #ff0000;
+}
+
+.temp-connection {
+  position: absolute;
+  border: 1px dashed #007bff;
+  pointer-events: none;
+  /* Make it non-interactive */
+  z-index: 1;
+}
+
+/* Inspection Box Styles */
+#inspection-box {
+  position: absolute;
+  background-color: #f9f9f9;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  padding: 10px;
+  padding-top: 25px;
+  /* Extra space for the close button */
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  z-index: 101;
+  /* Keep above nodes, connections, and connector lines */
+  min-width: 250px;
+  max-width: 400px;
+  max-height: 300px;
+  overflow-y: auto;
+  font-size: 0.9em;
+}
+
+#inspection-box-close {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  font-weight: bold;
+  padding: 2px 5px;
+}
+
+.inspection-item {
+  margin-bottom: 10px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #eee;
+}
+
+.inspection-item:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.inspection-item p {
+  margin: 3px 0;
+  word-wrap: break-word;
+}
+
+.inspection-item p strong {
+  color: #333;
+}
+
+#inspection-connector-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  /* SVG layer should not intercept mouse events */
+  z-index: 100;
+  /* Above nodes, below inspection box */
+}
+
+#inspection-connector-line {
+  stroke: #555;
+  stroke-width: 1.5px;
+  stroke-dasharray: 3, 2;
+}
+
+/* Node Status Styles */
+.node.status-idle {
+  background-color: #e0e0e0;
+  /* Light Grey */
+  border-color: #bdbdbd;
+}
+
+.node.status-processing {
+  background-color: #b3e5fc;
+  /* Light Blue */
+  border-color: #4fc3f7;
+}
+
+.node.status-completed {
+  background-color: #c8e6c9;
+  /* Light Green */
+  border-color: #81c784;
+}
+
+.node.status-error {
+  /* Light Red for any error */
+  background-color: #ffcdd2;
+  border-color: #e57373;
+}
+
+.node.status-error-critical {
+  /* Clearer Red for all errors */
+  background-color: #ef9a9a;
+  border-color: #f44336;
+}
+
+/* Ensure connector colors contrast with status colors */
+.node.status-idle .connector-box {
+  background-color: #f5f5f5;
+  border-color: #bdbdbd;
+}
+
+.node.status-processing .connector-box {
+  background-color: #e1f5fe;
+  border-color: #4fc3f7;
+}
+
+.node.status-completed .connector-box {
+  background-color: #e8f5e9;
+  border-color: #81c784;
+}
+
+.node.status-error .connector-box,
+.node.status-error-critical .connector-box {
+  /* Apply to both error states */
+  background-color: #ffebee;
+  border-color: #e57373;
+}
+
+/* Highlight needs to be visible on all backgrounds */
+.connector-box.highlighted {
+  background-color: #ffecb3 !important;
+  /* Use !important to override status colors */
+  border-color: #ffe082 !important;
+  outline: 2px solid #ffd54f !important;
+}
