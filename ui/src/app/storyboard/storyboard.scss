@@ -1,0 +1,1142 @@
+/**
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+:host {
+  display: block;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+.empty-storyboard-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+  gap: 16px;
+
+  mat-icon {
+    font-size: 64px;
+    width: 64px;
+    height: 64px;
+    opacity: 0.5;
+    stroke: var(--mat-sys-on-surface);
+  }
+
+  .message {
+    font-size: 1rem;
+    opacity: 0.8;
+    margin-bottom: 8px;
+    color: var(--mat-sys-on-surface);
+  }
+}
+
+.storyboard-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+}
+
+.project-title-header {
+  padding: 8px 24px;
+  background-color: var(--mat-sys-surface-container-lowest);
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  h1 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 500;
+    color: var(--mat-sys-on-surface);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    padding-right: 12px;
+  }
+
+  mat-chip-set {
+    --mdc-chip-label-text-size: 12px;
+    --mdc-chip-container-height: 28px;
+
+    ::ng-deep .mdc-evolution-chip-set__chips {
+      flex-flow: nowrap;
+    }
+
+    mat-chip {
+      --mdc-chip-container-color: var(--mat-sys-on-surface);
+      --mdc-chip-label-text-color: var(--mat-sys-on-surface);
+
+      &.aspect-ratio-chip,
+      &.resolution-chip {
+        pointer-events: none;
+      }
+
+      mat-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+        opacity: 0.6;
+      }
+    }
+  }
+}
+
+.storyboard-filmstrip {
+  height: 120px;
+  border-bottom: 1px solid var(--mat-sys-outline-variant);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+  overflow-x: auto;
+  flex-shrink: 0;
+
+  .filmstrip-item {
+    width: 160px;
+    min-width: 160px;
+    height: 80px;
+    background: var(--mat-sys-surface-container-high);
+    border: 1px solid var(--mat-sys-outline-variant);
+    border-radius: 8px;
+    padding: 8px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    cursor: pointer;
+
+    &.active {
+      border-color: var(--mat-sys-primary);
+
+      .scene-number {
+        background: var(--mat-sys-primary);
+        color: var(--mat-sys-on-primary);
+      }
+    }
+
+    .scene-number {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      width: 20px;
+      height: 20px;
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      backdrop-filter: blur(4px);
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: bold;
+      z-index: 2;
+    }
+
+    .scene-loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1;
+
+      ::ng-deep circle {
+        stroke: var(--mat-sys-primary) !important;
+      }
+    }
+
+    .scene-icon {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0.3;
+      z-index: 1;
+
+      mat-icon {
+        font-size: 32px;
+        width: 32px;
+        height: 32px;
+      }
+    }
+
+    .scene-label {
+      font-size: 0.8rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      z-index: 2;
+      color: var(--mat-sys-on-surface);
+      text-shadow: none; // Default no shadow
+    }
+
+    .reference-image-bg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 0;
+      opacity: 0.8; // Slight transparency to blend with background
+    }
+
+    // When image is present
+    &:has(.reference-image-bg) {
+      background: black;
+      overflow: hidden;
+
+      // Gradient overlay
+      &::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 60px;
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent);
+        z-index: 1;
+        pointer-events: none;
+      }
+
+      .scene-label {
+        color: white;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+      }
+    }
+
+    &.active:has(.reference-image-bg) {
+      border: 1px solid var(--mat-sys-primary);
+      box-shadow: 0 0 0 1px var(--mat-sys-primary);
+
+      .scene-number {
+        background: var(--mat-sys-primary);
+        color: var(--mat-sys-on-primary);
+        opacity: 1;
+      }
+    }
+
+    .delete-scene-btn {
+      position: absolute;
+      top: 4px; // Adjusted slightly for better visual balance with the 20x20 chip
+      right: 4px;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+      border-radius: 4px;
+      backdrop-filter: blur(4px);
+      z-index: 2; // Ensure it's above other elements
+
+      mat-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+        margin: 0;
+      }
+
+      &:hover {
+        color: #f44336 !important;
+        background: rgba(244, 67, 54, 0.08);
+      }
+
+      // Resize the touch target to match the visual button size
+      ::ng-deep .mat-mdc-button-touch-target {
+        width: 100%;
+        height: 100%;
+      }
+    }
+  }
+
+  .add-scene-btn {
+    box-shadow: none !important;
+    background: var(--mat-sys-surface-container-high) !important;
+    color: var(--mat-sys-on-surface) !important;
+    border: 1px solid var(--mat-sys-outline-variant);
+
+    &:hover {
+      background: var(--mat-sys-surface-container-highest) !important;
+    }
+  }
+
+  // Custom placeholder style
+  .filmstrip-item-placeholder {
+    width: 160px;
+    height: 80px;
+    background: var(--mat-sys-surface-container-high);
+    border: 2px dashed rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    transition: transform 250ms cubic-bezier(0, 0, 0.2, 1);
+  }
+
+  .cdk-drag-animating {
+    transition: transform 250ms cubic-bezier(0, 0, 0.2, 1);
+  }
+}
+
+// Custom preview styles, applied outside of the component scope
+// as the preview is appended to the body by default.
+.filmstrip-item-preview {
+  width: 178px;
+  height: 98px;
+  background: rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 8px;
+  padding: 8px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  box-sizing: border-box;
+  box-shadow:
+    0 5px 5px -3px rgba(0, 0, 0, 0.2),
+    0 8px 10px 1px rgba(0, 0, 0, 0.14),
+    0 3px 14px 2px rgba(0, 0, 0, 0.12);
+  cursor: grabbing;
+
+  .scene-number {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 20px;
+    height: 20px;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    backdrop-filter: blur(4px);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: bold;
+  }
+
+  .scene-icon {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.3;
+
+    mat-icon {
+      font-size: 32px;
+      width: 32px;
+      height: 32px;
+      color: rgba(0, 0, 0, 0.87); // Ensure icon color is set
+    }
+  }
+
+  .scene-label {
+    font-size: 0.8rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    z-index: 2;
+  }
+
+  .reference-image-bg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    z-index: 0;
+    // border-radius handled by container overflow hidden
+    opacity: 1;
+  }
+
+  // When image is present in preview
+  &:has(.reference-image-bg) {
+    background: black;
+    overflow: hidden; // Ensure border radius clips image
+
+    // Gradient overlay
+    &::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      width: 100%;
+      height: 48px;
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .scene-label {
+      color: white;
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+    }
+
+    .scene-number {
+      background: rgba(0, 0, 0, 0.6);
+      color: white;
+    }
+  }
+}
+
+.subtitle {
+  font-size: 0.75rem;
+  font-weight: 600;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  display: block;
+}
+
+.storyboard-columns {
+  display: grid;
+  grid-template-columns: 280px 1fr 320px;
+  flex: 1; // Take remaining height
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+
+  .column {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 16px;
+    gap: 16px;
+    border-right: 1px solid var(--mat-sys-outline-variant);
+
+    &:last-child {
+      border-right: none;
+    }
+  }
+
+  .left-sidebar {
+    overflow-y: auto; // Allow entire column to scroll
+
+    .scene-header {
+      margin-bottom: 16px;
+      h2 {
+        margin: 0;
+        font-size: 1.2rem;
+      }
+    }
+
+    .list-section {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+
+      .archived-panel {
+        margin-top: 16px;
+        background: transparent;
+        box-shadow: none;
+        overflow: visible;
+
+        .subtitle {
+          margin: 0;
+          color: inherit;
+        }
+
+        ::ng-deep .mat-expansion-panel-header {
+          padding-left: 0;
+          padding-right: 2px;
+        }
+
+        ::ng-deep .mat-expansion-panel-body {
+          padding-left: 0;
+          padding-right: 0;
+        }
+      }
+
+      .empty-state {
+        border: 1px dashed var(--mat-sys-outline);
+        border-radius: 8px;
+        height: 100px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 0.5;
+        font-size: 0.9rem;
+      }
+
+      .candidate-list {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+        gap: 12px;
+      }
+
+      .video-item {
+        border: 1px solid var(--mat-sys-outline);
+        border-radius: 8px;
+        overflow: hidden;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        position: relative;
+        cursor: pointer;
+
+        &.selected {
+          outline: 5px solid var(--mat-sys-primary);
+          outline-offset: -2px;
+          background: var(--mat-sys-primary-container);
+        }
+
+        &.placeholder {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border: 1px dashed rgba(0, 0, 0, 0.2);
+          background: var(--mat-sys-surface-container-high);
+          cursor: default;
+          height: auto; // Let aspect-ratio define height
+
+          &:hover {
+            transform: none;
+            box-shadow: none;
+            background: var(--mat-sys-surface-container-high);
+          }
+        }
+
+        &:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .video-thumbnail {
+          background: var(--mat-sys-surface-container-high);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          overflow: hidden;
+          position: relative;
+
+          .archive-btn {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            z-index: 2;
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            transform: scale(0.8);
+            backdrop-filter: blur(4px);
+
+            &:hover {
+              background: var(--mat-sys-error-container);
+              color: var(--mat-sys-on-error-container);
+            }
+          }
+
+          video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+          }
+        }
+
+        .resolution {
+          position: absolute;
+          top: 6px;
+          left: 10px;
+          background: rgba(0, 0, 0, 0.6);
+          color: white;
+          backdrop-filter: blur(4px);
+          padding: 2px 6px;
+          font-size: 0.7rem;
+          font-weight: 500;
+          border-radius: 4px;
+          white-space: nowrap;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .video-info {
+          padding: 6px 10px;
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          background: var(--mat-sys-surface-container-lowest);
+          border-top: 1px solid var(--mat-sys-outline-variant);
+
+          .video-chip {
+            font-size: 0.7rem;
+            font-weight: 500;
+            color: var(--mat-sys-on-surface);
+            background: var(--mat-sys-surface-container-highest);
+            padding: 2px 6px;
+            border-radius: 4px;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+
+            mat-icon {
+              font-size: 12px;
+              width: 12px;
+              height: 12px;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  .main-preview {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+
+    .preview-wrapper {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    .preview-area {
+      height: 100%;
+      max-width: 100%;
+      max-height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      color: rgba(255, 255, 255, 0.7);
+
+      mat-icon {
+        font-size: 64px;
+        width: 64px;
+        height: 64px;
+        color: white;
+        opacity: 0.8;
+        margin-bottom: 16px;
+      }
+
+      .placeholder-text {
+        opacity: 1;
+      }
+
+      .video-container {
+        border-radius: 8px;
+        width: 100%;
+        height: 100%;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+
+        .preview-video {
+          width: 100%;
+          height: 100%;
+          max-width: 100%;
+          max-height: 100%;
+          object-fit: contain;
+        }
+
+        .video-overlay {
+          position: absolute;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+
+          .video-controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            background: linear-gradient(
+              to top,
+              rgba(0, 0, 0, 0.7),
+              transparent
+            );
+            flex-direction: column;
+            align-items: stretch;
+            gap: 0;
+            color: white;
+            opacity: 1;
+
+            .time-group {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              margin-right: 12px;
+
+              .trimmed-info {
+                cursor: default;
+                font-size: 0.75rem;
+                font-family: monospace;
+                color: white;
+                margin-bottom: 0;
+              }
+
+              .time-display {
+                cursor: default;
+                font-size: 0.85rem;
+                font-family: monospace;
+                white-space: nowrap;
+              }
+            }
+
+            .controls-row {
+              display: flex;
+              align-items: center;
+              gap: 12px;
+              padding: 4px;
+              width: 100%;
+              box-sizing: border-box;
+
+              .volume-controls {
+                position: relative;
+                display: flex;
+                align-items: center;
+                gap: 4px;
+
+                .slider-popup {
+                  position: absolute;
+                  bottom: 40px;
+                  right: 0;
+                  width: 140px;
+                  height: 40px;
+                  background: var(--mat-sys-surface-container);
+                  backdrop-filter: blur(4px);
+                  border-radius: 8px;
+                  padding: 0 16px;
+                  display: flex;
+                  align-items: center;
+                  opacity: 0;
+                  pointer-events: none;
+                  transition: opacity 0.2s ease-in-out;
+                  z-index: 50;
+                  flex-grow: 0;
+
+                  &::before {
+                    content: '';
+                    position: absolute;
+                    bottom: -10px;
+                    left: 0;
+                    right: 0;
+                    height: 10px;
+                    background: transparent;
+                  }
+
+                  .volume-slider {
+                    width: 100%;
+                  }
+                }
+
+                &:hover .slider-popup {
+                  opacity: 1;
+                  pointer-events: auto;
+                }
+              }
+            }
+
+            mat-icon {
+              color: white;
+              font-size: 24px;
+              width: 24px;
+              height: 24px;
+              margin: 0;
+            }
+
+            .timeline-container {
+              flex: 1;
+              height: 24px;
+              margin-right: 4px;
+              display: flex;
+              align-items: center;
+              cursor: pointer;
+              position: relative;
+
+              .timeline-track {
+                width: 100%;
+                height: 4px;
+                background: rgba(255, 255, 255, 0.3);
+                border-radius: 2px;
+                position: relative;
+
+                .track-background {
+                  position: absolute;
+                  top: 0;
+                  left: 0;
+                  width: 100%;
+                  height: 100%;
+                  background: rgba(255, 255, 255, 0.3);
+                  border-radius: 2px;
+                }
+
+                .progress-bar {
+                  position: absolute;
+                  top: 0;
+                  left: 0;
+                  height: 100%;
+                  background: var(--mat-sys-primary);
+                  border-radius: 2px;
+                }
+
+                .trim-highlight {
+                  position: absolute;
+                  top: 0;
+                  height: 100%;
+                  background: color-mix(
+                    in srgb,
+                    var(--mat-sys-primary),
+                    transparent 60%
+                  );
+                  z-index: 1;
+                }
+
+                .trim-handle {
+                  position: absolute;
+                  top: -6px;
+                  bottom: -6px;
+                  width: 4px;
+                  background: var(--mat-sys-primary);
+                  border-radius: 2px;
+                  z-index: 2;
+                  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+                  cursor: ew-resize;
+
+                  // Hit area
+                  &::after {
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    bottom: 0;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    width: 24px; // Large hit area
+                    height: 100%;
+                  }
+
+                  &.start {
+                    transform: translateX(-50%);
+                  }
+                  &.end {
+                    transform: translateX(-50%);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  .controls-area {
+    padding: 16px;
+    width: 100%;
+    max-height: 200px;
+    flex: 1;
+    gap: 24px;
+    align-self: center;
+    display: flex;
+    box-sizing: border-box;
+
+    .trim-controls {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+
+      ::ng-deep .mat-mdc-form-field-infix {
+        width: 100%;
+      }
+
+      ::ng-deep input {
+        width: 8ch;
+      }
+    }
+
+    .timeline-container {
+      margin-bottom: 16px;
+      .time-labels {
+        display: flex;
+        justify-content: space-between;
+        font-family: monospace;
+        font-size: 0.8rem;
+        opacity: 0.7;
+        margin-bottom: 4px;
+      }
+    }
+
+    .prompt-box {
+      position: relative;
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+
+      ::ng-deep {
+        mat-form-field {
+          display: flex;
+          flex-grow: 1;
+          .mat-mdc-form-field-flex,
+          .mat-mdc-form-field-infix,
+          textarea {
+            height: 100%;
+            resize: none;
+          }
+        }
+      }
+    }
+  }
+}
+
+.button-content {
+  display: flex;
+  height: 40px;
+  align-items: center;
+  justify-items: center;
+  gap: 8px;
+
+  mat-icon {
+    margin: 0;
+  }
+}
+
+.right-sidebar {
+  padding: 0 !important; // settings header often has tabs
+
+  mat-tab-group {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+
+    ::ng-deep .mat-mdc-tab-body-wrapper {
+      flex: 1;
+      overflow: hidden;
+    }
+  }
+
+  .settings-header {
+    padding: 0 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 48px;
+  }
+
+  .settings-content {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    overflow-y: auto;
+    height: 100%;
+    box-sizing: border-box;
+
+    .setting-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+
+      label {
+        font-size: 0.9rem;
+        opacity: 0.9;
+      }
+
+      .setting-icon {
+        background: var(--mat-sys-primary);
+        border-radius: 4px;
+        padding: 2px;
+        color: var(--mat-sys-on-primary);
+        width: 20px;
+        height: 20px;
+        font-size: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .toggle-group {
+        width: 100%;
+        mat-button-toggle-group {
+          width: 100%;
+          border-radius: 24px; // Pill shape
+          overflow: hidden;
+
+          mat-button-toggle {
+            flex: 1;
+            min-width: 0; // Allow flex shrink if needed
+
+            ::ng-deep .mat-button-toggle-label-content {
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              line-height: normal;
+              padding: 12px 8px; // Increased vertical padding
+              gap: 8px; // Increased gap
+            }
+
+            mat-icon {
+              margin: 0;
+            }
+          }
+        }
+      }
+    }
+
+    .audio-toggle {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .reference-image-container {
+      width: 100%;
+      border-radius: 8px;
+      overflow: hidden;
+      align-self: flex-start;
+    }
+
+    .upload-area {
+      border: 2px dashed rgba(0, 0, 0, 0.12);
+      border-radius: 8px;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      background: rgba(0, 0, 0, 0.02);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-sizing: border-box;
+
+      &:hover {
+        background: rgba(0, 0, 0, 0.04);
+        border-color: var(--mat-sys-primary);
+        color: var(--mat-sys-primary);
+
+        .upload-icon {
+          animation: bounce 0.5s ease-in-out infinite;
+        }
+      }
+
+      .upload-content {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        padding: 8px;
+
+        .upload-icon {
+          font-size: 24px;
+          width: 24px;
+          height: 24px;
+          opacity: 0.5;
+        }
+
+        p {
+          margin: 0;
+          font-size: 0.8rem;
+          font-weight: 500;
+        }
+      }
+    }
+
+    .reference-image-preview {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      background: var(--mat-sys-surface-container-high);
+
+      img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .remove-image-btn {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(4px);
+        color: white;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+
+        mat-icon {
+          font-size: 16px;
+          width: 16px;
+          height: 16px;
+          margin: 0;
+        }
+
+        &:hover {
+          background: rgba(244, 67, 54, 0.9);
+          transform: scale(1.1);
+          box-shadow: 0 4px 12px rgba(244, 67, 54, 0.4);
+          color: white;
+        }
+
+        &:active {
+          transform: scale(0.95);
+        }
+      }
+    }
+  }
+}
+
+@keyframes bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+// Fix for slider thumb label overflow
+::ng-deep .mat-mdc-slider .mdc-slider__value-indicator-text {
+  font-size: 10px !important;
+  letter-spacing: -0.5px;
+}
