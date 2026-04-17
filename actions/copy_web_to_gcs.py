@@ -16,16 +16,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 import mimetypes
+
+import PIL.Image
+import requests
 
 from common import Key
 from common import logger
 from common import NodeInput
 from common import NodeOutput
 from common import Params
-import PIL.Image
-import requests
 from util.gcs_wrapper import GCS
 
 
@@ -54,12 +56,10 @@ def execute(gcs: GCS, _: Params, urls: NodeInput) -> NodeOutput:
             file_bytes = response.content
 
             content_type = None
-            try:
+            with contextlib.suppress(PIL.UnidentifiedImageError):
                 with io.BytesIO(file_bytes) as input_stream:
                     img = PIL.Image.open(input_stream)
                     content_type = PIL.Image.MIME.get(img.format)
-            except PIL.UnidentifiedImageError:
-                pass
 
             if not content_type:
                 content_type, _ = mimetypes.guess_type(url)
