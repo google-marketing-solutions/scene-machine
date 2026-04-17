@@ -115,16 +115,20 @@ content_type_short = {
 }
 
 
-@functools.lru_cache(maxsize=1)
-def get_api_client_headers() -> dict[str, str]:
+@functools.lru_cache(maxsize=None)
+def get_api_client_headers(tracking_type: TrackingType) -> dict[str, str]:
   """Gets headers for use with Google APIs.
 
   This currently covers only user-agent headers to identify the client in logs.
 
+  Args:
+    tracking_type: The string to denote what type of request is being made.
+
   Returns:
     A dictionary of headers.
   """
-  user_agent = 'gtech-ads-ce/scene-machine/'
+
+  user_agent = f'{_USER_AGENT_PREFIX}-{tracking_type.value}-v'
   try:
     with open('deployed_version.txt', 'r') as f:
       user_agent += f.read().strip()

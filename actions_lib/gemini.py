@@ -20,6 +20,7 @@ import json
 import logging
 import mimetypes
 
+from common import TrackingType, get_api_client_headers
 from google import genai
 from google.genai import types
 
@@ -83,6 +84,7 @@ def prompt(
     model="gemini-2.5-flash",
     temperature: float = 0.2,
     top_p: float = 0.2,
+    tracking_type: TrackingType | None = None,
 ):
     """Prompts Gemini for a response.
 
@@ -119,56 +121,63 @@ def prompt(
                 file_uri=file_uri, mime_type=get_mime_type(file_uri)
             )
         )
-    contents = [types.Content(role="user", parts=parts)]
 
-    safety_settings = [
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH.value,
-            threshold=types.HarmBlockThreshold.OFF.value,
-        ),
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT.value,
-            threshold=types.HarmBlockThreshold.OFF.value,
-        ),
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT.value,
-            threshold=types.HarmBlockThreshold.OFF.value,
-        ),
-        types.SafetySetting(
-            category=types.HarmCategory.HARM_CATEGORY_HARASSMENT.value,
-            threshold=types.HarmBlockThreshold.OFF.value,
-        ),
-    ]
+        contents = [types.Content(role="user", parts=parts)]
 
-    generate_content_config = types.GenerateContentConfig(
-        temperature=temperature,
-        top_p=top_p,
-        max_output_tokens=8192,
-        response_modalities=[types.Modality.TEXT.value]
-        if not response_schema
-        else None,
-        response_mime_type="application/json" if response_schema else None,
-        response_schema=response_schema,
-        safety_settings=safety_settings,
-        thinking_config=_get_thinking_config(model),
-    )
-    response = client.models.generate_content(
-        model=model,
-        contents=contents,
-        config=generate_content_config,
-    )
-    if response.candidates and response.candidates[0].content.parts:
-        output = "".join(
-            part.text
-            for part in response.candidates[0].content.parts
-            if hasattr(part, "text")
+        safety_settings = [
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH.value,
+                threshold=types.HarmBlockThreshold.OFF.value,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT.value,
+                threshold=types.HarmBlockThreshold.OFF.value,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT.value,
+                threshold=types.HarmBlockThreshold.OFF.value,
+            ),
+            types.SafetySetting(
+                category=types.HarmCategory.HARM_CATEGORY_HARASSMENT.value,
+                threshold=types.HarmBlockThreshold.OFF.value,
+            ),
+        ]
+
+        generate_content_config = types.GenerateContentConfig(
+            temperature=temperature,
+            top_p=top_p,
+            max_output_tokens=8192,
+            response_modalities=[types.Modality.TEXT.value]
+            if not response_schema
+            else None,
+            response_mime_type="application/json" if response_schema else None,
+            response_schema=response_schema,
+            safety_settings=safety_settings,
+            thinking_config=_get_thinking_config(model),
         )
-    else:
-        output = ""
+        http_options = (
+            types.HttpOptions(headers=get_api_client_headers(tracking_type))
+            if tracking_type
+            else None
+        )
+        response = client.models.generate_content(
+            model=model,
+            contents=contents,
+            config=generate_content_config,
+            http_options=http_options,
+        )
+        if response.candidates and response.candidates[0].content.parts:
+            output = "".join(
+                part.text
+                for part in response.candidates[0].content.parts
+                if hasattr(part, "text")
+            )
+        else:
+            output = ""
 
-    if response_schema:
-        return json.loads(output)
-    if need_to_remove_md_notation:
-        return remove_md_notation(output)
+        if response_schema:
+            return json.loads(output)
+        if need_to_remove_md_notation:
+            return remove_md_notation(output)
 
-    return output
+        return output
