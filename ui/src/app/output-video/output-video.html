@@ -1,0 +1,172 @@
+<!--
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+<div class="output-layout">
+  <div class="project-title-header">
+    <h1 [title]="configService.projectConfig.value().name">
+      {{ configService.projectConfig.value().name }}
+    </h1>
+    <mat-chip-set>
+      <mat-chip class="aspect-ratio-chip">
+        <mat-icon matChipAvatar>aspect_ratio</mat-icon>
+        {{ configService.projectConfig.value().aspectRatio }}
+      </mat-chip>
+      <mat-chip class="resolution-chip">
+        <mat-icon matChipAvatar>
+          @if (configService.projectConfig.value().resolution === '4k') {
+            4k
+          } @else {
+            hd
+          }
+        </mat-icon>
+        {{
+          configService.projectConfig.value().resolution === '4k'
+            ? '4K'
+            : configService.projectConfig.value().resolution
+        }}
+      </mat-chip>
+    </mat-chip-set>
+  </div>
+  <div class="main-content">
+    <div class="content-wrapper">
+      <div class="preview-area">
+        <div class="video-container" [style.aspect-ratio]="previewAspectRatio()">
+          @if (videoUrl()) {
+            <video [src]="videoUrl()" controls autoplay playsinline></video>
+          }
+        </div>
+      </div>
+
+      <div class="actions-panel">
+        <div class="subtitle">Rendered Videos</div>
+        @if (configService.projectConfig.value().renderRuns?.length) {
+          <div class="render-runs-list">
+            @for (run of configService.projectConfig.value().renderRuns; track run.createdAt) {
+              @if (!run.isArchived) {
+                <div
+                  class="render-run-item"
+                  [class.selected]="selectedRenderRun() === run"
+                  (click)="selectedRenderRun.set(run)"
+                >
+                  <div class="render-run-info">
+                    <mat-icon
+                      aria-hidden="false"
+                      matBadge="&#8203;"
+                      [matBadgeHidden]="run.wasPlayed"
+                      matBadgeSize="medium"
+                      matBadgePosition="above before"
+                      matBadgeDescription="Unwatched rendered video"
+                      >movie</mat-icon
+                    >
+                    <div class="render-run-text">
+                      <span class="render-run-name"
+                        >{{ run.createdAt | date: 'shortTime' }} ({{
+                          run.createdAt | date: 'mediumDate'
+                        }})</span
+                      >
+                    </div>
+                  </div>
+                  <button
+                    mat-icon-button
+                    color="warn"
+                    matTooltip="Archive Rendered Video"
+                    (click)="$event.stopPropagation(); setRenderRunArchiveStatus(run, true)"
+                  >
+                    <mat-icon>archive</mat-icon>
+                  </button>
+                </div>
+              }
+            }
+          </div>
+        }
+        <br />
+        <div class="subtitle">Archived</div>
+        <div class="render-runs-list">
+          @for (run of configService.projectConfig.value().renderRuns; track run.createdAt) {
+            @if (run.isArchived) {
+              <div
+                class="render-run-item"
+                [class.selected]="selectedRenderRun() === run"
+                (click)="selectedRenderRun.set(run)"
+              >
+                <div class="render-run-info">
+                  <mat-icon
+                    aria-hidden="false"
+                    matBadge="&#8203;"
+                    [matBadgeHidden]="run.wasPlayed"
+                    matBadgeSize="medium"
+                    matBadgePosition="above before"
+                    matBadgeDescription="Unwatched rendered video"
+                    >movie</mat-icon
+                  >
+                  <div class="render-run-text">
+                    <span class="render-run-name"
+                      >{{ run.createdAt | date: 'shortTime' }} ({{
+                        run.createdAt | date: 'mediumDate'
+                      }})</span
+                    >
+                  </div>
+                </div>
+                <button
+                  mat-icon-button
+                  color="warn"
+                  matTooltip="Unarchive Rendered Video"
+                  (click)="$event.stopPropagation(); setRenderRunArchiveStatus(run, false)"
+                >
+                  <mat-icon>unarchive</mat-icon>
+                </button>
+              </div>
+            }
+          }
+        </div>
+      </div>
+    </div>
+
+    <div class="bottom-bar">
+      <button
+        mat-flat-button
+        color="primary"
+        (click)="downloadVideo()"
+        [disabled]="!videoUrl() || downloading()"
+      >
+        <mat-icon>download</mat-icon>
+        <span>{{ downloading() ? 'Downloading...' : 'Download Video' }}</span>
+      </button>
+
+      <button mat-flat-button color="primary" [matMenuTriggerFor]="scenesMenu">
+        <mat-icon>download</mat-icon>
+        <span>Download Scenes</span>
+      </button>
+
+      <mat-menu #scenesMenu="matMenu" yPosition="above">
+        @for (scene of configService.projectConfig.value().storyboard; track scene.id) {
+          <button
+            mat-menu-item
+            (click)="downloadScene(scene)"
+            [disabled]="!getSceneVideoUrl(scene) || downloadingScenes().has(scene.id)"
+          >
+            @if (downloadingScenes().has(scene.id)) {
+              <mat-spinner diameter="16" class="scene-download-spinner"></mat-spinner>
+            } @else {
+              <mat-icon>movie</mat-icon>
+            }
+            <span>{{ scene.name }}</span>
+          </button>
+        }
+      </mat-menu>
+    </div>
+  </div>
+</div>
