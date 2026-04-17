@@ -71,7 +71,7 @@ def prompt(
     model="gemini-2.5-flash",
     temperature: float = 0.2,
     top_p: float = 0.2,
-    call_type: TrackingType | None = None,
+    tracking_type: TrackingType | None = None,
 ):
   """Prompts Gemini for a response.
 
@@ -145,8 +145,8 @@ def prompt(
       else None,
   )
   http_options = (
-      types.HttpOptions(headers=get_api_client_headers(call_type))
-      if call_type
+      types.HttpOptions(headers=get_api_client_headers(tracking_type))
+      if tracking_type
       else None
   )
   response = client.models.generate_content(
