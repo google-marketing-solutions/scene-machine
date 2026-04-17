@@ -71,18 +71,15 @@ def execute(gcs: GCS, _: Params, urls: NodeInput) -> NodeOutput:
                 content_type = 'application/octet-stream'
 
             dot_extension = f'.{content_type.split("/")[-1]}'
-            logger.debug('dot_extension %s', dot_extension)
             # Some URLs might have the same "filename" part, so we need to make
             # them unique by adding the index.
             raw_name = url.split('/')[-1].split('?')[0]
-            logger.debug('raw_name %s', raw_name)
             if raw_name:
                 base_file_name = f'{index}_{raw_name}'
             else:
                 base_file_name = f'file_{index}'
             if not base_file_name.endswith(dot_extension):
                 base_file_name += dot_extension
-            logger.debug('base_file_name %s', base_file_name)
 
             gcs_path = gcs.store(file_bytes, base_file_name, content_type)
             output_files.append({Key.FILE.value: gcs_path})
