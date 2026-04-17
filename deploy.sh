@@ -115,9 +115,10 @@ for ROLE in "${ROLES[@]}"; do
 done
 
 # 3) Deploy backend (Cloud Run)
-COMMIT_DATE=$(git log -1 --format=%cI)
-GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-echo "${GIT_BRANCH}/${COMMIT_DATE}" > deployed_version.txt
+COMMIT_TIME=$(TZ=UTC git log -1 --format='%cd' --date=format-local:'%Y%m%d.%H%M%S')
+COMMIT_VERSION_DECIMAL=$(printf "%d" 0x$(git log -1 --format='%h'))
+# User agent suffix needs to be a decimal number
+echo "${COMMIT_TIME}.${COMMIT_VERSION_DECIMAL}" > deployed_version.txt
 sync
 if ! gcloud artifacts repositories describe "${ARTIFACT_REPO}" --project=$PROJECT --location="$REGION" &> /dev/null; then
   echo "Creating artifact repository: $ARTIFACT_REPO"

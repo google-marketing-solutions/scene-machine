@@ -23,6 +23,9 @@ Params = typing.Dict[str, typing.Any]
 NodeInput = typing.List[typing.Dict[str, str]]
 NodeOutput = typing.Dict[str, NodeInput]
 
+_USER_AGENT_PREFIX = 'cloud-solutions/mas-scenemachine'
+_GIT_VERSION_FILE = 'deployed_version.txt'
+
 
 class TypeNames(enum.Enum):
   """Enumerates type names to compensate deficiencies in Python's typing."""
@@ -102,6 +105,13 @@ class ContentType(enum.Enum):
   VIDEO = 'video/*'
 
 
+class TrackingType(enum.Enum):
+  """Enumerates types of activities registered with GCP."""
+
+  STORYBOARD = 'storyboard'
+  VIDEO = 'video'
+
+
 #  Maps short type names to suitable input and output MIME types.
 content_type_short = {
     'string': {
@@ -116,17 +126,21 @@ content_type_short = {
 
 
 @functools.lru_cache(maxsize=1)
-def get_api_client_headers() -> dict[str, str]:
+def get_api_client_headers(context: TrackingType) -> dict[str, str]:
   """Gets headers for use with Google APIs.
 
   This currently covers only user-agent headers to identify the client in logs.
 
+  Args:
+    context: The string to denote what type of request is being made.
+
   Returns:
     A dictionary of headers.
   """
-  user_agent = 'gtech-ads-ce/scene-machine/'
+
+  user_agent = _USER_AGENT_PREFIX + '-' + str(context) + '-v'
   try:
-    with open('deployed_version.txt', 'r') as f:
+    with open(_GIT_VERSION_FILE, 'r') as f:
       user_agent += f.read().strip()
   except FileNotFoundError:
     user_agent += 'unknown'

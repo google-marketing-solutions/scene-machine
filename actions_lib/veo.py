@@ -20,6 +20,7 @@ from typing import Any
 from typing import Literal
 
 from common import get_api_client_headers
+from common import TrackingType
 from google import genai
 from google.genai import types
 
@@ -43,12 +44,37 @@ def generate(
     model: str = 'veo-3.0-generate-preview',
     generate_audio: bool = False,
 ) -> list[str] | None:
-  """Generates videos using Veo."""
+  """Generates videos using Veo.
+
+  Args:
+    gcp_project: The ID of the Google Cloud project to use.
+    gcp_location: The Google Cloud location to use.
+    prompt: The text prompt describing the video to generate.
+    image_url: Image to base the video on.
+    image_type: Image type.
+    duration_seconds: Duration of the video in seconds.
+    amount: Number of videos to generate.
+    aspect_ratio: Aspect ratio of the video.
+    resolution: Resolution of the video.
+    output_gcs: Predefined destination to which to write the video file.
+    enhance_prompt: Whether to allow Veo to modify the prompt.
+    allow_persons: Whether to allow people to be shown in the video.
+    model: The Veo model to use for generation.
+    generate_audio: Whether to generate an audio track in the video.
+
+  Returns:
+    The list of URIs of the generated videos.
+
+  Raises:
+    RuntimeError: If no videos were generated.
+  """
   client = genai.Client(
       vertexai=True,
       project=gcp_project,
       location=gcp_location,
-      http_options=types.HttpOptions(headers=get_api_client_headers()),
+      http_options=types.HttpOptions(
+          headers=get_api_client_headers(TrackingType.VIDEO.value)
+      ),
   )
   # Note: Below, types.GenerateVideosConfigDict led to linting problems.
   config_params: dict[str, Any] = {
