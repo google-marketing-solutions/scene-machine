@@ -1,0 +1,156 @@
+<!doctype html>
+<!--
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+<html>
+  <head>
+    <title>[Scene Machine] Execution-status viewer</title>
+    <script src="status/renderWorkflow.js"></script>
+    <script src="status/callBackend.js"></script>
+    <link rel="stylesheet" href="status/re.css" />
+  </head>
+
+  <body>
+    <label for="executionId">Execution ID:</label><input id="executionId" />
+    <button id="getStatusButton">Get status</button>
+    <div id="canvas"></div>
+
+    <script>
+      const getStatusButton = document.getElementById('getStatusButton');
+      const executionIdInput = document.getElementById('executionId');
+
+      function getQueryParam(name) {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(name);
+      }
+
+      const executionIdFromQuery = getQueryParam('executionId');
+      if (executionIdFromQuery) {
+        executionIdInput.value = executionIdFromQuery;
+      }
+
+      getStatusButton.addEventListener('click', callCloudRunEndpoint);
+
+      let workflow = {};
+      let actions = {};
+      let executionData = {};
+
+      const canvas = document.getElementById('canvas');
+      let nodes = {}; // DOM elements for nodes
+      let connections = []; // Array of connection objects
+      const nodeWidth = 150; // Default width for nodes
+      const horizontalSpacing = 200; // Default horizontal spacing for auto-layout
+      let selectedConnectionIndex = null;
+
+      let draggingConnection = false;
+      let sourceConnector = null; // DOM element of the source connector during a drag
+      let tempLine = null; // DOM element for the temporary line during connection drag
+
+      // Inspection Box
+      let currentInspectionBox = null;
+      let currentInspectionLine = null;
+      let inspectionLineSvg = null;
+      let tetheredHandlerElement = null;
+
+      function initializeExecutionData(loadedExecutionData) {
+        try {
+          executionData = loadedExecutionData;
+          console.log('Execution data loaded.');
+          void init(executionData['workflowDefinition'], executionData['workflowParams']);
+        } catch (e) {
+          console.error('Error parsing execution data:', e);
+          executionData = {}; // Fallback to empty data on error
+        }
+      }
+
+      function init(workflowDefinition, workflowParams) {
+        workflow = {workflowDefinition, workflowParams};
+        canvas.innerHTML = '';
+        nodes = {};
+        connections = [];
+        selectedConnectionIndex = null;
+        closeInspectionBox();
+
+        const wfDef = workflow.workflowDefinition;
+        if (!wfDef || Object.keys(wfDef).length === 0) {
+          // Check if wfDef is valid
+          console.error(
+            'Cannot init: Workflow definition is missing or empty after initialization attempt.',
+          );
+          canvas.innerHTML =
+            '<p>Error: Workflow definition is missing or empty. Cannot render. Check if default files loaded correctly.</p>';
+          return;
+        }
+
+        Object.keys(wfDef).forEach(nodeId => {
+          // Pass actions data to createNodeElement if it needs it
+          nodes[nodeId] = createNodeElement(nodeId, wfDef[nodeId], actions); // Assuming createNodeElement might need actions
+          positionNode(nodes[nodeId], wfDef[nodeId]); // Position if defined
+        });
+
+        // Determine if auto-layout is needed
+        const needsLayout = Object.values(wfDef).some(
+          nodeDef => !nodeDef.position || typeof nodeDef.position.x !== 'number',
+        );
+        if (needsLayout) {
+          layoutNodes();
+        }
+
+        Object.values(nodes).forEach(node => positionNodeConnectors(node));
+        createConnections();
+        drawConnections();
+
+        setupEventListeners();
+      }
+
+      async function loadDefaultsAndInitialize() {
+        try {
+          console.log('Fetching actions data...');
+          const [actionsResponse] = await Promise.all([fetch('definitions/actions.json')]);
+          if (!actionsResponse.ok) {
+            throw new Error(`Failed to fetch actions.json: ${actionsResponse.statusText}`);
+          }
+          actions = await actionsResponse.json();
+          console.log('Default data loaded successfully.');
+        } catch (error) {
+          console.error('Error loading default definition files:', error);
+          canvas.innerHTML = `<p>Error loading default definitions: ${error.message}. Cannot initialize application.</p>`;
+        }
+      }
+
+      async function loadConfig() {
+        try {
+          console.log('Fetching config...');
+          const [configResponse] = await Promise.all([fetch('definitions/config.json')]);
+          if (!configResponse.ok) {
+            throw new Error(`Failed to fetch config.json: ${configResponse.statusText}`);
+          }
+          config = await configResponse.json();
+          console.log('Config loaded successfully.');
+        } catch (error) {
+          console.error('Error loading config:', error);
+          canvas.innerHTML = `<p>Error loading config: ${error.message}. Cannot initialize application.</p>`;
+        }
+      }
+
+      Promise.all([loadDefaultsAndInitialize(), loadConfig()]).then(() => {
+        if (executionIdInput.value !== '') {
+          callCloudRunEndpoint();
+        }
+      });
+    </script>
+  </body>
+</html>
