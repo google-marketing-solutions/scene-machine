@@ -30,7 +30,7 @@ from google.genai import types as gtypes
 import PIL.Image
 
 
-IMAGE_MODEL = "gemini-2.5-flash-image"
+_IMAGE_MODEL = "gemini-2.5-flash-image"
 
 
 def outpaint_image(
@@ -70,7 +70,7 @@ def outpaint_image(
     )
 
     outpaint_response = client.models.generate_content(
-        model=IMAGE_MODEL, contents=contents, config=generate_config
+        model=_IMAGE_MODEL, contents=contents, config=generate_config
     )
 
     if not outpaint_response.candidates:

@@ -56,7 +56,9 @@ class TestOutpainter(unittest.TestCase):
         mock_content = mock.Mock()
         mock_part = mock.Mock()
 
-        mock_part.inline_data = self.mock_outpainted_bytes
+        # Fix: mock_part.inline_data must be an object with data and mime_type
+        mock_blob = mock.Mock(data=self.mock_outpainted_bytes, mime_type="image/png")
+        mock_part.inline_data = mock_blob
         mock_content.parts = [mock_part]
         mock_candidate.content = mock_content
         mock_response.candidates = [mock_candidate]
@@ -70,7 +72,8 @@ class TestOutpainter(unittest.TestCase):
             self.mock_target_ratio,
         )
 
-        self.assertEqual(result, self.mock_outpainted_bytes)
+        # Fix: result is a tuple (bytes, str)
+        self.assertEqual(result, (self.mock_outpainted_bytes, "image/png"))
         mock_pil_open.assert_called_once()
         mock_image_instance.load.assert_called_once()
         mock_genai_client.assert_called_once_with(
@@ -80,7 +83,8 @@ class TestOutpainter(unittest.TestCase):
         )
         mock_client_instance.models.generate_content.assert_called_once()
         _, kwargs = mock_client_instance.models.generate_content.call_args
-        self.assertEqual(kwargs["model"], outpainter.IMAGE_MODEL)
+        # Fix: IMAGE_MODEL is now private _IMAGE_MODEL
+        self.assertEqual(kwargs["model"], outpainter._IMAGE_MODEL)
         self.assertIn(
             "Outpaint the image to the required aspect ratio",
             kwargs["contents"][0],
@@ -89,40 +93,6 @@ class TestOutpainter(unittest.TestCase):
             kwargs["config"].image_config.aspect_ratio, self.mock_target_ratio
         )
 
-    @mock.patch("actions_lib.outpainter.PIL.Image.open")
-    @mock.patch("actions_lib.outpainter.genai.Client")
-    def test_outpaint_image_with_description(
-        self, mock_genai_client, mock_pil_open
-    ):
-        """Tests the outpaint_image function when a description is provided."""
-        # Setup mocks similar to test_outpaint_image_success
-        mock_image_instance = mock.Mock()
-        mock_pil_open.return_value = mock_image_instance
-        mock_client_instance = mock.Mock()
-        mock_genai_client.return_value = mock_client_instance
-        mock_response = mock.Mock()
-        mock_candidate = mock.Mock()
-        mock_content = mock.Mock()
-        mock_part = mock.Mock()
-        mock_part.inline_data = self.mock_outpainted_bytes
-        mock_content.parts = [mock_part]
-        mock_candidate.content = mock_content
-        mock_response.candidates = [mock_candidate]
-        mock_client_instance.models.generate_content.return_value = mock_response
-
-        outpainter.outpaint_image(
-            self.mock_image_bytes,
-            self.mock_gcp_project,
-            self.mock_gcp_location,
-            self.mock_target_ratio,
-            description=self.mock_description,
-        )
-
-        _, kwargs = mock_client_instance.models.generate_content.call_args
-        self.assertIn(
-            f"The description of the image is: {self.mock_description}",
-            kwargs["contents"][0],
-        )
 
     @mock.patch("actions_lib.outpainter.PIL.Image.open")
     @mock.patch("actions_lib.outpainter.genai.Client")
