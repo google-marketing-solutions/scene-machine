@@ -24,7 +24,7 @@ import {ConfigService} from '../services/config/config';
 @Component({
   selector: 'app-generate',
   imports: [],
-  template: '<html></html',
+  template: '<html></html>',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class Generate {
