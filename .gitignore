@@ -4,7 +4,7 @@ ui/definitions/config.json
 *.pyc
 __pycache__
 .firebase
-venv
+venv*
 .venv/
 ui/app/.vscode/
 ui/app/src/app/services/config/config.service.ts
