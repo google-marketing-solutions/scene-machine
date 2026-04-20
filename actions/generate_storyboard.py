@@ -119,9 +119,9 @@ response_schema = {
 
 
 def generate_system_prompt(min_scenes: int = 1, max_scenes: int = 3) -> str:
-  """Return a system prompt for the generate_storyboard action.
+  """Returns a system prompt for the generate_storyboard action.
 
-  Returns a system prompt that includes min and max number of scenes to be
+  The system prompt includes min and max number of scenes to be
   generated in case the user hasn't provided any other indication in their
   prompt. The min number of scenes is determined by the number of products
   (assumption: we should have at least as many scenes as there are products)
@@ -340,7 +340,7 @@ def execute(
 
   config = genai.types.GenerateContentConfig(
       system_instruction=generate_system_prompt(
-          len(products.keys()), len(images)
+          len(products), len(images)
       ),
       temperature=0.7,
       top_p=0.2,
