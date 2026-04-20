@@ -14,10 +14,11 @@
 
 """Encapsulates access to Gemini via the Vertex AI API."""
 
+from __future__ import annotations
+
 import json
 import logging
 import mimetypes
-from typing import Any, Dict, List
 
 from google import genai
 from google.genai import types
@@ -59,11 +60,24 @@ def remove_md_notation(s: str) -> str:
     return s.replace("```json", "").replace("```", "")
 
 
+def _get_thinking_config(model: str):
+    """Gets the thinking configuration for the specific model."""
+    if model.startswith("gemini-2.5-pro"):
+        return types.ThinkingConfig(thinking_budget=128)
+    elif model.startswith("gemini-2.5-flash") or model.startswith(
+        "gemini-2.5-flash-lite"
+    ):
+        return types.ThinkingConfig(thinking_budget=0)
+    return None
+
+
 def prompt(
     gcp_project: str,
     text_prompt: str,
-    response_schema: Dict[str, Any] = None,
-    file_uris: List[str] = None,
+    response_schema: dict[
+        str, str | dict | list | int | float | bool
+    ] = None,
+    file_uris: list[str] = None,
     need_to_remove_md_notation=True,
     location="us-central1",
     model="gemini-2.5-flash",
@@ -136,9 +150,7 @@ def prompt(
         response_mime_type="application/json" if response_schema else None,
         response_schema=response_schema,
         safety_settings=safety_settings,
-        thinking_config=types.ThinkingConfig(thinking_budget=0)
-        if model != "gemini-2.5-pro"
-        else None,
+        thinking_config=_get_thinking_config(model),
     )
     response = client.models.generate_content(
         model=model,

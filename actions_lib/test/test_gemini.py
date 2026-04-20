@@ -20,6 +20,7 @@ from unittest import mock
 
 from actions_lib import gemini
 from google.genai import types
+from parameterized import parameterized
 
 
 class TestGemini(unittest.TestCase):
@@ -81,13 +82,25 @@ class TestGemini(unittest.TestCase):
         mock_response.candidates = [mock_candidate]
         mock_client.models.generate_content.return_value = mock_response
 
-        schema = {"type": "OBJECT", "properties": {"result": {"type": "STRING"}}}
+        schema = {
+            "type": "OBJECT",
+            "properties": {"result": {"type": "STRING"}},
+        }
         output = gemini.prompt(
             gcp_project="test-proj",
             text_prompt="get json",
             response_schema=schema,
         )
         self.assertEqual(output, {"result": "success"})
+
+        mock_client.models.generate_content.assert_called_once()
+        args, kwargs = mock_client.models.generate_content.call_args
+
+        # Verify prompt text is passed correctly in the complex structure
+        self.assertEqual(kwargs["contents"][0].parts[0].text, "get json")
+
+        # Verify schema was applied to config
+        self.assertEqual(kwargs["config"].response_schema, schema)
 
     @mock.patch("google.genai.Client")
     def test_prompt_with_files(self, mock_client_class):
@@ -107,6 +120,36 @@ class TestGemini(unittest.TestCase):
             file_uris=["gs://bucket/image.png"],
         )
         self.assertEqual(output, "analyzed")
+
+
+    @parameterized.expand([
+        ("gemini-2.5-pro", 128),
+        ("gemini-2.5-flash", 0),
+    ])
+    @mock.patch("google.genai.Client")
+    def test_prompt_thinking_config(
+        self, model_name, expected_budget, mock_client_class
+    ):
+        """Tests prompt thinking config."""
+        mock_client = mock_client_class.return_value
+        mock_response = mock.Mock()
+        mock_candidate = mock.Mock()
+        mock_part = mock.Mock()
+        mock_part.text = "success"
+        mock_candidate.content.parts = [mock_part]
+        mock_response.candidates = [mock_candidate]
+        mock_client.models.generate_content.return_value = mock_response
+
+        gemini.prompt(
+            gcp_project="test-proj",
+            text_prompt="hi",
+            model=model_name,
+        )
+
+        args, kwargs = mock_client.models.generate_content.call_args
+        self.assertEqual(
+            kwargs["config"].thinking_config.thinking_budget, expected_budget
+        )
 
 
 if __name__ == "__main__":
