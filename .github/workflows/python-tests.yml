@@ -30,4 +30,4 @@ jobs:
 
     - name: Run tests with pytest
       run: |
-        pytest actions/test actions_lib/test test
+        python -m pytest actions/test actions_lib/test test
