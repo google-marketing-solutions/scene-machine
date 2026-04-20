@@ -58,7 +58,7 @@ def execute(
     A NodeOutput object containing the ad script.
 
   Raises:
-    RuntimeError: for repeated invalid outputs.
+    RuntimeError: For repeated invalid outputs.
   """
   briefing_text = (
       gcs.load_text(briefing[0][Key.FILE.value])
