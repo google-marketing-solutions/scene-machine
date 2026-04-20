@@ -1,0 +1,697 @@
+<!--
+ Copyright 2026 Google LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License");
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
+-->
+
+@if (config.projectConfig.isLoading() || !config.projectConfig.value().id) {
+  <div class="loading-state">
+    <mat-spinner diameter="40"></mat-spinner>
+    <p>Loading project...</p>
+  </div>
+} @else {
+  @if (config.projectConfig.value().storyboard.length > 0) {
+    <div class="storyboard-layout">
+      <!-- Project Title -->
+      <div class="project-title-header">
+        <h1 [title]="config.projectConfig.value().name">{{ config.projectConfig.value().name }}</h1>
+        <mat-chip-set>
+          <mat-chip class="aspect-ratio-chip">
+            <mat-icon matChipAvatar>aspect_ratio</mat-icon>
+            {{ config.projectConfig.value().aspectRatio }}
+          </mat-chip>
+          <mat-chip class="resolution-chip">
+            <mat-icon matChipAvatar>
+              @if (config.projectConfig.value().resolution === '4k') {
+                4k
+              } @else {
+                hd
+              }
+            </mat-icon>
+            {{
+              config.projectConfig.value().resolution === '4k'
+                ? '4K'
+                : config.projectConfig.value().resolution
+            }}
+          </mat-chip>
+        </mat-chip-set>
+      </div>
+
+      <!-- Top Filmstrip Header -->
+      <div
+        class="storyboard-filmstrip"
+        cdkDropList
+        cdkDropListOrientation="horizontal"
+        (cdkDropListDropped)="drop($event)"
+      >
+        @for (scene of config.projectConfig.value().storyboard; track scene.id) {
+          <div
+            class="filmstrip-item"
+            [class.active]="selectedSceneId() === scene.id"
+            (click)="selectScene(scene.id)"
+            cdkDrag
+            [cdkDragData]="scene"
+            cdkDragBoundary=".storyboard-filmstrip"
+          >
+            <div class="scene-number">{{ $index + 1 }}</div>
+            <button
+              mat-icon-button
+              class="delete-scene-btn"
+              title="Delete Scene"
+              (click)="$event.stopPropagation(); deleteScene(scene.id)"
+            >
+              <mat-icon>delete</mat-icon>
+            </button>
+            @if (this.config.isGeneratedScene(scene)) {
+              @if (
+                scene.selectedCandidateIndex !== undefined &&
+                scene.candidates?.[scene.selectedCandidateIndex]?.referenceImage
+              ) {
+                <img
+                  [src]="scene.candidates?.[scene.selectedCandidateIndex]?.referenceImage?.url"
+                  class="reference-image-bg"
+                  alt="Reference Image"
+                />
+                <!-- Show loading spinner even if image is present -->
+                @if (areCandidatesGenerating(scene.id)) {
+                  <div class="scene-loading">
+                    <mat-spinner diameter="32"></mat-spinner>
+                  </div>
+                }
+              } @else {
+                @if (areCandidatesGenerating(scene.id)) {
+                  <div class="scene-loading">
+                    <mat-spinner diameter="32"></mat-spinner>
+                  </div>
+                } @else {
+                  <div class="scene-icon"><mat-icon>auto_awesome</mat-icon></div>
+                }
+              }
+            } @else {
+              <div class="scene-icon"><mat-icon>videocam</mat-icon></div>
+            }
+            <div class="scene-label">{{ scene.name }}</div>
+
+            <!-- Custom preview template -->
+            <div *cdkDragPreview>
+              <div class="filmstrip-item-preview">
+                <div class="scene-number">{{ $index + 1 }}</div>
+                @if (this.config.isGeneratedScene(scene)) {
+                  @if (
+                    scene.selectedCandidateIndex !== undefined &&
+                    scene.candidates?.[scene.selectedCandidateIndex]?.referenceImage
+                  ) {
+                    <img
+                      [src]="scene.candidates?.[scene.selectedCandidateIndex]?.referenceImage?.url"
+                      class="reference-image-bg"
+                      alt="Reference Image"
+                    />
+                  } @else {
+                    <div class="scene-icon"><mat-icon>auto_awesome</mat-icon></div>
+                  }
+                } @else {
+                  <div class="scene-icon"><mat-icon>videocam</mat-icon></div>
+                }
+                <div class="scene-label">{{ scene.name }}</div>
+              </div>
+            </div>
+
+            <!-- Custom placeholder -->
+            <div *cdkDragPlaceholder class="filmstrip-item-placeholder"></div>
+          </div>
+        }
+        <button mat-mini-fab class="add-scene-btn" title="Add Scene" (click)="addScene()">
+          <mat-icon>add</mat-icon>
+        </button>
+      </div>
+
+      <div class="storyboard-columns">
+        @if (selectedScene(); as scene) {
+          <!-- Left Column: Scene List -->
+          <div class="column left-sidebar">
+            <div class="scene-header">
+              <div class="subtitle">SCENE NAME</div>
+              <mat-form-field
+                appearance="outline"
+                subscriptSizing="dynamic"
+                style="width: 100%; margin-top: 8px"
+              >
+                <input matInput [(ngModel)]="scene.name" (ngModelChange)="updateScenes()" />
+              </mat-form-field>
+            </div>
+
+            @if (this.config.isGeneratedScene(scene)) {
+              <div class="list-section">
+                <div class="subtitle">Candidates ({{ candidateCounts().active }})</div>
+                @if ((scene.candidates?.length ?? 0) > 0 || areCandidatesGenerating(scene.id)) {
+                  <div
+                    class="candidate-list"
+                    [class.has-selection]="!!scene.selectedCandidateIndex"
+                  >
+                    @if (scene.candidates) {
+                      @for (candidate of scene.candidates; track candidate.video?.url) {
+                        @if (!candidate.isArchived) {
+                          <div
+                            class="video-item"
+                            (click)="selectCandidate(scene, $index)"
+                            [class.selected]="scene.selectedCandidateIndex === $index"
+                          >
+                            <div
+                              class="video-thumbnail"
+                              [style.aspect-ratio]="previewAspectRatio()"
+                            >
+                              <div class="resolution">
+                                {{ candidate.resolution === '4k' ? '4K' : candidate.resolution }}
+                              </div>
+                              <button
+                                mat-icon-button
+                                class="archive-btn"
+                                (click)="toggleArchive($event, scene, $index)"
+                                matTooltip="Archive Candidate"
+                              >
+                                <mat-icon>archive</mat-icon>
+                              </button>
+                              <video
+                                #videoPlayer
+                                [src]="candidate.video?.url"
+                                [muted]="true"
+                                alt="Candidate Preview"
+                                loop
+                                matTooltip="Preview: 2x speed"
+                                matTooltipPosition="left"
+                                (mouseenter)="videoPlayer.playbackRate = 2; videoPlayer.play()"
+                                (mouseleave)="videoPlayer.pause(); videoPlayer.currentTime = 0"
+                              ></video>
+                            </div>
+                            <div class="video-info">
+                              <div class="video-chip">Run {{ candidate.runNumber }}</div>
+                              @if (candidate.trim && candidate.trim.start !== undefined) {
+                                <div class="video-chip">
+                                  <mat-icon>content_cut</mat-icon>
+                                  {{
+                                    (candidate.trim.end ?? candidate.durationSeconds) -
+                                      candidate.trim.start | number: '1.2-2'
+                                  }}s
+                                </div>
+                              }
+                              <div class="video-chip">{{ candidate.durationSeconds }}s</div>
+                            </div>
+                          </div>
+                        }
+                      }
+                    }
+                    @if (areCandidatesGenerating(scene.id)) {
+                      @for (i of getPlaceholdersArray(); track $index) {
+                        <div
+                          class="video-item placeholder"
+                          [style.aspect-ratio]="previewAspectRatio()"
+                        >
+                          <mat-spinner diameter="32"></mat-spinner>
+                        </div>
+                      }
+                    }
+                  </div>
+                  <mat-expansion-panel class="archived-panel">
+                    <mat-expansion-panel-header>
+                      <mat-panel-title class="subtitle">
+                        Archived ({{ candidateCounts().archived }})
+                      </mat-panel-title>
+                    </mat-expansion-panel-header>
+
+                    <div
+                      class="candidate-list"
+                      [class.has-selection]="!!scene.selectedCandidateIndex"
+                    >
+                      @if (scene.candidates) {
+                        @for (candidate of scene.candidates; track candidate.video?.url) {
+                          @if (candidate.isArchived) {
+                            <div
+                              class="video-item archived"
+                              (click)="selectCandidate(scene, $index)"
+                              [class.selected]="scene.selectedCandidateIndex === $index"
+                              style="opacity: 0.5"
+                            >
+                              <div
+                                class="video-thumbnail"
+                                [style.aspect-ratio]="previewAspectRatio()"
+                              >
+                                <button
+                                  mat-icon-button
+                                  class="archive-btn"
+                                  (click)="toggleArchive($event, scene, $index)"
+                                  matTooltip="Restore Candidate"
+                                >
+                                  <mat-icon>unarchive</mat-icon>
+                                </button>
+                                <video
+                                  #archivedVideoPlayer
+                                  [src]="candidate.video?.url"
+                                  [muted]="true"
+                                  alt="Archived Candidate Preview"
+                                  loop
+                                  matTooltip="Preview: 2x speed"
+                                  matTooltipPosition="left"
+                                  (mouseenter)="
+                                    archivedVideoPlayer.playbackRate = 2; archivedVideoPlayer.play()
+                                  "
+                                  (mouseleave)="
+                                    archivedVideoPlayer.pause(); archivedVideoPlayer.currentTime = 0
+                                  "
+                                ></video>
+                              </div>
+                              <div class="video-info">
+                                <div class="video-chip">Run {{ candidate.runNumber }}</div>
+                                @if (candidate.trim && candidate.trim.start !== undefined) {
+                                  <div class="video-chip">
+                                    <mat-icon>content_cut</mat-icon>
+                                    {{
+                                      (candidate.trim.end ?? candidate.durationSeconds) -
+                                        candidate.trim.start | number: '1.2-2'
+                                    }}s
+                                  </div>
+                                }
+                                <div class="video-chip">{{ candidate.durationSeconds }}s</div>
+                              </div>
+                            </div>
+                          }
+                        }
+                      }
+                    </div>
+                  </mat-expansion-panel>
+                } @else {
+                  <div class="empty-state">No videos yet</div>
+                }
+              </div>
+            }
+          </div>
+
+          <!-- Center Column: Preview & Prompt -->
+          <div class="column main-preview">
+            <div class="preview-wrapper">
+              <div class="preview-area">
+                @if (
+                  this.config.isGeneratedScene(scene) && this.selectedCandidate();
+                  as candidate
+                ) {
+                  <div class="video-container" [style.aspect-ratio]="previewAspectRatio()">
+                    <video
+                      #mainVideo
+                      [src]="candidate.video?.url"
+                      (timeupdate)="onVideoTimeUpdate()"
+                      (loadedmetadata)="onVideoLoadedMetadata()"
+                      (ended)="onVideoEnded()"
+                      class="preview-video"
+                      [muted]="isMuted()"
+                      [volume]="videoVolume()"
+                      loop
+                    ></video>
+
+                    <div class="video-overlay" (click)="toggleVideoPlay()">
+                      <div class="video-controls" (click)="$event.stopPropagation()">
+                        <div class="controls-row">
+                          <button mat-icon-button (click)="toggleVideoPlay()">
+                            <mat-icon>{{ isVideoPlaying() ? 'pause' : 'play_arrow' }}</mat-icon>
+                          </button>
+
+                          <div class="time-group">
+                            @if (trimBySceneType()) {
+                              <div class="trimmed-info">
+                                Trimmed: {{ trimmedDuration() | number: '1.2-2' }}s
+                              </div>
+                            }
+                            <span class="time-display">
+                              {{ currentPlaybackTime() * 1000 | date: 'mm:ss' }} /
+                              {{ videoDuration() * 1000 | date: 'mm:ss' }}
+                            </span>
+                          </div>
+
+                          <div class="timeline-container" (click)="seekVideo($event)">
+                            <div class="timeline-track" #timelineTrack>
+                              <div class="track-background"></div>
+
+                              <div
+                                class="progress-bar"
+                                [style.left.%]="trimStartPercent()"
+                                [style.width.%]="progressWidthPercent()"
+                              ></div>
+                              <div
+                                class="trim-highlight"
+                                [style.left.%]="trimStartPercent()"
+                                [style.width.%]="trimWidthPercent()"
+                              ></div>
+                              <div
+                                class="trim-handle start"
+                                [style.left.%]="trimStartPercent()"
+                                (mousedown)="startDraggingTrim($event, 'start')"
+                                (click)="$event.stopPropagation()"
+                              ></div>
+                              <div
+                                class="trim-handle end"
+                                [style.left.%]="trimEndPercent()"
+                                (mousedown)="startDraggingTrim($event, 'end')"
+                                (click)="$event.stopPropagation()"
+                              ></div>
+                            </div>
+                          </div>
+
+                          <div class="volume-controls">
+                            <button mat-icon-button (click)="isMuted.set(!isMuted())">
+                              <mat-icon>{{
+                                isMuted() || videoVolume() == 0 ? 'volume_off' : 'volume_up'
+                              }}</mat-icon>
+                            </button>
+                            <div class="slider-popup">
+                              <mat-slider class="volume-slider" min="0" max="1" step="0.05">
+                                <input
+                                  matSliderThumb
+                                  [value]="isMuted() ? 0 : videoVolume()"
+                                  (input)="changeVolume($event)"
+                                />
+                              </mat-slider>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                } @else if (this.config.isProvidedVideoScene(scene)) {
+                  @if (scene.video) {
+                    <div class="video-container" [style.aspect-ratio]="previewAspectRatio()">
+                      <video
+                        #mainVideo
+                        [src]="scene.video.url"
+                        [muted]="isMuted()"
+                        [volume]="videoVolume()"
+                        (timeupdate)="onVideoTimeUpdate()"
+                        (loadedmetadata)="onVideoLoadedMetadata()"
+                        (ended)="onVideoEnded()"
+                        class="preview-video"
+                        loop
+                      ></video>
+
+                      <div class="video-overlay" (click)="toggleVideoPlay()">
+                        <div class="video-controls" (click)="$event.stopPropagation()">
+                          <div class="controls-row">
+                            <button mat-icon-button (click)="toggleVideoPlay()">
+                              <mat-icon>{{ isVideoPlaying() ? 'pause' : 'play_arrow' }}</mat-icon>
+                            </button>
+
+                            <div class="time-group">
+                              @if (trimBySceneType()) {
+                                <div class="trimmed-info">
+                                  Trimmed: {{ trimmedDuration() | number: '1.2-2' }}s
+                                </div>
+                              }
+                              <span class="time-display">
+                                {{ currentPlaybackTime() * 1000 | date: 'mm:ss' }} /
+                                {{ videoDuration() * 1000 | date: 'mm:ss' }}
+                              </span>
+                            </div>
+
+                            <div class="timeline-container" (click)="seekVideo($event)">
+                              <div class="timeline-track" #timelineTrack>
+                                <div class="track-background"></div>
+
+                                <div
+                                  class="progress-bar"
+                                  [style.left.%]="trimStartPercent()"
+                                  [style.width.%]="progressWidthPercent()"
+                                ></div>
+                                <div
+                                  class="trim-highlight"
+                                  [style.left.%]="trimStartPercent()"
+                                  [style.width.%]="trimWidthPercent()"
+                                ></div>
+                                <div
+                                  class="trim-handle start"
+                                  [style.left.%]="trimStartPercent()"
+                                  (mousedown)="startDraggingTrim($event, 'start')"
+                                  (click)="$event.stopPropagation()"
+                                ></div>
+                                <div
+                                  class="trim-handle end"
+                                  [style.left.%]="trimEndPercent()"
+                                  (mousedown)="startDraggingTrim($event, 'end')"
+                                  (click)="$event.stopPropagation()"
+                                ></div>
+                              </div>
+                            </div>
+
+                            <div class="volume-controls">
+                              <button mat-icon-button (click)="isMuted.set(!isMuted())">
+                                <mat-icon>{{
+                                  isMuted() || videoVolume() == 0 ? 'volume_off' : 'volume_up'
+                                }}</mat-icon>
+                              </button>
+                              <div class="slider-popup">
+                                <mat-slider class="volume-slider" min="0" max="1" step="0.05">
+                                  <input
+                                    matSliderThumb
+                                    [value]="isMuted() ? 0 : videoVolume()"
+                                    (input)="changeVolume($event)"
+                                  />
+                                </mat-slider>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  } @else {
+                    <mat-icon>upload</mat-icon>
+                    <div class="placeholder-text">Video is uploading...</div>
+                  }
+                } @else {
+                  <mat-icon>videocam</mat-icon>
+                  <div class="placeholder-text">Select a video to preview</div>
+                }
+              </div>
+            </div>
+
+            <div class="controls-area">
+              @if (this.config.isGeneratedScene(scene) || this.config.isProvidedVideoScene(scene)) {
+                <div class="trim-controls">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Trim start</mat-label>
+                    <input
+                      #trimStartModel="ngModel"
+                      matInput
+                      step="0.005"
+                      min="0"
+                      [max]="videoDuration()"
+                      type="number"
+                      [ngModel]="trimStart()"
+                      (ngModelChange)="seekTo($event); updateTrim({start: $event})"
+                      (blur)="trimStartModel.control.setValue(trimStart())"
+                    />
+                    <button
+                      mat-icon-button
+                      matSuffix
+                      matTooltip="Copy current time"
+                      (click)="updateTrim({start: currentPlaybackTime()})"
+                      matTooltipPosition="above"
+                    >
+                      <mat-icon>access_time</mat-icon>
+                    </button>
+                  </mat-form-field>
+                  <mat-form-field appearance="outline">
+                    <mat-label>Trim end</mat-label>
+                    <input
+                      #trimEndModel="ngModel"
+                      matInput
+                      step="0.005"
+                      min="0"
+                      [max]="videoDuration()"
+                      type="number"
+                      [ngModel]="trimEnd()"
+                      (ngModelChange)="seekTo($event); updateTrim({end: $event})"
+                      (blur)="trimEndModel.control.setValue(trimEnd())"
+                    />
+                    <button
+                      mat-icon-button
+                      matSuffix
+                      matTooltip="Copy current time"
+                      (click)="updateTrim({end: currentPlaybackTime()})"
+                      matTooltipPosition="above"
+                    >
+                      <mat-icon>access_time</mat-icon>
+                    </button>
+                  </mat-form-field>
+                </div>
+              }
+              @if (this.config.isGeneratedScene(scene)) {
+                <!-- Prompt Input -->
+                <div class="prompt-box">
+                  <mat-form-field appearance="outline">
+                    <mat-label>Prompt</mat-label>
+                    <textarea
+                      matInput
+                      placeholder="Describe your video..."
+                      [(ngModel)]="scene.prompt"
+                      (ngModelChange)="updateScenes()"
+                    ></textarea>
+                  </mat-form-field>
+                </div>
+              }
+            </div>
+          </div>
+
+          <!-- Right Column: Settings -->
+          @if (this.config.isGeneratedScene(scene)) {
+            <div class="column right-sidebar">
+              <div class="settings-content">
+                <button
+                  mat-flat-button
+                  color="primary"
+                  [disabled]="!scene.prompt || areCandidatesGenerating(scene.id)"
+                  (click)="generateCandidates()"
+                >
+                  @if (areCandidatesGenerating(scene.id)) {
+                    <span class="button-content">
+                      <mat-spinner diameter="18" strokeWidth="2"></mat-spinner>
+                      <span>Generating...</span>
+                    </span>
+                  } @else {
+                    <span class="button-content">
+                      <mat-icon>movie_filter</mat-icon>
+                      <span>Generate Candidates</span>
+                    </span>
+                  }
+                </button>
+                <!-- Reference Image -->
+                @if (this.config.isGeneratedScene(scene)) {
+                  <div class="setting-group">
+                    <span class="subtitle">Reference Image</span>
+                    <div
+                      class="reference-image-container"
+                      [style.aspect-ratio]="previewAspectRatio()"
+                    >
+                      @if (scene.referenceImage) {
+                        <div class="reference-image-preview">
+                          <img [src]="scene.referenceImage.url" alt="Reference Image" />
+                          <button
+                            mat-icon-button
+                            class="remove-image-btn"
+                            (click)="removeReferenceImage()"
+                            title="Remove image"
+                          >
+                            <mat-icon>close</mat-icon>
+                          </button>
+                        </div>
+                      } @else {
+                        <div
+                          class="upload-area"
+                          (click)="fileInput.click()"
+                          (dragover)="onDragOver($event)"
+                          (drop)="onDrop($event)"
+                        >
+                          <div class="upload-content">
+                            <mat-icon class="upload-icon">upload</mat-icon>
+                            <p>Drag & drop or click to upload</p>
+                          </div>
+                          <input
+                            #fileInput
+                            type="file"
+                            accept="image/*"
+                            style="display: none"
+                            (change)="onFileSelected($event)"
+                          />
+                        </div>
+                      }
+                    </div>
+                  </div>
+                }
+
+                <!-- Model -->
+                <div class="setting-group">
+                  <span class="subtitle">Model</span>
+                  <mat-form-field
+                    appearance="outline"
+                    subscriptSizing="dynamic"
+                    style="width: 100%"
+                  >
+                    <mat-select
+                      [ngModel]="config.projectConfig.value().model"
+                      (ngModelChange)="config.updateProjectConfig({model: $event})"
+                    >
+                      @for (model of config.VIDEO_GENERATION_MODELS; track model) {
+                        <mat-option [value]="model">{{ model }}</mat-option>
+                      }
+                    </mat-select>
+                  </mat-form-field>
+                </div>
+
+                <!-- Number of candidates -->
+                <div class="setting-group">
+                  <div style="display: flex; justify-content: space-between">
+                    <span class="subtitle">Number of candidates</span>
+                    <span class="subtitle">{{
+                      config.projectConfig.value().numberOfCandidates
+                    }}</span>
+                  </div>
+                  <mat-slider min="1" max="4" step="1" discrete showTickMarks>
+                    <input
+                      matSliderThumb
+                      [ngModel]="config.projectConfig.value().numberOfCandidates"
+                      (ngModelChange)="config.updateProjectConfig({numberOfCandidates: $event})"
+                    />
+                  </mat-slider>
+                </div>
+
+                <!-- Video duration -->
+                <div class="setting-group">
+                  <div style="display: flex; justify-content: space-between">
+                    <span class="subtitle">Candidate duration</span>
+                    <span class="subtitle" style="text-transform: none"
+                      >{{ config.projectConfig.value().candidateDurationSeconds }}s</span
+                    >
+                  </div>
+                  <mat-slider min="4" max="8" step="2" discrete showTickMarks>
+                    <input
+                      matSliderThumb
+                      [ngModel]="config.projectConfig.value().candidateDurationSeconds"
+                      (ngModelChange)="
+                        config.updateProjectConfig({candidateDurationSeconds: $event})
+                      "
+                    />
+                  </mat-slider>
+                </div>
+
+                <!-- Audio -->
+                <div class="setting-group">
+                  <div class="audio-toggle">
+                    <div style="display: flex; align-items: center; gap: 8px">
+                      <mat-icon class="setting-icon">music_note</mat-icon>
+                      <span class="subtitle">Generate audio</span>
+                    </div>
+                    <mat-slide-toggle
+                      color="primary"
+                      [ngModel]="config.projectConfig.value().generateAudio"
+                      (ngModelChange)="config.updateProjectConfig({generateAudio: $event})"
+                    ></mat-slide-toggle>
+                  </div>
+                </div>
+              </div>
+            </div>
+          }
+        }
+      </div>
+    </div>
+  } @else {
+    <div class="empty-storyboard-state">
+      <mat-icon>videocam</mat-icon>
+      <div class="message">No scenes. Add one to start.</div>
+      <button mat-flat-button color="primary" (click)="addScene()">Add Scene</button>
+    </div>
+  }
+}
