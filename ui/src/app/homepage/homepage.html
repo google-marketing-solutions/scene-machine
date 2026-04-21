@@ -95,16 +95,18 @@
                   <mat-icon>movie</mat-icon>
                 </div>
               }
-              <button
-                mat-icon-button
-                class="delete-project-btn"
-                title="Delete Project"
-                (click)="
-                  $event.preventDefault(); $event.stopPropagation(); deleteProject(project.id)
-                "
-              >
-                <mat-icon>delete</mat-icon>
-              </button>
+              @if (project.createdBy === userEmail()) {
+                <button
+                  mat-icon-button
+                  class="delete-project-btn"
+                  title="Delete Project"
+                  (click)="
+                    $event.preventDefault(); $event.stopPropagation(); deleteProject(project.id)
+                  "
+                >
+                  <mat-icon>delete</mat-icon>
+                </button>
+              }
             </div>
             <mat-card-content>
               <h3 class="project-title">{{ project.name || 'Untitled Project' }}</h3>

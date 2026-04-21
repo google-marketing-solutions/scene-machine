@@ -23,6 +23,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import {Auth} from '@angular/fire/auth';
 import {FormsModule} from '@angular/forms';
 import {MatButtonModule} from '@angular/material/button';
 import {MatButtonToggleModule} from '@angular/material/button-toggle';
@@ -95,6 +96,12 @@ export class Setup {
   private readonly snackBar = inject(MatSnackBar);
   readonly config = inject(ConfigService);
   readonly templatesService = inject(TemplatesService);
+  readonly auth = inject(Auth);
+
+  userEmail = computed(() => this.auth.currentUser?.email ?? null);
+  createdByEmail = computed(
+    () => this.config.projectConfig.value().createdBy || this.userEmail(),
+  );
 
   creationMode = signal<'ai' | 'manual'>('ai');
 

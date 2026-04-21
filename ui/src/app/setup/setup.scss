@@ -779,6 +779,11 @@
       box-shadow: 0 8px 24px
         color-mix(in srgb, var(--mat-sys-error) 40%, transparent);
     }
+
+    &:disabled {
+      opacity: 0.3;
+      pointer-events: auto;
+    }
   }
 
   .generate-btn {

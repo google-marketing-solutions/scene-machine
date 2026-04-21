@@ -383,6 +383,7 @@
           mat-flat-button
           class="delete-project-btn"
           title="Delete Project"
+          [disabled]="userEmail() !== createdByEmail()"
           (click)="deleteProject()"
         >
           <mat-icon>delete</mat-icon>
