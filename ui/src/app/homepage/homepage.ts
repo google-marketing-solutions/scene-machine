@@ -27,6 +27,7 @@ import {MatCardModule} from '@angular/material/card';
 import {MatDialog, MatDialogModule} from '@angular/material/dialog';
 import {MatIconModule} from '@angular/material/icon';
 import {MatSlideToggleModule} from '@angular/material/slide-toggle';
+import {MatTooltipModule} from '@angular/material/tooltip';
 import {RouterModule} from '@angular/router';
 import {
   ConfigService,
@@ -48,6 +49,7 @@ import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialo
     MatSlideToggleModule,
     DatePipe,
     MatDialogModule,
+    MatTooltipModule,
   ],
   templateUrl: './homepage.html',
   styleUrl: './homepage.scss',

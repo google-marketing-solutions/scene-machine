@@ -22,137 +22,107 @@
     </p>
   </div>
 
-  <div class="homepage-container">
-    <a routerLink="/generate/ai" class="card-link">
-      <mat-card class="action-card" appearance="outlined">
-        <div class="card-glow"></div>
-        <mat-card-header>
-          <mat-icon class="card-icon">add_circle</mat-icon>
-          <mat-card-title>New Project</mat-card-title>
-        </mat-card-header>
-        <mat-card-content>
-          <p>Start from scratch or use AI guidance to bring your next cinematic vision to life</p>
-        </mat-card-content>
-      </mat-card>
-    </a>
-
-    <a routerLink="/templates" class="card-link">
-      <mat-card class="action-card" appearance="outlined">
-        <div class="card-glow"></div>
-        <mat-card-header>
-          <mat-icon class="card-icon">feed</mat-icon>
-          <mat-card-title>Creative Templates</mat-card-title>
-        </mat-card-header>
-        <mat-card-content>
-          <p>
-            Browse, edit, and organize your creative templates for consistent and fast production
-          </p>
-        </mat-card-content>
-      </mat-card>
-    </a>
-  </div>
-
   <div class="projects-section">
     <div class="projects-header">
-      <h2>Projects</h2>
       <mat-slide-toggle [checked]="myProjectsOnly()" (change)="toggleFilter($event.checked)">
         My projects only
       </mat-slide-toggle>
     </div>
+    <div class="projects-grid">
+      <a routerLink="/generate/ai" class="card-link">
+        <mat-card class="action-card" appearance="outlined">
+          <div class="card-glow"></div>
+          <mat-card-header>
+            <mat-icon class="card-icon">add_circle</mat-icon>
+            <mat-card-title>New Project</mat-card-title>
+          </mat-card-header>
+          <mat-card-content>
+            <p>Start from scratch or use AI guidance to bring your next cinematic vision to life</p>
+          </mat-card-content>
+        </mat-card>
+      </a>
 
-    @if (projects().length > 0) {
-      <div class="projects-grid">
-        @for (project of projects(); track project.id) {
-          <a
-            [routerLink]="[project.id, 'storyboard']"
-            class="project-card-link"
-            [class.is-vertical]="getAspectRatio(project) === '9/16'"
-          >
-            <mat-card class="project-card" appearance="outlined">
-              <div
-                class="project-thumbnail"
-                #projectThumbnail
-                [style.aspect-ratio]="getAspectRatio(project)"
-              >
-                @let thumb = getThumbnailData(project);
+      @for (project of projects(); track project.id) {
+        <a
+          [routerLink]="[project.id, 'storyboard']"
+          class="project-card-link"
+          [class.is-vertical]="getAspectRatio(project) === '9/16'"
+        >
+          <mat-card class="project-card" appearance="outlined">
+            <div
+              class="project-thumbnail"
+              #projectThumbnail
+              [style.aspect-ratio]="getAspectRatio(project)"
+            >
+              @let thumb = getThumbnailData(project);
 
-                @if (thumb.lowQualityThumbnail) {
-                  <img
-                    [src]="thumb.lowQualityThumbnail"
-                    class="low-quality-thumb"
-                    alt="Thumbnail"
-                  />
-                }
+              @if (thumb.lowQualityThumbnail) {
+                <img [src]="thumb.lowQualityThumbnail" class="low-quality-thumb" alt="Thumbnail" />
+              }
 
-                @if (thumb.highQualityThumbnail) {
-                  <img
-                    [src]="thumb.highQualityThumbnail"
-                    class="high-res-img"
-                    #highResImg
-                    (load)="
-                      highResImg.classList.add('loaded');
-                      projectThumbnail.classList.add('high-res-loaded')
-                    "
-                    alt="Thumbnail"
-                  />
-                }
-
-                <!-- Fallback 1: Reference image -->
-                @if (thumb.showReference) {
-                  <img [src]="thumb.referenceImage" alt="Thumbnail" />
-                }
-
-                <!-- Fallback 2: Video -->
-                @if (thumb.showVideo) {
-                  <video
-                    [src]="thumb.videoUrl"
-                    muted
-                    loop
-                    onmouseover="this.play()"
-                    onmouseout="this.pause()"
-                  ></video>
-                }
-
-                <!-- Fallback 3: Placeholder -->
-                @if (thumb.showPlaceholder) {
-                  <div class="placeholder-thumbnail">
-                    <mat-icon>movie</mat-icon>
-                  </div>
-                }
-                <button
-                  mat-icon-button
-                  class="delete-project-btn"
-                  title="Delete Project"
-                  (click)="
-                    $event.preventDefault(); $event.stopPropagation(); deleteProject(project.id)
+              @if (thumb.highQualityThumbnail) {
+                <img
+                  [src]="thumb.highQualityThumbnail"
+                  class="high-res-img"
+                  #highResImg
+                  (load)="
+                    highResImg.classList.add('loaded');
+                    projectThumbnail.classList.add('high-res-loaded')
                   "
-                >
-                  <mat-icon>delete</mat-icon>
-                </button>
-              </div>
-              <mat-card-content>
-                <h3 class="project-title">{{ project.name || 'Untitled Project' }}</h3>
-                <div class="last-edited">
-                  <span class="edit-date"
-                    >Last edit: {{ project.lastEdited | date: 'mediumDate' }}</span
-                  >
-                  @if (!myProjectsOnly() && project.createdBy) {
-                    <span class="avatar-wrapper">
-                      <mat-icon class="tiny-avatar">account_circle</mat-icon>
-                      <span class="username">{{ getUsername(project.createdBy) }}</span>
-                    </span>
-                  }
+                  alt="Thumbnail"
+                />
+              }
+
+              <!-- Fallback 1: Reference image -->
+              @if (thumb.showReference) {
+                <img [src]="thumb.referenceImage" alt="Thumbnail" />
+              }
+
+              <!-- Fallback 2: Video -->
+              @if (thumb.showVideo) {
+                <video
+                  [src]="thumb.videoUrl"
+                  muted
+                  loop
+                  onmouseover="this.play()"
+                  onmouseout="this.pause()"
+                ></video>
+              }
+
+              <!-- Fallback 3: Placeholder -->
+              @if (thumb.showPlaceholder) {
+                <div class="placeholder-thumbnail">
+                  <mat-icon>movie</mat-icon>
                 </div>
-              </mat-card-content>
-            </mat-card>
-          </a>
-        }
-      </div>
-    } @else {
-      <div class="empty-projects-state">
-        <h3>No projects found</h3>
-        <p>Try turning off the filter or creating a new project above!</p>
-      </div>
-    }
+              }
+              <button
+                mat-icon-button
+                class="delete-project-btn"
+                title="Delete Project"
+                (click)="
+                  $event.preventDefault(); $event.stopPropagation(); deleteProject(project.id)
+                "
+              >
+                <mat-icon>delete</mat-icon>
+              </button>
+            </div>
+            <mat-card-content>
+              <h3 class="project-title">{{ project.name || 'Untitled Project' }}</h3>
+              <div class="last-edited">
+                <span class="edit-date"
+                  >Last edit: {{ project.lastEdited | date: 'mediumDate' }}</span
+                >
+                @if (!myProjectsOnly() && project.createdBy) {
+                  <span class="avatar-wrapper">
+                    <mat-icon class="tiny-avatar">account_circle</mat-icon>
+                    <span class="username">{{ getUsername(project.createdBy) }}</span>
+                  </span>
+                }
+              </div>
+            </mat-card-content>
+          </mat-card>
+        </a>
+      }
+    </div>
   </div>
 </div>
