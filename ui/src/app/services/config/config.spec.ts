@@ -19,6 +19,7 @@ import {Auth} from '@angular/fire/auth';
 import {Firestore} from '@angular/fire/firestore';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {ConfigService} from './config';
+import '../../testing/mocks/match-media.mock';
 
 describe('Config', () => {
   let service: ConfigService;

@@ -20,6 +20,7 @@ import {Firestore} from '@angular/fire/firestore';
 import {provideRouter} from '@angular/router';
 import {beforeEach, describe, expect, it} from 'vitest';
 import {App} from './app';
+import './testing/mocks/match-media.mock';
 
 describe('App', () => {
   beforeEach(async () => {

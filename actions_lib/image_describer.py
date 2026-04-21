@@ -34,7 +34,6 @@ def describe_image(
   Returns:
     a JSON object with a description of the image.
   """
-  # print(f"Describing: {image_path} ({guidance})")
   if guidance:
     guidance_prompt = (
         f"\n\nThis identifies the focus object of the image: {guidance}"

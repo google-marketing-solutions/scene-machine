@@ -21,6 +21,7 @@ import {provideRouter} from '@angular/router';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {routes} from '../app.routes';
 import {Generate} from './generate';
+import '../testing/mocks/match-media.mock';
 
 describe('Generate', () => {
   let component: Generate;
