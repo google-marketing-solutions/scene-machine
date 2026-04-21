@@ -23,6 +23,7 @@ import {RouterTestingHarness} from '@angular/router/testing';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {routes} from '../app.routes';
 import {Setup} from './setup';
+import '../testing/mocks/match-media.mock';
 
 describe('Setup', () => {
   let component: Setup;
