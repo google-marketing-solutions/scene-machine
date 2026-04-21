@@ -22,7 +22,6 @@
 } @else {
   <div class="setup-container">
     <div class="header-section">
-      <p class="project-label">PROJECT NAME</p>
       <mat-form-field appearance="fill" class="project-title-field">
         <input
           matInput
@@ -37,6 +36,7 @@
           <mat-button-toggle-group
             [ngModel]="config.projectConfig.value().aspectRatio"
             (ngModelChange)="aspectRatioUpdated($event)"
+            [hideSingleSelectionIndicator]="true"
             [disabled]="hasCandidates()"
             name="aspectRatio"
             aria-label="Aspect Ratio"
@@ -139,232 +139,241 @@
       <div class="section source-images">
         <div class="section-header">
           <div class="step-badge">1</div>
-          <span>Specify your Product(s) <span class="required-text">*</span></span>
+          <h2>Products & Services</h2>
         </div>
-
-        <mat-accordion class="product-accordion" multi>
-          @for (product of config.projectConfig.value().inputConfig.products; track product.id) {
-            <mat-expansion-panel [expanded]="true">
-              <mat-expansion-panel-header>
-                <mat-panel-title>
-                  <span class="product-name">{{ product.name }}</span>
-                </mat-panel-title>
-                <mat-panel-description>
-                  <span class="image-count">{{ product.images.length }} images</span>
-                  <button
-                    mat-icon-button
-                    class="delete-product-btn"
-                    (click)="$event.stopPropagation(); removeProduct(product.id)"
-                  >
-                    <mat-icon>delete</mat-icon>
-                  </button>
-                </mat-panel-description>
-              </mat-expansion-panel-header>
-
-              <div class="product-content-split">
-                <div class="left-part">
-                  <div class="subsection-header has-bottom-margin">
-                    <mat-icon>image</mat-icon>
-                    <span>Product Images</span>
-                  </div>
-
-                  <div
-                    class="upload-area"
-                    (dragover)="onDragOver($event)"
-                    (drop)="onDrop($event, product.id)"
-                    (click)="fileInput.click()"
-                  >
-                    <input
-                      #fileInput
-                      type="file"
-                      multiple
-                      accept="image/*"
-                      class="hidden-file-input"
-                      (change)="onFileSelected($event, product.id)"
-                    />
-
-                    @if (product.images.length === 0) {
-                      <div class="upload-content">
-                        <mat-icon class="upload-icon">upload</mat-icon>
-                        <p>Drag & drop images here</p>
-                        <p class="browse">or click to browse</p>
-                        <p class="limit-text">Max file size: {{ MAX_FILE_SIZE_MB }}MB</p>
-                      </div>
-                    } @else {
-                      <div class="images-grid">
-                        @for (image of product.images; track $index; let i = $index) {
-                          <div
-                            class="image-item"
-                            [style.aspect-ratio]="previewAspectRatio()"
-                            (click)="$event.stopPropagation()"
-                          >
-                            <img
-                              [src]="image.url"
-                              (load)="
-                                (image.heightPixels === undefined ||
-                                  image.widthPixels === undefined) &&
-                                  imageLoaded($event, product.id, i)
-                              "
-                            />
-                            <button
-                              class="remove-image-btn"
-                              mat-icon-button
-                              (click)="removeImage(product.id, i)"
-                            >
-                              <mat-icon>close</mat-icon>
-                            </button>
-                            @if (
-                              image.aspectRatioDeviation !== undefined &&
-                              image.aspectRatioDeviation > ASPECT_RATIO_DEVIATION_THRESHOLD
-                            ) {
-                              <mat-icon class="aspect-ratio-icon" matTooltip="Aspect ratio mismatch"
-                                >aspect_ratio</mat-icon
-                              >
-                            }
-                          </div>
-                        }
-                        <div
-                          class="add-more-trigger"
-                          [style.aspect-ratio]="previewAspectRatio()"
-                          (click)="fileInput.click(); $event.stopPropagation()"
-                        >
-                          <mat-icon>add</mat-icon>
-                          <span>Add more</span>
-                        </div>
-                      </div>
-                    }
-                  </div>
-                </div>
-
-                <div class="right-part">
-                  <div class="subsection-header has-bottom-margin">
-                    <mat-icon>description</mat-icon>
-                    <span
-                      >Product Description. Max length:
-                      {{ MAX_PRODUCT_DESCRIPTION_LENGTH }} characters (optional)</span
+        <div class="section-content">
+          <mat-accordion class="product-accordion" multi>
+            @for (product of config.projectConfig.value().inputConfig.products; track product.id) {
+              <mat-expansion-panel [expanded]="true">
+                <mat-expansion-panel-header>
+                  <mat-panel-title>
+                    <span class="product-name">{{ product.name }}</span>
+                  </mat-panel-title>
+                  <mat-panel-description>
+                    <span class="image-count">{{ product.images.length }} images</span>
+                    <button
+                      mat-icon-button
+                      class="delete-product-btn"
+                      (click)="$event.stopPropagation(); removeProduct(product.id)"
                     >
-                  </div>
-                  <mat-form-field appearance="outline" class="guidance-field">
-                    <textarea
-                      matInput
-                      placeholder="Describe your product: USPs, materials, benefits, dimensions, etc..."
-                      [ngModel]="product.description"
-                      (ngModelChange)="updateProductDescriptionText(product.id, $event)"
-                      maxlength="{{ MAX_PRODUCT_DESCRIPTION_LENGTH }}"
-                    ></textarea>
-                  </mat-form-field>
-                  <mat-hint>
-                    Characters used: {{ (product?.description || '').length }} /
-                    {{ MAX_PRODUCT_DESCRIPTION_LENGTH }}
-                  </mat-hint>
-                </div>
-              </div>
-            </mat-expansion-panel>
-          }
-        </mat-accordion>
+                      <mat-icon>delete</mat-icon>
+                    </button>
+                  </mat-panel-description>
+                </mat-expansion-panel-header>
 
-        <button mat-button class="add-product-btn" (click)="$event.stopPropagation(); addProduct()">
-          <mat-icon>add</mat-icon>
-          Add Product
-        </button>
+                <div class="product-content-split">
+                  <div class="left-part">
+                    <div class="subsection-header has-bottom-margin">
+                      <span>Image(s)</span>
+                    </div>
+
+                    <div
+                      class="upload-area"
+                      (dragover)="onDragOver($event)"
+                      (drop)="onDrop($event, product.id)"
+                      (click)="fileInput.click()"
+                    >
+                      <input
+                        #fileInput
+                        type="file"
+                        multiple
+                        accept="image/*"
+                        class="hidden-file-input"
+                        (change)="onFileSelected($event, product.id)"
+                      />
+
+                      @if (product.images.length === 0) {
+                        <div class="upload-content">
+                          <mat-icon class="upload-icon">upload</mat-icon>
+                          <p>Drag & drop images here</p>
+                          <p class="browse">or click to browse</p>
+                          <p class="limit-text">Max file size: {{ MAX_FILE_SIZE_MB }}MB</p>
+                        </div>
+                      } @else {
+                        <div class="images-grid">
+                          @for (image of product.images; track $index; let i = $index) {
+                            <div
+                              class="image-item"
+                              [style.aspect-ratio]="previewAspectRatio()"
+                              (click)="$event.stopPropagation()"
+                            >
+                              <img
+                                [src]="image.url"
+                                (load)="
+                                  (image.heightPixels === undefined ||
+                                    image.widthPixels === undefined) &&
+                                    imageLoaded($event, product.id, i)
+                                "
+                              />
+                              <button
+                                class="remove-image-btn"
+                                mat-icon-button
+                                (click)="removeImage(product.id, i)"
+                              >
+                                <mat-icon>close</mat-icon>
+                              </button>
+                              @if (
+                                image.aspectRatioDeviation !== undefined &&
+                                image.aspectRatioDeviation > ASPECT_RATIO_DEVIATION_THRESHOLD
+                              ) {
+                                <mat-icon
+                                  class="aspect-ratio-icon"
+                                  matTooltip="Aspect ratio mismatch"
+                                  >aspect_ratio</mat-icon
+                                >
+                              }
+                            </div>
+                          }
+                          <div
+                            class="add-more-trigger"
+                            [style.aspect-ratio]="previewAspectRatio()"
+                            (click)="fileInput.click(); $event.stopPropagation()"
+                          >
+                            <mat-icon>add</mat-icon>
+                            <span>Add more</span>
+                          </div>
+                        </div>
+                      }
+                    </div>
+                  </div>
+
+                  <div class="right-part">
+                    <div class="subsection-header has-bottom-margin">
+                      <span>Description (optional)</span>
+                    </div>
+                    <mat-form-field appearance="outline" class="guidance-field">
+                      <textarea
+                        matInput
+                        placeholder="Description (USPs, materials, benefits, dimensions, etc...)"
+                        [ngModel]="product.description"
+                        (ngModelChange)="updateProductDescriptionText(product.id, $event)"
+                        maxlength="{{ MAX_PRODUCT_DESCRIPTION_LENGTH }}"
+                      ></textarea>
+                    </mat-form-field>
+                  </div>
+                </div>
+                <mat-hint>
+                  Characters used: {{ (product?.description || '').length }} /
+                  {{ MAX_PRODUCT_DESCRIPTION_LENGTH }}
+                </mat-hint>
+              </mat-expansion-panel>
+            }
+          </mat-accordion>
+
+          <button
+            mat-button
+            class="add-product-btn"
+            (click)="$event.stopPropagation(); addProduct()"
+          >
+            <mat-icon>add</mat-icon>
+            Add Product
+          </button>
+        </div>
       </div>
 
       <div class="section audience-market">
         <div class="section-header">
           <div class="step-badge">2</div>
-          <span>Define Audience (optional)</span>
+          <h2><span class="optional-info">Optional</span><br />Audience & Market</h2>
         </div>
-        <mat-form-field appearance="outline" class="guidance-field">
-          <textarea
-            matInput
-            placeholder="Audience, location, market, demographics, affinity groups, etc..."
-            [ngModel]="config.projectConfig.value().inputConfig.audience"
-            (ngModelChange)="updateInputConfig({audience: $event})"
-          ></textarea>
-        </mat-form-field>
+        <div class="section-content">
+          <mat-form-field appearance="outline" class="guidance-field">
+            <textarea
+              matInput
+              placeholder="Audience, location, market, demographics, affinity groups, etc..."
+              [ngModel]="config.projectConfig.value().inputConfig.audience"
+              (ngModelChange)="updateInputConfig({audience: $event})"
+            ></textarea>
+          </mat-form-field>
+        </div>
       </div>
 
       <div class="section style-guidance">
         <div class="section-header">
           <div class="step-badge">3</div>
-          <span>Provide Style (optional)</span>
+          <h2><span class="optional-info">Optional</span><br />Style</h2>
         </div>
-        <mat-form-field appearance="outline" class="guidance-field">
-          <textarea
-            matInput
-            placeholder="Corporate Identity (CI) or brand guidance. Additional visual styles or color palettes can also be described..."
-            [ngModel]="config.projectConfig.value().inputConfig.style"
-            (ngModelChange)="updateInputConfig({style: $event})"
-          ></textarea>
-        </mat-form-field>
+        <div class="section-content">
+          <mat-form-field appearance="outline" class="guidance-field">
+            <textarea
+              matInput
+              placeholder="Corporate Identity (CI) or brand guidance. Additional visual styles or color palettes can also be described..."
+              [ngModel]="config.projectConfig.value().inputConfig.style"
+              (ngModelChange)="updateInputConfig({style: $event})"
+            ></textarea>
+          </mat-form-field>
+        </div>
       </div>
 
       <div class="section creative-guidance-templates">
         <div class="section-header">
           <div class="step-badge">4</div>
-          <span>Specify Composition (optional)</span>
+          <h2><span class="optional-info">Optional</span><br />Composition</h2>
+          <span style="flex: 1"></span>
+          <a
+            mat-stroked-button
+            routerLink="/templates"
+            matTooltip="Browse, edit, and organize your creative templates for consistent and fast production"
+          >
+            <mat-icon>feed</mat-icon>
+            Creative Templates
+          </a>
         </div>
-        <div class="subsection-header">
-          <span>Select from templates or describe your own</span>
-        </div>
-        <div class="templates-carousel has-bottom-margin">
-          <button mat-icon-button (click)="moveBack()" [disabled]="!canMoveBack()">
-            <mat-icon>chevron_left</mat-icon>
-          </button>
-          <div class="templates-grid">
-            @for (template of visibleTemplates(); track template.id) {
-              <div class="template-card-wrapper">
-                <app-template-card
-                  class="selectable-template-card"
-                  [template]="template"
-                  [selected]="selectedTemplateId() === template.id"
-                  [showEditAction]="false"
-                  (click)="selectTemplate(template)"
-                ></app-template-card>
-
-                @if (selectedTemplateId() === template.id) {
-                  <div class="selected-badge">
-                    <mat-icon>check_circle</mat-icon>
-                  </div>
-                }
-              </div>
-            }
+        <div class="section-content">
+          <div class="subsection-header has-bottom-margin">
+            <span>Select from templates or describe your own</span>
           </div>
-          <button mat-icon-button (click)="moveForward()" [disabled]="!canMoveForward()">
-            <mat-icon>chevron_right</mat-icon>
-          </button>
+
+          <div class="templates-carousel">
+            <button
+              mat-icon-button
+              class="scroll-back"
+              (click)="moveBack()"
+              [disabled]="!canMoveBack()"
+            >
+              <mat-icon>chevron_left</mat-icon>
+            </button>
+            <div class="templates-grid">
+              @for (template of visibleTemplates(); track template.id) {
+                <div class="template-card-wrapper">
+                  <app-template-card
+                    class="selectable-template-card"
+                    [template]="template"
+                    [selected]="selectedTemplateId() === template.id"
+                    [showEditAction]="false"
+                    (click)="selectTemplate(template)"
+                  ></app-template-card>
+
+                  @if (selectedTemplateId() === template.id) {
+                    <div class="selected-badge">
+                      <mat-icon>check_circle</mat-icon>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+            <button
+              mat-icon-button
+              class="scroll-forward"
+              (click)="moveForward()"
+              [disabled]="!canMoveForward()"
+            >
+              <mat-icon>chevron_right</mat-icon>
+            </button>
+          </div>
         </div>
 
         <mat-divider class="section-divider"></mat-divider>
 
-        @if (selectedTemplateId() !== 'custom') {
-          <div class="guidance-header-row">
-            <div class="subsection-header">
-              <mat-icon>auto_fix_high</mat-icon>
-              <span>Composition from the template is applied</span>
-            </div>
-            <button mat-stroked-button (click)="toggleGuidanceText()">
-              <mat-icon>{{ showGuidanceText() ? 'visibility_off' : 'visibility' }}</mat-icon>
-              {{ showGuidanceText() ? 'Hide Text' : 'View / Edit Text' }}
-            </button>
-          </div>
-        } @else {
-          <div class="subsection-header has-bottom-margin">
-            <mat-icon>auto_fix_high</mat-icon>
-            <span>Custom Creative Guidance</span>
-          </div>
-        }
-
-        @if (selectedTemplateId() === 'custom' || showGuidanceText()) {
-          <mat-form-field appearance="outline" class="guidance-field">
-            <textarea
-              matInput
-              placeholder="Describe the style, mood, pacing, or specific elements you want to see in the video..."
-              [ngModel]="config.projectConfig.value().inputConfig.composition"
-              (ngModelChange)="updateInputConfig({composition: $event})"
-            ></textarea>
-          </mat-form-field>
-        }
+        <mat-form-field appearance="outline" class="guidance-field">
+          <textarea
+            matInput
+            placeholder="Describe the style, mood, pacing, or specific elements you want to see in the video..."
+            (input)="revertToCustomTemplate()"
+            [ngModel]="config.projectConfig.value().inputConfig.composition"
+            (ngModelChange)="updateInputConfig({composition: $event})"
+          ></textarea>
+        </mat-form-field>
       </div>
     }
 
@@ -387,9 +396,7 @@
         }
         <span
           [matTooltip]="
-            creationMode() === 'ai' && !hasImages()
-              ? 'Please specify at least one product image'
-              : ''
+            creationMode() === 'ai' && !hasImages() ? 'Please specify at least one image' : ''
           "
           matTooltipPosition="above"
           class="generate-wrapper"

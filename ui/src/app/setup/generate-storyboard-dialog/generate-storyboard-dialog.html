@@ -70,28 +70,30 @@
               </div>
 
               <div class="scene-content-card">
-                <div class="thumbnail-placeholder" [style.aspect-ratio]="aspectRatio">
-                  @if (scene.referenceImage) {
-                    <img [src]="scene.referenceImage.url" class="reference-image" />
-                  } @else {
-                    <mat-icon>image</mat-icon>
-                  }
+                <div class="scene-header">
+                  <h3>{{ scene.name }}</h3>
+                  <button mat-icon-button class="delete-scene-btn" (click)="removeScene(i)">
+                    <mat-icon>delete</mat-icon>
+                  </button>
                 </div>
-
-                <div class="scene-details">
-                  <div class="scene-header">
-                    <h3>{{ scene.name }}</h3>
-                    <button mat-icon-button class="delete-scene-btn" (click)="removeScene(i)">
-                      <mat-icon>delete</mat-icon>
-                    </button>
+                <div class="scene-content">
+                  <div class="thumbnail-placeholder" [style.aspect-ratio]="aspectRatio">
+                    @if (scene.referenceImage) {
+                      <img [src]="scene.referenceImage.url" class="reference-image" />
+                    } @else {
+                      <mat-icon>image</mat-icon>
+                    }
                   </div>
-                  <mat-form-field appearance="outline" class="scene-prompt">
-                    <textarea
-                      matInput
-                      [(ngModel)]="scene.prompt"
-                      placeholder="Enter scene prompt..."
-                    ></textarea>
-                  </mat-form-field>
+
+                  <div class="scene-details">
+                    <mat-form-field appearance="outline" class="scene-prompt">
+                      <textarea
+                        matInput
+                        [(ngModel)]="scene.prompt"
+                        placeholder="Enter scene prompt..."
+                      ></textarea>
+                    </mat-form-field>
+                  </div>
                 </div>
               </div>
             </div>
