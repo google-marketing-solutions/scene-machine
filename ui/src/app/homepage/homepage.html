@@ -69,19 +69,52 @@
             [class.is-vertical]="getAspectRatio(project) === '9/16'"
           >
             <mat-card class="project-card" appearance="outlined">
-              <div class="project-thumbnail" [style.aspect-ratio]="getAspectRatio(project)">
-                @let thumb = getThumbnail(project);
-                @if (thumb?.type === 'video') {
+              <div
+                class="project-thumbnail"
+                #projectThumbnail
+                [style.aspect-ratio]="getAspectRatio(project)"
+              >
+                @let thumb = getThumbnailData(project);
+
+                @if (thumb.lowQualityThumbnail) {
+                  <img
+                    [src]="thumb.lowQualityThumbnail"
+                    class="low-quality-thumb"
+                    alt="Thumbnail"
+                  />
+                }
+
+                @if (thumb.highQualityThumbnail) {
+                  <img
+                    [src]="thumb.highQualityThumbnail"
+                    class="high-res-img"
+                    #highResImg
+                    (load)="
+                      highResImg.classList.add('loaded');
+                      projectThumbnail.classList.add('high-res-loaded')
+                    "
+                    alt="Thumbnail"
+                  />
+                }
+
+                <!-- Fallback 1: Reference image -->
+                @if (thumb.showReference) {
+                  <img [src]="thumb.referenceImage" alt="Thumbnail" />
+                }
+
+                <!-- Fallback 2: Video -->
+                @if (thumb.showVideo) {
                   <video
-                    [src]="thumb?.url"
+                    [src]="thumb.videoUrl"
                     muted
                     loop
                     onmouseover="this.play()"
                     onmouseout="this.pause()"
                   ></video>
-                } @else if (thumb?.type === 'image') {
-                  <img [src]="thumb?.url" alt="Project thumbnail" />
-                } @else {
+                }
+
+                <!-- Fallback 3: Placeholder -->
+                @if (thumb.showPlaceholder) {
                   <div class="placeholder-thumbnail">
                     <mat-icon>movie</mat-icon>
                   </div>

@@ -79,20 +79,20 @@ export const VIDEO_GENERATION_MODELS = [
 ];
 
 interface GlobalConfig {
-  // Backend API
+  // BE API
   gatewayApiKey: string;
   gatewayBaseUrl: string;
 
-  // GCP
+  // gcp
   gcpLocation: string;
   gcpProject: string;
   gcsBucket: string;
 
-  // Gemini
+  // gemini
   geminiModel: string;
   geminiLocation: string;
 
-  // Veo
+  // veo
   veoLocation: string;
   veoModel: string;
   generateAudio: boolean;
@@ -101,10 +101,10 @@ interface GlobalConfig {
   aspectRatio: AspectRatio;
   duration: number;
 
-  // Cloud Tasks
+  // cloud tasks
   tasksQueuePrefix: string;
 
-  // FFmpeg
+  // ffmpeg
   encodingSpeed: number;
   qualityLevel: number;
 }
@@ -202,6 +202,8 @@ interface Scene {
   type: 'generated' | 'video';
   transition?: string;
   transitionOverlap?: number;
+  lowQualityThumbnail?: string;
+  highQualityThumbnail?: GcsFile;
 }
 
 /**
@@ -220,6 +222,8 @@ export interface Candidate {
   resolution: Resolution;
   referenceImage?: GcsFile;
   isArchived?: boolean;
+  lowQualityThumbnail?: string;
+  highQualityThumbnail?: GcsFile;
 }
 
 /**
@@ -507,6 +511,14 @@ export class ConfigService {
   async deleteProject(projectId: string) {
     return runInInjectionContext(this.injector, async () => {
       await deleteDoc(doc(this.firestore, `projects/${projectId}`));
+    });
+  }
+
+  async updateProject(projectId: string, partial: Partial<ProjectConfig>) {
+    return runInInjectionContext(this.injector, async () => {
+      await setDoc(doc(this.firestore, `projects/${projectId}`), partial, {
+        merge: true,
+      });
     });
   }
 }

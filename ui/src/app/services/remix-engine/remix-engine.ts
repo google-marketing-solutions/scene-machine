@@ -46,6 +46,7 @@ import {
   Resolution,
   VisualOverlay,
 } from '../config/config';
+import {GenerateThumbnailService} from '../generate-thumbnail/generate-thumbnail';
 import {
   CombineVideoArrangement as CombineScenesArrangement,
   CombineScenesWorkflowParameters,
@@ -75,6 +76,7 @@ export class RemixEngineService {
   private httpClient = inject(HttpClient);
   private injector = inject(EnvironmentInjector);
   private storage = inject(Storage);
+  private thumbnailService = inject(GenerateThumbnailService);
 
   private startWorkflow(
     workflowDefinition: object,
@@ -562,6 +564,25 @@ export class RemixEngineService {
             const reference = ref(this.storage, path);
             return getDownloadURL(reference);
           });
+
+          const lowQualityThumbnail = await this.thumbnailService
+            .generateLowQualityThumbnail(url, 'video')
+            .then(blob => this.thumbnailService.toBase64(blob))
+            .then(base64 => base64)
+            .catch(e => {
+              console.log(e);
+              return '';
+            });
+          const highQualityThumbnail = await this.thumbnailService
+            .generateHighQualityThumbnail(url, 'video')
+            .then(blob => this.thumbnailService.toFile(blob))
+            .then(file => this.uploadThumbnail(file))
+            .then(resp => resp)
+            .catch(e => {
+              console.log(e);
+              return {path: '', url: ''};
+            });
+
           const newCandidate: Candidate = {
             runNumber: currentMaxRun + 1,
             durationSeconds,
@@ -570,6 +591,8 @@ export class RemixEngineService {
             generateAudio,
             resolution,
             video: {url, path},
+            lowQualityThumbnail: lowQualityThumbnail,
+            highQualityThumbnail: highQualityThumbnail,
           };
           if (scene.referenceImage) {
             newCandidate.referenceImage = {...scene.referenceImage};
@@ -657,20 +680,27 @@ export class RemixEngineService {
       if (!storyboardJsonFile) {
         throw new Error('Storyboard JSON file not found');
       }
-      const storyboardJson = await runInInjectionContext(
-        this.injector,
-        async () => {
-          const reference = ref(this.storage, storyboardJsonFile);
-          const blob = await getBlob(reference);
-          return JSON.parse(await blob.text());
-        },
-      );
 
-      if (
-        !('storyboard' in storyboardJson) ||
-        !Array.isArray(storyboardJson['storyboard'])
-      ) {
-        throw new Error('Storyboard JSON file is missing storyboard');
+      let storyboardJson;
+      try {
+        storyboardJson = await runInInjectionContext(
+          this.injector,
+          async () => {
+            const reference = ref(this.storage, storyboardJsonFile);
+            const blob = await getBlob(reference);
+            return JSON.parse(await blob.text());
+          },
+        );
+
+        if (
+          !('storyboard' in storyboardJson) ||
+          !Array.isArray(storyboardJson['storyboard'])
+        ) {
+          throw new Error('Storyboard JSON file is missing storyboard');
+        }
+      } catch (error) {
+        console.error('Failed to parse storyboard JSON:', error);
+        throw new Error('Failed to parse storyboard JSON');
       }
 
       const outpaintedImages =
@@ -722,8 +752,6 @@ export class RemixEngineService {
       if (error instanceof ProjectChangedError) {
         console.info(error.message);
         return;
-      } else if (error instanceof SyntaxError) {
-        console.error('Failed to parse storyboard JSON:', error);
       } else if (error instanceof Error) {
         console.error('Storyboard generation error:', error);
         if (executionId) {
@@ -860,14 +888,16 @@ export class RemixEngineService {
     for (const scene of validScenes) {
       let gcsVideoPath;
       let skipTime = 0;
-      const duration = this.getSceneVideoDuration(scene, skipTime);
+      let duration = 0;
       if (this.configService.isProvidedVideoScene(scene)) {
         gcsVideoPath = scene.video?.path;
         skipTime = scene.trim?.start ?? 0;
+        duration = this.getSceneVideoDuration(scene, skipTime);
       } else if (this.configService.isGeneratedScene(scene)) {
         const candidate = scene.candidates![scene.selectedCandidateIndex!];
         gcsVideoPath = candidate.video?.path;
         skipTime = candidate.trim?.start ?? 0;
+        duration = this.getSceneVideoDuration(scene, skipTime);
       }
       if (!gcsVideoPath) {
         console.log(`No video for scene ${scene.id}`);
@@ -920,13 +950,13 @@ export class RemixEngineService {
     return arrangement;
   }
 
-  async uploadMedia(media: File) {
+  async uploadMedia(media: File, path: string = 'remix-input') {
     const fileNameParts = media.name.split('.');
     const extension = fileNameParts.pop();
     const contentHash = await this.generateHash(media);
     const fileName = `${fileNameParts.join('.')}-${contentHash}.${extension}`;
     return await runInInjectionContext(this.injector, async () => {
-      const storageRef = ref(this.storage, `remix-input/${fileName}`);
+      const storageRef = ref(this.storage, `${path}/${fileName}`);
       try {
         const downloadUrl = await getDownloadURL(storageRef);
         return {
@@ -948,5 +978,9 @@ export class RemixEngineService {
         };
       }
     });
+  }
+
+  async uploadThumbnail(media: File) {
+    return this.uploadMedia(media, 'thumbnail');
   }
 }
