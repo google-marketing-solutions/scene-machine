@@ -168,8 +168,16 @@ fi
 if [[ "${1:-}" != "local" ]]; then
   export NG_CLI_ANALYTICS=ci
   echo "Deploying UI (AppEngine)"
-  (cd ui && npm install --legacy-peer-deps && npx ng build --configuration production) && (cd ui && gcloud app deploy --quiet --project $PROJECT)
-  echo "Scene Machine is now available under the following address: https://$(gcloud app describe --format='value(defaultHostname)')"
+  (
+    cd ui \
+      && npm install --legacy-peer-deps \
+      && npx ng build --configuration production
+  ) \
+    && (
+      cd ui \
+        && gcloud app deploy --quiet --project "${PROJECT}"
+    )
+  echo "Done"
 fi
 
 echo "Configuring Firebase authorized domains..."
@@ -180,4 +188,7 @@ curl -X PATCH "https://identitytoolkit.googleapis.com/v2/projects/${PROJECT}/con
   -o /dev/null \
   -d "{\"authorizedDomains\": [\"localhost\", \"$(gcloud app describe --format='value(defaultHostname)')\"]}"
 
-echo "Scene Machine UI is deployed"
+echo
+echo "Scene Machine UI is deployed, now you can open:"
+echo "https://$(gcloud app describe --format='value(defaultHostname)')"
+echo

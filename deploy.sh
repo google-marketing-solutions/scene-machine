@@ -133,6 +133,7 @@ ROLES=(
   "roles/storage.objectUser"
   "roles/artifactregistry.writer"
   "roles/logging.logWriter"
+  "roles/iam.serviceAccountUser"
 )
 for ROLE in "${ROLES[@]}"; do
   gcloud projects add-iam-policy-binding $PROJECT --member="serviceAccount:${SERVICE_ACCOUNT}" --role="$ROLE" --condition=None
