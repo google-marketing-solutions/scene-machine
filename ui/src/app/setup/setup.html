@@ -244,7 +244,7 @@
                     <mat-form-field appearance="outline" class="guidance-field">
                       <textarea
                         matInput
-                        placeholder="Description (USPs, materials, benefits, dimensions, etc...)"
+                        placeholder="Description (USPs, materials, benefits, dimensions, etc.)"
                         [ngModel]="product.description"
                         (ngModelChange)="updateProductDescriptionText(product.id, $event)"
                         maxlength="{{ MAX_PRODUCT_DESCRIPTION_LENGTH }}"
