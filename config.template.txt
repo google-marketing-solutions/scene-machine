@@ -1,14 +1,20 @@
-export PROJECT=
+# Specify values depending on your GCP set up
+export PROJECT= # your Project ID
 export REGION= # choose from: https://docs.cloud.google.com/tasks/docs/locations
-export GCS_BUCKET= # must be unique across projects
-FIRESTORE_DB=
-export FIRESTORE_DB_UI=
-ARTIFACT_REPO=
-API_GATEWAY=
+export GEMINI_REGION= # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models
+export GEMINI_MODEL= # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models#gemini-models
+export VEO_REGION= # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models
+export VEO_MODEL= # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models#veo-models
 API_GATEWAY_REGION= # europe-west1 | europe-west2 | us-central1
 APP_ENGINE_REGION= # europe-west | europe-west2/3/6 | us-central
-export TASKS_QUEUE_PREFIX=
-export GEMINI_REGION=
-export GEMINI_MODEL= # remember that models may be discontinued by Google
-export VEO_REGION=
-export VEO_MODEL= # remember that models may be discontinued by Google
+
+# Specify values. These resources will be created if they don't exist
+export GCS_BUCKET= # Must be unique across Google Cloud globally
+export FIRESTORE_DB= # Backend: Firestore database ID
+export FIRESTORE_DB_UI= # UI: Firestore database ID
+export ARTIFACT_REPO= # your Artifact Repository ID
+export API_GATEWAY= # your API Gateway ID
+
+# You can use these preset values as is or change
+export TASKS_QUEUE_PREFIX=SceneMachine- # prefix for the Cloud Tasks queue name; can contain only letters, numbers, or hyphens (-)
+export BACKEND_SERVICE_NAME=remix-engine-backend

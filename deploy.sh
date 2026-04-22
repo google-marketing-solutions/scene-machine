@@ -13,23 +13,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Generate ui/definitions/config.json for backend and frontend
+generate_config() {
+  envsubst < ui/definitions/config.template.json > ui/definitions/config.json
+}
 
 set -eu
 echo "Deploying Scene Machine... (Total runtime estimate: ≈17 minutes)"
 
 # Check config
 REQUIRED_VARS=(
-  "PROJECT"
-  "REGION"
+  "API_GATEWAY"
+  "API_GATEWAY_REGION"
+  "APP_ENGINE_REGION"
+  "ARTIFACT_REPO"
+  "BACKEND_SERVICE_NAME"
   "FIRESTORE_DB"
   "FIRESTORE_DB_UI"
   "GCS_BUCKET"
-  "ARTIFACT_REPO"
+  "GEMINI_MODEL"
+  "GEMINI_REGION"
+  "PROJECT"
+  "REGION"
   "TASKS_QUEUE_PREFIX"
+  "VEO_MODEL"
+  "VEO_REGION"
 )
 MISSING=0
 for var in "${REQUIRED_VARS[@]}"; do
-  if ! grep -qE "^(export )?${var}=[A-Za-z0-9._-]+" ./config.txt; then
+  if ! grep -qE "^(export )?${var}=[A-Za-z0-9._\$-]+" ./config.txt; then
     echo "ERROR: $var is missing, empty, or has invalid characters in config.txt"
     MISSING=$((MISSING + 1))
   fi
@@ -82,6 +94,18 @@ else
   firebase --project $PROJECT apps:create WEB $PROJECT
 fi
 
+# Deploy rules for Backend Firestore DB
+export CURRENT_FIRESTORE_DB=$FIRESTORE_DB
+envsubst < ./firebase/firebase.json.template > ./firebase/firebase.json
+envsubst < ./firebase/.firebaserc.template > ./firebase/.firebaserc
+firebase target:apply --config firebase/firebase.json storage bucket_target $GCS_BUCKET --project $PROJECT
+
+echo "Deploying rules for Backend Firestore DB..."
+firebase deploy --config firebase/firebase.json --only firestore --project $PROJECT
+
+rm firebase/firebase.json
+rm firebase/.firebaserc
+
 export FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
 
 if ! gcloud app describe --project=$PROJECT &> /dev/null; then
@@ -123,9 +147,13 @@ if ! gcloud artifacts repositories describe "${ARTIFACT_REPO}" --project=$PROJEC
   echo "Creating artifact repository: $ARTIFACT_REPO"
   gcloud artifacts repositories create "${ARTIFACT_REPO}" --repository-format=docker --project=$PROJECT --location="$REGION"
 fi
-echo "Deploying backend to Cloud Run (Estimated time: ≈7 minutes)..."
-gcloud run deploy orch --source . --image $REGION-docker.pkg.dev/$PROJECT/$ARTIFACT_REPO/orch:latest --region $REGION --project $PROJECT --cpu=8 --memory=16G --no-allow-unauthenticated
-export CLOUD_RUN_URL=$(gcloud run services describe orch --region=$REGION --project=$PROJECT --format='value(status.url)')
+
+# Write config.json since backend needs part of it
+generate_config
+
+echo "Deploying backend to Cloud Run (Estimated time: ~7 minutes)..."
+gcloud run deploy "$BACKEND_SERVICE_NAME" --source . --image $REGION-docker.pkg.dev/$PROJECT/$ARTIFACT_REPO/$BACKEND_SERVICE_NAME:latest --region $REGION --project $PROJECT --cpu=8 --memory=16G --no-allow-unauthenticated
+export CLOUD_RUN_URL=$(gcloud run services describe "$BACKEND_SERVICE_NAME" --region=$REGION --project=$PROJECT --format='value(status.url)')
 
 # Ensure queues
 QUEUES=("Other" "Gemini" "Veo")
@@ -199,14 +227,22 @@ API_UID=$(gcloud services api-keys list --filter="displayName='Scene Machine API
 if [ -z "$API_UID" ]; then
   echo "API Key doesn't exist. Creating it..."
   gcloud services api-keys create --display-name="Scene Machine API Key" --api-target=service=$API_MANAGED_SERVICE_HOST --project=$PROJECT
+  # Fetch the UID again after creation
+  API_UID=$(gcloud services api-keys list --filter="displayName='Scene Machine API Key'" --format="value(uid)" --project=$PROJECT)
 else
   echo "API Key already exists. Skipping."
 fi
 
-export API_KEY=$(gcloud services api-keys get-key-string $API_UID --project=$PROJECT --format="value(keyString)")
+if [ -n "$API_UID" ]; then
+  export API_KEY=$(gcloud services api-keys get-key-string $API_UID --project=$PROJECT --format="value(keyString)")
+else
+  echo "ERROR: Failed to retrieve API Key UID."
+  exit 1
+fi
 export API_GATEWAY_HOST=$(gcloud api-gateway gateways describe scenemachine-api-gateway --project=$PROJECT --location=$API_GATEWAY_REGION --format="value(defaultHostname)")
 
-echo "{ \"appEngineUrl\": \"https://$UI_HOST\", \"firestoreDatabase\": \"$FIRESTORE_DB\", \"gcsBucket\": \"$GCS_BUCKET\", \"apiGatewaySettings\": { \"baseUrl\": \"https://$API_GATEWAY_HOST\", \"apiKey\": \"$API_KEY\" } }" > ui/definitions/config.json # could use jq to extend later
+# Write config.json again, now with all values needed for UI
+generate_config
 
 # 5) Set permissions and create user role
 envsubst < ./gcs-cors-config.template.json > ./gcs-cors-config.json
@@ -222,4 +258,10 @@ fi
 # 6) Upload example files
 gcloud storage cp workflow_examples/input/* gs://${GCS_BUCKET}/examples/
 
-echo "To deploy the UI, follow the instructions in README.md"
+read -p "Do you want to deploy the UI? (y/N) " answer
+if [[ "$answer" =~ ^[Yy]$ ]]; then
+  ./deploy-ui.sh
+else
+  echo "To deploy the UI later, follow the instructions in README.md or run ./deploy-ui.sh"
+fi
+

@@ -1,0 +1,10 @@
+{
+  "firestore": {
+    "database": "${CURRENT_FIRESTORE_DB}",
+    "rules": "firestore.rules"
+  },
+  "storage": {
+    "rules": "storage.rules",
+    "target": "bucket_target"
+  }
+}
