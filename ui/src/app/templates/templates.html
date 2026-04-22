@@ -20,9 +20,9 @@
       <div class="header-main">
         <div class="header-title-row">
           @if (!dialogRef) {
-            <a routerLink="/" class="back-link">
+            <a (click)="goBack()" class="back-link" style="cursor: pointer;">
               <mat-icon>arrow_back</mat-icon>
-              Back to Home
+              Back
             </a>
           }
           <h1>Creative Templates</h1>

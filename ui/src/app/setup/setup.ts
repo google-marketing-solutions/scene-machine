@@ -39,7 +39,7 @@ import {MatSlideToggleModule} from '@angular/material/slide-toggle';
 import {MatSliderModule} from '@angular/material/slider';
 import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {MatTooltipModule} from '@angular/material/tooltip';
-import {ActivatedRoute, Router} from '@angular/router';
+import {ActivatedRoute, Router, RouterLink} from '@angular/router';
 import {
   ASPECT_RATIO_DEVIATION_THRESHOLD,
   AspectRatio,
@@ -53,6 +53,7 @@ import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {Template, TemplatesService} from '../services/templates/templates';
 import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialog';
 import {TemplateCard} from '../templates/template-card/template-card';
+import {ConfirmTemplateDialog} from './confirm-template-dialog/confirm-template-dialog';
 import {GenerateStoryboardDialog} from './generate-storyboard-dialog/generate-storyboard-dialog';
 
 /**
@@ -80,6 +81,7 @@ import {GenerateStoryboardDialog} from './generate-storyboard-dialog/generate-st
     MatTooltipModule,
     MatDialogModule,
     TemplateCard,
+    RouterLink,
   ],
   templateUrl: './setup.html',
   styleUrl: './setup.scss',
@@ -145,6 +147,17 @@ export class Setup {
             audience: '',
           },
         });
+      }
+    });
+
+    effect(() => {
+      const project = this.config.projectConfig.value();
+      const availableModels = this.config.VIDEO_GENERATION_MODELS;
+
+      if (project.id && availableModels.length > 0) {
+        if (!project.model || !availableModels.includes(project.model)) {
+          this.config.updateProjectConfig({model: availableModels[0]});
+        }
       }
     });
   }
@@ -318,8 +331,7 @@ export class Setup {
   }
 
   currentOffset = signal(0);
-  visibleTemplatesCount = 4;
-  showGuidanceText = signal(false);
+  visibleTemplatesCount = 3;
 
   ownTemplate: Template = {
     id: 'custom',
@@ -333,8 +345,8 @@ export class Setup {
 
   allTemplates = computed(() => {
     const templates = this.templatesService.templates.value();
-    if (!templates) return [this.ownTemplate];
-    return [this.ownTemplate, ...templates];
+    if (!templates) return [];
+    return [...templates];
   });
 
   visibleTemplates = computed(() => {
@@ -365,19 +377,32 @@ export class Setup {
   }
 
   selectTemplate(template: Template) {
-    if (template.id === 'custom') {
-      this.updateInputConfig({templateId: 'custom'});
+    if (
+      template.id !== 'custom' &&
+      this.selectedTemplateId() === 'custom' &&
+      this.config.projectConfig.value().inputConfig.composition
+    ) {
+      const dialogRef = this.dialog.open(ConfirmTemplateDialog);
+      dialogRef.afterClosed().subscribe(result => {
+        if (result) {
+          this.updateInputConfig({
+            templateId: template.id,
+            composition: template.prompt,
+          });
+        }
+      });
     } else {
       this.updateInputConfig({
         templateId: template.id,
         composition: template.prompt,
       });
     }
-    this.showGuidanceText.set(true);
   }
 
-  toggleGuidanceText() {
-    this.showGuidanceText.update(v => !v);
+  revertToCustomTemplate() {
+    if (this.selectedTemplateId() !== 'custom') {
+      this.updateInputConfig({templateId: 'custom'});
+    }
   }
 
   addProduct() {

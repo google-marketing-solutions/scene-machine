@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import {CommonModule} from '@angular/common';
+import {CommonModule, Location} from '@angular/common';
 import {ChangeDetectionStrategy, Component, inject} from '@angular/core';
 import {FormsModule} from '@angular/forms';
 import {MatButtonModule} from '@angular/material/button';
@@ -58,9 +58,14 @@ export class Templates {
   dialogRef = inject(MatDialogRef<Templates>, {optional: true});
   dialog = inject(MatDialog);
   templatesService = inject(TemplatesService);
+  private readonly location = inject(Location);
 
   close() {
     this.dialogRef?.close();
+  }
+
+  goBack() {
+    this.location.back();
   }
 
   openCreateDialog(template?: Template) {
