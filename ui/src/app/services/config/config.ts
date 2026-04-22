@@ -79,20 +79,20 @@ export const VIDEO_GENERATION_MODELS = [
 ];
 
 interface GlobalConfig {
-  // BE API
+  // Backend API
   gatewayApiKey: string;
   gatewayBaseUrl: string;
 
-  // gcp
+  // GCP
   gcpLocation: string;
   gcpProject: string;
   gcsBucket: string;
 
-  // gemini
+  // Gemini
   geminiModel: string;
   geminiLocation: string;
 
-  // veo
+  // Veo
   veoLocation: string;
   veoModel: string;
   generateAudio: boolean;
@@ -101,10 +101,10 @@ interface GlobalConfig {
   aspectRatio: AspectRatio;
   duration: number;
 
-  // cloud tasks
+  // Cloud Tasks
   tasksQueuePrefix: string;
 
-  // ffmpeg
+  // FFmpeg
   encodingSpeed: number;
   qualityLevel: number;
 }
@@ -243,6 +243,13 @@ export interface ProvidedVideoScene extends Scene {
   video?: GcsFile;
   durationSeconds?: number;
   trim?: {start?: number; end?: number};
+}
+
+export interface ThumbnailMaterial {
+  lowQualityThumbnail?: string;
+  highQualityThumbnail?: string;
+  referenceImage?: string;
+  videoUrl?: string;
 }
 
 /**
@@ -511,14 +518,6 @@ export class ConfigService {
   async deleteProject(projectId: string) {
     return runInInjectionContext(this.injector, async () => {
       await deleteDoc(doc(this.firestore, `projects/${projectId}`));
-    });
-  }
-
-  async updateProject(projectId: string, partial: Partial<ProjectConfig>) {
-    return runInInjectionContext(this.injector, async () => {
-      await setDoc(doc(this.firestore, `projects/${projectId}`), partial, {
-        merge: true,
-      });
     });
   }
 }

@@ -174,19 +174,18 @@ export class Storyboard {
     highQualityThumbnail?: {url?: string};
     referenceImage?: {url?: string};
   }) {
-    const hasLow = !!item.lowQualityThumbnail;
-    const hasHigh = !!item.highQualityThumbnail?.url;
-    const hasRef = !!item.referenceImage?.url;
-    const hasThumb = hasLow || hasHigh;
+    const hasLowQualityThumbnail = !!item.lowQualityThumbnail;
+    const hasHighQualityThumbnail = !!item.highQualityThumbnail?.url;
+    const hasReferenceImage = !!item.referenceImage?.url;
+    const hasThumbnail = hasLowQualityThumbnail || hasHighQualityThumbnail;
 
-    const rslt = {
+    return {
       lowQuality: item.lowQualityThumbnail,
       highQuality: item.highQualityThumbnail?.url,
       reference: item.referenceImage?.url,
-      showReference: !hasThumb && hasRef,
-      showIcon: !hasThumb && !hasRef,
+      showReference: !hasThumbnail && hasReferenceImage,
+      showIcon: !hasThumbnail && !hasReferenceImage,
     };
-    return rslt;
   }
 
   formatTimeLabel(value: number): string {

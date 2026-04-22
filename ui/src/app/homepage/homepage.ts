@@ -30,9 +30,8 @@ import {MatSlideToggleModule} from '@angular/material/slide-toggle';
 import {RouterModule} from '@angular/router';
 import {
   ConfigService,
-  GeneratedScene,
   ProjectConfig,
-  ProvidedVideoScene,
+  ThumbnailMaterial,
 } from '../services/config/config';
 import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialog';
 
@@ -92,12 +91,7 @@ export class Homepage {
     return email.split('@')[0];
   }
 
-  getThumbnail(project: ProjectConfig): {
-    lowQualityThumbnail?: string;
-    highQualityThumbnail?: string;
-    referenceImage?: string;
-    videoUrl?: string;
-  } {
+  getThumbnailMaterial(project: ProjectConfig): ThumbnailMaterial {
     if (!project.storyboard || project.storyboard.length === 0) {
       return {};
     }
@@ -128,7 +122,7 @@ export class Homepage {
   }
 
   getThumbnailData(project: ProjectConfig) {
-    const thumb = this.getThumbnail(project);
+    const thumb = this.getThumbnailMaterial(project);
     const hasThumb =
       !!thumb.lowQualityThumbnail || !!thumb.highQualityThumbnail;
 
@@ -142,18 +136,6 @@ export class Homepage {
 
   getAspectRatio(project: ProjectConfig): string {
     return project.aspectRatio ? project.aspectRatio.replace(':', '/') : '16/9';
-  }
-
-  isGeneratedScene(
-    scene: GeneratedScene | ProvidedVideoScene | null,
-  ): scene is GeneratedScene {
-    return this.config.isGeneratedScene(scene);
-  }
-
-  isProvidedVideoScene(
-    scene: GeneratedScene | ProvidedVideoScene | null,
-  ): boolean {
-    return this.config.isProvidedVideoScene(scene);
   }
 
   deleteProject(projectId: string) {

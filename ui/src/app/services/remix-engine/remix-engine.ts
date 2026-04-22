@@ -568,19 +568,17 @@ export class RemixEngineService {
           const lowQualityThumbnail = await this.thumbnailService
             .generateLowQualityThumbnail(url, 'video')
             .then(blob => this.thumbnailService.toBase64(blob))
-            .then(base64 => base64)
             .catch(e => {
               console.log(e);
-              return '';
+              return undefined;
             });
           const highQualityThumbnail = await this.thumbnailService
             .generateHighQualityThumbnail(url, 'video')
             .then(blob => this.thumbnailService.toFile(blob))
             .then(file => this.uploadThumbnail(file))
-            .then(resp => resp)
             .catch(e => {
               console.log(e);
-              return {path: '', url: ''};
+              return undefined;
             });
 
           const newCandidate: Candidate = {
@@ -591,8 +589,8 @@ export class RemixEngineService {
             generateAudio,
             resolution,
             video: {url, path},
-            lowQualityThumbnail: lowQualityThumbnail,
-            highQualityThumbnail: highQualityThumbnail,
+            lowQualityThumbnail,
+            highQualityThumbnail,
           };
           if (scene.referenceImage) {
             newCandidate.referenceImage = {...scene.referenceImage};
@@ -681,26 +679,20 @@ export class RemixEngineService {
         throw new Error('Storyboard JSON file not found');
       }
 
-      let storyboardJson;
-      try {
-        storyboardJson = await runInInjectionContext(
-          this.injector,
-          async () => {
-            const reference = ref(this.storage, storyboardJsonFile);
-            const blob = await getBlob(reference);
-            return JSON.parse(await blob.text());
-          },
-        );
+      const storyboardJson = await runInInjectionContext(
+        this.injector,
+        async () => {
+          const reference = ref(this.storage, storyboardJsonFile);
+          const blob = await getBlob(reference);
+          return JSON.parse(await blob.text());
+        },
+      );
 
-        if (
-          !('storyboard' in storyboardJson) ||
-          !Array.isArray(storyboardJson['storyboard'])
-        ) {
-          throw new Error('Storyboard JSON file is missing storyboard');
-        }
-      } catch (error) {
-        console.error('Failed to parse storyboard JSON:', error);
-        throw new Error('Failed to parse storyboard JSON');
+      if (
+        !('storyboard' in storyboardJson) ||
+        !Array.isArray(storyboardJson['storyboard'])
+      ) {
+        throw new Error('Storyboard JSON file is missing storyboard');
       }
 
       const outpaintedImages =
@@ -888,16 +880,14 @@ export class RemixEngineService {
     for (const scene of validScenes) {
       let gcsVideoPath;
       let skipTime = 0;
-      let duration = 0;
+      const duration = this.getSceneVideoDuration(scene, skipTime);
       if (this.configService.isProvidedVideoScene(scene)) {
         gcsVideoPath = scene.video?.path;
         skipTime = scene.trim?.start ?? 0;
-        duration = this.getSceneVideoDuration(scene, skipTime);
       } else if (this.configService.isGeneratedScene(scene)) {
         const candidate = scene.candidates![scene.selectedCandidateIndex!];
         gcsVideoPath = candidate.video?.path;
         skipTime = candidate.trim?.start ?? 0;
-        duration = this.getSceneVideoDuration(scene, skipTime);
       }
       if (!gcsVideoPath) {
         console.log(`No video for scene ${scene.id}`);
