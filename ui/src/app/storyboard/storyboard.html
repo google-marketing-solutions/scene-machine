@@ -72,34 +72,54 @@
             >
               <mat-icon>delete</mat-icon>
             </button>
-            @if (this.config.isGeneratedScene(scene)) {
-              @if (
-                scene.selectedCandidateIndex !== undefined &&
-                scene.candidates?.[scene.selectedCandidateIndex]?.referenceImage
-              ) {
+            @let fallbackIcon = this.config.isGeneratedScene(scene) ? 'auto_awesome' : 'videocam';
+            @let thumb =
+              this.config.isGeneratedScene(scene) && (scene.candidates?.length ?? 0) > 0
+                ? getThumbnailData(scene.candidates![scene.selectedCandidateIndex ?? 0])
+                : getThumbnailData(scene);
+            <div #thumbContainer>
+              <!-- 1. Low quality image -->
+              @if (thumb.lowQuality) {
                 <img
-                  [src]="scene.candidates?.[scene.selectedCandidateIndex]?.referenceImage?.url"
-                  class="reference-image-bg"
-                  alt="Reference Image"
+                  [src]="thumb.lowQuality"
+                  class="reference-image-bg loaded"
+                  alt="Low Quality Thumbnail"
                 />
-                <!-- Show loading spinner even if image is present -->
-                @if (areCandidatesGenerating(scene.id)) {
-                  <div class="scene-loading">
-                    <mat-spinner diameter="32"></mat-spinner>
-                  </div>
-                }
-              } @else {
-                @if (areCandidatesGenerating(scene.id)) {
-                  <div class="scene-loading">
-                    <mat-spinner diameter="32"></mat-spinner>
-                  </div>
-                } @else {
-                  <div class="scene-icon"><mat-icon>auto_awesome</mat-icon></div>
-                }
               }
-            } @else {
-              <div class="scene-icon"><mat-icon>videocam</mat-icon></div>
-            }
+
+              <!-- 2. High quality image -->
+              @if (thumb.highQuality) {
+                <img
+                  [src]="thumb.highQuality"
+                  class="reference-image-bg high-res-img"
+                  #highResImg
+                  (load)="
+                    highResImg.classList.add('loaded');
+                    thumbContainer.classList.add('high-res-loaded')
+                  "
+                  alt="High Quality Thumbnail"
+                />
+              }
+
+              <!-- 3. Fallback to Reference Image -->
+              @if (thumb.showReference) {
+                <img [src]="thumb.reference" class="reference-image-bg" alt="Reference Image" />
+              }
+
+              <!-- 4. Fallback to Icon -->
+              @if (thumb.showIcon) {
+                <div class="scene-icon">
+                  <mat-icon>{{ fallbackIcon }}</mat-icon>
+                </div>
+              }
+
+              <!-- 5. Spinner if generating -->
+              @if (areCandidatesGenerating(scene.id)) {
+                <div class="scene-loading">
+                  <mat-spinner diameter="32"></mat-spinner>
+                </div>
+              }
+            </div>
             <div class="scene-label">{{ scene.name }}</div>
 
             <!-- Custom preview template -->
@@ -141,11 +161,7 @@
           <div class="column left-sidebar">
             <div class="scene-header">
               <div class="subtitle">SCENE NAME</div>
-              <mat-form-field
-                appearance="outline"
-                subscriptSizing="dynamic"
-                style="width: 100%; margin-top: 8px"
-              >
+              <mat-form-field appearance="outline" subscriptSizing="dynamic" class="name-field">
                 <input matInput [(ngModel)]="scene.name" (ngModelChange)="updateScenes()" />
               </mat-form-field>
             </div>
@@ -168,6 +184,7 @@
                           >
                             <div
                               class="video-thumbnail"
+                              #thumbContainer
                               [style.aspect-ratio]="previewAspectRatio()"
                             >
                               <div class="resolution">
@@ -181,6 +198,45 @@
                               >
                                 <mat-icon>archive</mat-icon>
                               </button>
+
+                              @let thumb = getThumbnailData(candidate);
+                              <!-- 1. Low quality image -->
+                              @if (thumb.lowQuality) {
+                                <img
+                                  [src]="thumb.lowQuality"
+                                  class="reference-image-bg loaded"
+                                  alt="Low Quality Thumbnail"
+                                />
+                              }
+
+                              <!-- 2. High quality image -->
+                              @if (thumb.highQuality) {
+                                <img
+                                  [src]="thumb.highQuality"
+                                  class="reference-image-bg high-res-img"
+                                  #highResImg
+                                  (load)="
+                                    highResImg.classList.add('loaded');
+                                    thumbContainer.classList.add('high-res-loaded')
+                                  "
+                                  alt="High Quality Thumbnail"
+                                />
+                              }
+
+                              <!-- 3. Fallback to Reference Image -->
+                              @if (thumb.showReference) {
+                                <img
+                                  [src]="thumb.reference"
+                                  class="reference-image-bg"
+                                  alt="Reference Image"
+                                />
+                              }
+
+                              <!-- 4. Fallback to Icon -->
+                              @if (thumb.showIcon) {
+                                <div class="scene-icon"><mat-icon>auto_awesome</mat-icon></div>
+                              }
+
                               <video
                                 #videoPlayer
                                 [src]="candidate.video?.url"
@@ -239,10 +295,10 @@
                               class="video-item archived"
                               (click)="selectCandidate(scene, $index)"
                               [class.selected]="scene.selectedCandidateIndex === $index"
-                              style="opacity: 0.5"
                             >
                               <div
                                 class="video-thumbnail"
+                                #thumbContainer
                                 [style.aspect-ratio]="previewAspectRatio()"
                               >
                                 <button
@@ -253,6 +309,45 @@
                                 >
                                   <mat-icon>unarchive</mat-icon>
                                 </button>
+
+                                @let thumb = getThumbnailData(candidate);
+                                <!-- 1. Low quality image -->
+                                @if (thumb.lowQuality) {
+                                  <img
+                                    [src]="thumb.lowQuality"
+                                    class="reference-image-bg loaded"
+                                    alt="Low Quality Thumbnail"
+                                  />
+                                }
+
+                                <!-- 2. High quality image -->
+                                @if (thumb.highQuality) {
+                                  <img
+                                    [src]="thumb.highQuality"
+                                    class="reference-image-bg high-res-img"
+                                    #highResImg
+                                    (load)="
+                                      highResImg.classList.add('loaded');
+                                      thumbContainer.classList.add('high-res-loaded')
+                                    "
+                                    alt="High Quality Thumbnail"
+                                  />
+                                }
+
+                                <!-- 3. Fallback to Reference Image -->
+                                @if (thumb.showReference) {
+                                  <img
+                                    [src]="thumb.reference"
+                                    class="reference-image-bg"
+                                    alt="Reference Image"
+                                  />
+                                }
+
+                                <!-- 4. Fallback to Icon -->
+                                @if (thumb.showIcon) {
+                                  <div class="scene-icon"><mat-icon>auto_awesome</mat-icon></div>
+                                }
+
                                 <video
                                   #archivedVideoPlayer
                                   [src]="candidate.video?.url"
@@ -603,7 +698,7 @@
                             #fileInput
                             type="file"
                             accept="image/*"
-                            style="display: none"
+                            class="hidden-file-input"
                             (change)="onFileSelected($event)"
                           />
                         </div>
@@ -618,7 +713,7 @@
                   <mat-form-field
                     appearance="outline"
                     subscriptSizing="dynamic"
-                    style="width: 100%"
+                    class="full-width-field"
                   >
                     <mat-select
                       [ngModel]="config.projectConfig.value().model"
@@ -633,7 +728,7 @@
 
                 <!-- Number of candidates -->
                 <div class="setting-group">
-                  <div style="display: flex; justify-content: space-between">
+                  <div class="setting-header">
                     <span class="subtitle">Number of candidates</span>
                     <span class="subtitle">{{
                       config.projectConfig.value().numberOfCandidates
@@ -650,9 +745,9 @@
 
                 <!-- Video duration -->
                 <div class="setting-group">
-                  <div style="display: flex; justify-content: space-between">
+                  <div class="setting-header">
                     <span class="subtitle">Candidate duration</span>
-                    <span class="subtitle" style="text-transform: none"
+                    <span class="subtitle no-transform"
                       >{{ config.projectConfig.value().candidateDurationSeconds }}s</span
                     >
                   </div>
@@ -670,7 +765,7 @@
                 <!-- Audio -->
                 <div class="setting-group">
                   <div class="audio-toggle">
-                    <div style="display: flex; align-items: center; gap: 8px">
+                    <div>
                       <mat-icon class="setting-icon">music_note</mat-icon>
                       <span class="subtitle">Generate audio</span>
                     </div>

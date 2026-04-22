@@ -202,6 +202,8 @@ interface Scene {
   type: 'generated' | 'video';
   transition?: string;
   transitionOverlap?: number;
+  lowQualityThumbnail?: string;
+  highQualityThumbnail?: GcsFile;
 }
 
 /**
@@ -220,6 +222,8 @@ export interface Candidate {
   resolution: Resolution;
   referenceImage?: GcsFile;
   isArchived?: boolean;
+  lowQualityThumbnail?: string;
+  highQualityThumbnail?: GcsFile;
 }
 
 /**
@@ -239,6 +243,13 @@ export interface ProvidedVideoScene extends Scene {
   video?: GcsFile;
   durationSeconds?: number;
   trim?: {start?: number; end?: number};
+}
+
+export interface ThumbnailMaterial {
+  lowQualityThumbnail?: string;
+  highQualityThumbnail?: string;
+  referenceImage?: string;
+  videoUrl?: string;
 }
 
 /**

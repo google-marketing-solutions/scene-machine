@@ -28,7 +28,11 @@ import {MatDialog, MatDialogModule} from '@angular/material/dialog';
 import {MatIconModule} from '@angular/material/icon';
 import {MatSlideToggleModule} from '@angular/material/slide-toggle';
 import {RouterModule} from '@angular/router';
-import {ConfigService, ProjectConfig} from '../services/config/config';
+import {
+  ConfigService,
+  ProjectConfig,
+  ThumbnailMaterial,
+} from '../services/config/config';
 import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialog';
 
 /**
@@ -87,32 +91,47 @@ export class Homepage {
     return email.split('@')[0];
   }
 
-  getThumbnail(
-    project: ProjectConfig,
-  ): {type: 'video' | 'image'; url: string} | undefined {
+  getThumbnailMaterial(project: ProjectConfig): ThumbnailMaterial {
     if (!project.storyboard || project.storyboard.length === 0) {
-      return undefined;
+      return {};
     }
     const firstScene = project.storyboard[0];
-    if (this.config.isProvidedVideoScene(firstScene) && firstScene.video?.url) {
-      return {type: 'video', url: firstScene.video.url};
-    }
-    if (
-      this.config.isGeneratedScene(firstScene) &&
-      firstScene.selectedCandidateIndex !== undefined &&
-      firstScene.candidates &&
-      firstScene.candidates[firstScene.selectedCandidateIndex].video?.url
-    ) {
+    if (this.config.isProvidedVideoScene(firstScene)) {
       return {
-        type: 'video',
-        url: firstScene.candidates[firstScene.selectedCandidateIndex].video!
-          .url,
+        lowQualityThumbnail: firstScene.lowQualityThumbnail,
+        highQualityThumbnail: firstScene.highQualityThumbnail?.url,
+        videoUrl: firstScene.video?.url,
       };
     }
-    if (this.config.isGeneratedScene(firstScene) && firstScene.referenceImage) {
-      return {type: 'image', url: firstScene.referenceImage.url};
+    if (this.config.isGeneratedScene(firstScene)) {
+      const selectedCandidate =
+        firstScene.candidates?.[firstScene.selectedCandidateIndex ?? 0];
+
+      return {
+        lowQualityThumbnail:
+          selectedCandidate?.lowQualityThumbnail ||
+          firstScene.lowQualityThumbnail,
+        highQualityThumbnail:
+          selectedCandidate?.highQualityThumbnail?.url ||
+          firstScene.highQualityThumbnail?.url,
+        referenceImage: firstScene.referenceImage?.url,
+        videoUrl: selectedCandidate?.video?.url,
+      };
     }
-    return undefined;
+    return {};
+  }
+
+  getThumbnailData(project: ProjectConfig) {
+    const thumb = this.getThumbnailMaterial(project);
+    const hasThumb =
+      !!thumb.lowQualityThumbnail || !!thumb.highQualityThumbnail;
+
+    return {
+      ...thumb,
+      showReference: thumb.referenceImage !== undefined,
+      showVideo: !hasThumb && !thumb.referenceImage && !!thumb.videoUrl,
+      showPlaceholder: !hasThumb && !thumb.referenceImage && !thumb.videoUrl,
+    };
   }
 
   getAspectRatio(project: ProjectConfig): string {

@@ -52,6 +52,7 @@ import {
   ProvidedVideoScene,
   toDecimals,
 } from '../services/config/config';
+import {GenerateThumbnailService} from '../services/generate-thumbnail/generate-thumbnail';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {
   AddSceneDialog,
@@ -95,6 +96,7 @@ export class Storyboard {
   config = inject(ConfigService);
   protected remixEngineService = inject(RemixEngineService);
   private dialog = inject(MatDialog);
+  private generateThumbnailService = inject(GenerateThumbnailService);
 
   videoElement = viewChild<ElementRef<HTMLVideoElement>>('mainVideo');
   timelineTrack = viewChild<ElementRef<HTMLElement>>('timelineTrack');
@@ -166,6 +168,25 @@ export class Storyboard {
     const ratio = this.config.projectConfig.value().aspectRatio;
     return ratio ? ratio.replace(':', '/') : '16/9';
   });
+
+  getThumbnailData(item: {
+    lowQualityThumbnail?: string;
+    highQualityThumbnail?: {url?: string};
+    referenceImage?: {url?: string};
+  }) {
+    const hasLowQualityThumbnail = !!item.lowQualityThumbnail;
+    const hasHighQualityThumbnail = !!item.highQualityThumbnail?.url;
+    const hasReferenceImage = !!item.referenceImage?.url;
+    const hasThumbnail = hasLowQualityThumbnail || hasHighQualityThumbnail;
+
+    return {
+      lowQuality: item.lowQualityThumbnail,
+      highQuality: item.highQualityThumbnail?.url,
+      reference: item.referenceImage?.url,
+      showReference: !hasThumbnail && hasReferenceImage,
+      showIcon: !hasThumbnail && !hasReferenceImage,
+    };
+  }
 
   formatTimeLabel(value: number): string {
     return `${value.toFixed(2)}s`;
@@ -497,6 +518,13 @@ export class Storyboard {
             path: uploadResult.path,
           };
           scene.durationSeconds = duration;
+          scene.lowQualityThumbnail = await this.generateThumbnailService
+            .generateLowQualityThumbnail(result.file, 'video')
+            .then(blob => this.generateThumbnailService.toBase64(blob));
+          scene.highQualityThumbnail = await this.generateThumbnailService
+            .generateHighQualityThumbnail(result.file, 'video')
+            .then(blob => this.generateThumbnailService.toFile(blob))
+            .then(file => this.remixEngineService.uploadThumbnail(file));
           this.updateScenes(scene);
         }
       });
@@ -626,6 +654,28 @@ export class Storyboard {
         .storyboard.find(s => s.id === sceneId);
       if (scene && this.config.isGeneratedScene(scene)) {
         scene.referenceImage = {path, url};
+        try {
+          const [lowQualityThumbnail, highQualityThumbnail] = await Promise.all(
+            [
+              this.generateThumbnailService.generateLowQualityThumbnail(
+                file,
+                'image',
+              ),
+              this.generateThumbnailService.generateHighQualityThumbnail(
+                file,
+                'image',
+              ),
+            ],
+          );
+          scene.lowQualityThumbnail =
+            await this.generateThumbnailService.toBase64(lowQualityThumbnail);
+          scene.highQualityThumbnail =
+            await this.remixEngineService.uploadThumbnail(
+              this.generateThumbnailService.toFile(highQualityThumbnail),
+            );
+        } catch (error) {
+          console.log(error);
+        }
       }
       this.updateScenes(scene);
     }

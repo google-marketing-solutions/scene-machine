@@ -46,6 +46,7 @@ import {
   Resolution,
   VisualOverlay,
 } from '../config/config';
+import {GenerateThumbnailService} from '../generate-thumbnail/generate-thumbnail';
 import {
   CombineVideoArrangement as CombineScenesArrangement,
   CombineScenesWorkflowParameters,
@@ -75,6 +76,7 @@ export class RemixEngineService {
   private httpClient = inject(HttpClient);
   private injector = inject(EnvironmentInjector);
   private storage = inject(Storage);
+  private thumbnailService = inject(GenerateThumbnailService);
 
   private startWorkflow(
     workflowDefinition: object,
@@ -562,6 +564,23 @@ export class RemixEngineService {
             const reference = ref(this.storage, path);
             return getDownloadURL(reference);
           });
+
+          const lowQualityThumbnail = await this.thumbnailService
+            .generateLowQualityThumbnail(url, 'video')
+            .then(blob => this.thumbnailService.toBase64(blob))
+            .catch(e => {
+              console.log(e);
+              return undefined;
+            });
+          const highQualityThumbnail = await this.thumbnailService
+            .generateHighQualityThumbnail(url, 'video')
+            .then(blob => this.thumbnailService.toFile(blob))
+            .then(file => this.uploadThumbnail(file))
+            .catch(e => {
+              console.log(e);
+              return undefined;
+            });
+
           const newCandidate: Candidate = {
             runNumber: currentMaxRun + 1,
             durationSeconds,
@@ -570,6 +589,8 @@ export class RemixEngineService {
             generateAudio,
             resolution,
             video: {url, path},
+            lowQualityThumbnail,
+            highQualityThumbnail,
           };
           if (scene.referenceImage) {
             newCandidate.referenceImage = {...scene.referenceImage};
@@ -657,6 +678,7 @@ export class RemixEngineService {
       if (!storyboardJsonFile) {
         throw new Error('Storyboard JSON file not found');
       }
+
       const storyboardJson = await runInInjectionContext(
         this.injector,
         async () => {
@@ -722,8 +744,6 @@ export class RemixEngineService {
       if (error instanceof ProjectChangedError) {
         console.info(error.message);
         return;
-      } else if (error instanceof SyntaxError) {
-        console.error('Failed to parse storyboard JSON:', error);
       } else if (error instanceof Error) {
         console.error('Storyboard generation error:', error);
         if (executionId) {
@@ -920,13 +940,13 @@ export class RemixEngineService {
     return arrangement;
   }
 
-  async uploadMedia(media: File) {
+  async uploadMedia(media: File, path: string = 'remix-input') {
     const fileNameParts = media.name.split('.');
     const extension = fileNameParts.pop();
     const contentHash = await this.generateHash(media);
     const fileName = `${fileNameParts.join('.')}-${contentHash}.${extension}`;
     return await runInInjectionContext(this.injector, async () => {
-      const storageRef = ref(this.storage, `remix-input/${fileName}`);
+      const storageRef = ref(this.storage, `${path}/${fileName}`);
       try {
         const downloadUrl = await getDownloadURL(storageRef);
         return {
@@ -948,5 +968,9 @@ export class RemixEngineService {
         };
       }
     });
+  }
+
+  async uploadThumbnail(media: File) {
+    return this.uploadMedia(media, 'thumbnail');
   }
 }
