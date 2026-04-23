@@ -1,0 +1,9 @@
+{
+  "appEngineUrl": "https://$UI_HOST",
+  "firestoreDatabase": "$FIRESTORE_DB",
+  "gcsBucket": "$GCS_BUCKET",
+  "apiGatewaySettings": {
+    "baseUrl": "https://$API_GATEWAY_HOST",
+    "apiKey": "$API_KEY"
+  }
+}

@@ -11,3 +11,5 @@ ui/app/src/app/services/config/config.service.ts
 gcs-cors-config.json
 apispec.yaml
 deployed_version.txt
+firebase/firebase.json
+firebase/.firebaserc
