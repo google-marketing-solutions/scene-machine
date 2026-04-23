@@ -24,6 +24,5 @@ export FIRESTORE_DB_UI=scene-machine-ui # UI: Firestore database ID
 export ARTIFACT_REPO=scene-machine # your Artifact Repository ID
 API_GATEWAY=scenemachine-api-gateway # your API Gateway ID
 
-# You can use these preset values as is or change
 export TASKS_QUEUE_PREFIX=SceneMachine- # prefix for the Cloud Tasks queue name; can contain only letters, numbers, or hyphens (-)
 export BACKEND_SERVICE_NAME=remix-engine-backend
