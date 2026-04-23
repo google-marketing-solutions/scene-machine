@@ -115,6 +115,18 @@ content_type_short = {
 }
 
 
+class TrackingType(enum.Enum):
+  """Enumerates tracking types for user-agent logging."""
+
+  VIDEO = 'video'
+  STORYBOARD = 'storyboard'
+  IMAGE = 'image'
+  PROMPT = 'prompt'
+
+
+_USER_AGENT_PREFIX = 'gtech-ads-ce/scene-machine'
+
+
 @functools.lru_cache(maxsize=None)
 def get_api_client_headers(tracking_type: TrackingType) -> dict[str, str]:
   """Gets headers for use with Google APIs.

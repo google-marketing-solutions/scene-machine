@@ -20,9 +20,12 @@ import json
 import logging
 import mimetypes
 
-from common import TrackingType, get_api_client_headers
 from google import genai
 from google.genai import types
+
+from common import get_api_client_headers
+from common import TrackingType
+
 
 logger = logging.getLogger(__name__)
 
@@ -106,10 +109,16 @@ def prompt(
       A dictionary containing the parsed JSON response if response_schema is
       provided, or a raw string containing the response text otherwise.
     """
+    http_options = (
+        types.HttpOptions(headers=get_api_client_headers(tracking_type))
+        if tracking_type
+        else None
+    )
     client = genai.Client(
         vertexai=True,
         project=gcp_project,
         location=location,
+        http_options=http_options,
     )
 
     parts = [types.Part.from_text(text=text_prompt)]
@@ -122,62 +131,58 @@ def prompt(
             )
         )
 
-        contents = [types.Content(role="user", parts=parts)]
+    contents = [types.Content(role="user", parts=parts)]
 
-        safety_settings = [
-            types.SafetySetting(
-                category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH.value,
-                threshold=types.HarmBlockThreshold.OFF.value,
-            ),
-            types.SafetySetting(
-                category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT.value,
-                threshold=types.HarmBlockThreshold.OFF.value,
-            ),
-            types.SafetySetting(
-                category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT.value,
-                threshold=types.HarmBlockThreshold.OFF.value,
-            ),
-            types.SafetySetting(
-                category=types.HarmCategory.HARM_CATEGORY_HARASSMENT.value,
-                threshold=types.HarmBlockThreshold.OFF.value,
-            ),
-        ]
+    safety_settings = [
+        types.SafetySetting(
+            category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH.value,
+            threshold=types.HarmBlockThreshold.OFF.value,
+        ),
+        types.SafetySetting(
+            category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT.value,
+            threshold=types.HarmBlockThreshold.OFF.value,
+        ),
+        types.SafetySetting(
+            category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT.value,
+            threshold=types.HarmBlockThreshold.OFF.value,
+        ),
+        types.SafetySetting(
+            category=types.HarmCategory.HARM_CATEGORY_HARASSMENT.value,
+            threshold=types.HarmBlockThreshold.OFF.value,
+        ),
+    ]
 
-        generate_content_config = types.GenerateContentConfig(
-            temperature=temperature,
-            top_p=top_p,
-            max_output_tokens=8192,
-            response_modalities=[types.Modality.TEXT.value]
-            if not response_schema
-            else None,
-            response_mime_type="application/json" if response_schema else None,
-            response_schema=response_schema,
-            safety_settings=safety_settings,
-            thinking_config=_get_thinking_config(model),
+    generate_content_config = types.GenerateContentConfig(
+        temperature=temperature,
+        top_p=top_p,
+        max_output_tokens=8192,
+        response_modalities=[types.Modality.TEXT.value]
+        if not response_schema
+        else None,
+        response_mime_type="application/json" if response_schema else None,
+        response_schema=response_schema,
+        safety_settings=safety_settings,
+        thinking_config=_get_thinking_config(model),
+    )
+
+    response = client.models.generate_content(
+        model=model,
+        contents=contents,
+        config=generate_content_config,
+    )
+    if response.candidates and response.candidates[0].content.parts:
+        output = "".join(
+            part.text
+            for part in response.candidates[0].content.parts
+            if hasattr(part, "text")
         )
-        http_options = (
-            types.HttpOptions(headers=get_api_client_headers(tracking_type))
-            if tracking_type
-            else None
-        )
-        response = client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=generate_content_config,
-            http_options=http_options,
-        )
-        if response.candidates and response.candidates[0].content.parts:
-            output = "".join(
-                part.text
-                for part in response.candidates[0].content.parts
-                if hasattr(part, "text")
-            )
-        else:
-            output = ""
+    else:
+        output = ""
 
-        if response_schema:
-            return json.loads(output)
-        if need_to_remove_md_notation:
-            return remove_md_notation(output)
+    if response_schema:
+        return json.loads(output)
+    if need_to_remove_md_notation:
+        return remove_md_notation(output)
 
-        return output
+    return output
+

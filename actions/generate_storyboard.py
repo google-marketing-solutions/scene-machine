@@ -25,11 +25,14 @@ from google import genai
 from actions_lib.gemini import get_mime_type
 from common import ContentType
 from common import Dimension
+from common import get_api_client_headers
 from common import Key
 from common import logger
 from common import NodeInput
 from common import NodeOutput
 from common import Params
+from common import TrackingType
+
 from util.gcs_wrapper import GCS
 
 
@@ -332,10 +335,16 @@ def execute(
     )
     prompt_parts.append(genai.types.Part.from_text(text=user_prompt_text))
 
+  http_options = (
+      genai.types.HttpOptions(
+          headers=get_api_client_headers(TrackingType.STORYBOARD)
+      )
+  )
   client = genai.Client(
       vertexai=True,
       project=workflow_params[Key.GCP_PROJECT.value],
       location=gemini_model_location,
+      http_options=http_options,
   )
 
   config = genai.types.GenerateContentConfig(

@@ -1,0 +1,107 @@
+{
+  "workflowDefinition": {
+    "root": {
+      "action": "pass",
+      "input": {
+        "images": null,
+        "user_prompt": null
+      },
+      "types": {
+        "images": "image",
+        "user_prompt": "string"
+      }
+    },
+    "n_storyboard": {
+      "action": "generate_storyboard",
+      "input": {
+        "images": {
+          "node": "root",
+          "output": "images"
+        },
+        "user_prompt": {
+          "node": "root",
+          "output": "user_prompt"
+        }
+      },
+      "parameters": {
+        "gemini_model": "gemini-3.1-flash-lite-preview",
+        "gemini_model_location": "global"
+      },
+      "dimensionsConsumed": [
+        "product_id",
+        "image_id",
+        "product_description",
+        "image_instruction"
+      ]
+    },
+    "sink": {
+      "action": "pass",
+      "input": {
+        "storyboard": {
+          "node": "n_storyboard",
+          "output": "storyboard"
+        }
+      }
+    }
+  },
+  "nodeId": "root",
+  "workflowId": "storyboard_test_1",
+  "forceExecution": true,
+  "workflowParams": {
+    "gcpProject": "${PROJECT}",
+    "gcpLocation": "${REGION}",
+    "gcsBucket": "${GCS_BUCKET}",
+    "tasksQueuePrefix": "${TASKS_QUEUE_PREFIX}"
+  },
+  "inputFiles": {
+    "images": [
+      {
+        "file": "examples/Scene1.png",
+        "product_id": "1",
+        "product_description": "Assortment of couches for all tastes and styles.",
+        "image_id": "1",
+        "image_instruction": "crop"
+      },
+      {
+        "file": "examples/Scene2.png",
+        "product_id": "1",
+        "product_description": "Assortment of couches for all tastes and styles.",
+        "image_id": "2",
+        "image_instruction": "crop"
+      },
+      {
+        "file": "examples/Scene3.png",
+        "product_id": "1",
+        "product_description": "Assortment of couches for all tastes and styles.",
+        "image_id": "3",
+        "image_instruction": "crop"
+      },
+      {
+        "file": "examples/Scene4.png",
+        "product_id": "2",
+        "product_description": "Assortment of couches for all tastes and styles.",
+        "image_id": "4",
+        "image_instruction": "crop"
+      },
+      {
+        "file": "examples/Scene5.png",
+        "product_id": "2",
+        "product_description": "Assortment of couches for all tastes and styles.",
+        "image_id": "5",
+        "image_instruction": "outpaint"
+      },
+      {
+        "file": "examples/Scene6.png",
+        "product_id": "3",
+        "product_description": "Assortment of couches for all tastes and styles.",
+        "image_id": "6",
+        "image_instruction": "nothing"
+      }
+    ],
+    "user_prompt": [
+      {
+        "file": "examples/user_prompt.txt"
+      }
+    ]
+  }
+}

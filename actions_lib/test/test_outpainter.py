@@ -80,7 +80,9 @@ class TestOutpainter(unittest.TestCase):
             vertexai=True,
             project=self.mock_gcp_project,
             location=self.mock_gcp_location,
+            http_options=mock.ANY,
         )
+
         mock_client_instance.models.generate_content.assert_called_once()
         _, kwargs = mock_client_instance.models.generate_content.call_args
         # Fix: IMAGE_MODEL is now private _IMAGE_MODEL
