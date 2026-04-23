@@ -18,6 +18,7 @@ import {DatePipe} from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   inject,
   signal,
 } from '@angular/core';
@@ -59,6 +60,7 @@ export class Homepage {
   private dialog = inject(MatDialog);
   projects = signal<ProjectConfig[]>([]);
   myProjectsOnly = signal<boolean>(true);
+  userEmail = computed(() => this.auth.currentUser?.email ?? null);
 
   constructor() {
     void this.auth.authStateReady().then(() => {
