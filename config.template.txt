@@ -2,7 +2,7 @@
 # You can use it as a template for your own config.txt file
 #
 # How to use:
-# 1. cp config.example.txt config.txt
+# 1. cp config.template.txt config.txt
 # 2. Replace <YOUR_PROJECT_ID> with your GCP Project ID parameter
 # 3. Run ./deploy.sh and ./deploy-ui.sh
 
