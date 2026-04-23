@@ -84,7 +84,7 @@ echo "Deploying rules for UI Firestore DB"
 (
   cd firebase
   export CURRENT_FIRESTORE_DB=$FIRESTORE_DB_UI
-  envsubst < ./firebase.json.template > ./firebase.json
+  envsubst < ./firebase.template.json > ./firebase.json
   envsubst < ./.firebaserc.template > ./.firebaserc
   firebase target:apply storage bucket_target $GCS_BUCKET --project $PROJECT
 
@@ -117,7 +117,6 @@ for template in creative_templates/*.json; do
     -d @"$template"
 done
 
-# Give default app engine account GCS permissions
 echo "Granting Storage Admin role to App Engine default service account..."
 gcloud projects add-iam-policy-binding $PROJECT \
     --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" \
@@ -125,7 +124,6 @@ gcloud projects add-iam-policy-binding $PROJECT \
     --condition=None \
     --quiet
 
-# Give default app engine account Artifact Registry permissions
 echo "Granting Artifact Registry Writer role to App Engine default service account..."
 gcloud projects add-iam-policy-binding $PROJECT \
     --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" \
@@ -133,7 +131,6 @@ gcloud projects add-iam-policy-binding $PROJECT \
     --condition=None \
     --quiet
 
-# Check if consent screen is configured
 echo "Checking if OAuth consent screen is configured..."
 # Attempt to list brands. If empty or failures, we assume not configured or API disabled.
 BRANDS=$(gcloud iap oauth-brands list --project=$PROJECT --format="value(name)" 2>/dev/null)

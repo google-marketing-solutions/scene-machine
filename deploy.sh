@@ -96,7 +96,7 @@ fi
 
 # Deploy rules for Backend Firestore DB
 export CURRENT_FIRESTORE_DB=$FIRESTORE_DB
-envsubst < ./firebase/firebase.json.template > ./firebase/firebase.json
+envsubst < ./firebase/firebase.template.json > ./firebase/firebase.json
 envsubst < ./firebase/.firebaserc.template > ./firebase/.firebaserc
 firebase target:apply --config firebase/firebase.json storage bucket_target $GCS_BUCKET --project $PROJECT
 
