@@ -60,7 +60,7 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
 1.  **Clone the Repository**
     ```bash
     git clone https://github.com/google-marketing-solutions/scene-machine
-    cd scene_machine
+    cd scene-machine
     ```
 
 2.  **Configure the Application**
@@ -72,7 +72,7 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
     *   **Important Notes for Configuration:**
         *   **Naming:** Use alphanumerical names (with hyphens) for entities like databases.
         *   **Storage:** If using an existing bucket, it must use a non-hierarchical namespace.
-        *   **Locations:** Match model availability (e.g., Veo might not be available in all regions). Check [Google Cloud AI Platform documentation](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations) for locations.
+        *   **Locations:** Match model availability (e.g. Veo might not be available in all regions). Check [Google Cloud AI Platform documentation](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations) for locations.
         *   **Model Lifespans:** Prefer using current models as older ones are discontinued over time. Check [Google Cloud AI Platform documentation](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models) for model lifespans.
 
 3.  **Execute Deployment**
@@ -81,7 +81,7 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
         ./deploy.sh
         ```
     *   *Note: The script outputs estimates regarding run times.*
-    *   *Note: You might be prompted to run the UI deploy script immediately at the end.*
+    *   *Note: You might be prompted to run the UI deployment script immediately at the end.*
 
     > [!TIP]
     > **Troubleshooting Firebase project creation:**
@@ -89,7 +89,7 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
 
 4.  **Deploy UI**
     *   Run `./deploy-ui.sh` (if you skipped it during backend deployment).
-    *   If requested, perform any required manual steps indicated by the script (like linking buckets or configuring OAuth setups).
+    *   If requested, perform any required manual steps indicated by the script (e.g. linking buckets or configuring OAuth).
 
 Once successfully deployed, `./deploy-ui.sh` will output the URL where Scene Machine is available. Note this down to open it in your browser.
 
