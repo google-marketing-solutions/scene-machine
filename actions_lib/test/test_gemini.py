@@ -65,10 +65,13 @@ class TestGemini(unittest.TestCase):
         )
         self.assertEqual(output, "mock response")
 
-        # Verify interactions
         mock_client_class.assert_called_once_with(
-            vertexai=True, project="test-proj", location="us-central1"
+            vertexai=True,
+            project="test-proj",
+            location="us-central1",
+            http_options=mock.ANY,
         )
+
 
     @mock.patch("google.genai.Client")
     def test_prompt_json_schema(self, mock_client_class):

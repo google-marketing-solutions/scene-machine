@@ -23,6 +23,10 @@ import mimetypes
 from google import genai
 from google.genai import types
 
+from common import get_api_client_headers
+from common import TrackingType
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,6 +87,7 @@ def prompt(
     model="gemini-2.5-flash",
     temperature: float = 0.2,
     top_p: float = 0.2,
+    tracking_type: TrackingType | None = None,
 ):
     """Prompts Gemini for a response.
 
@@ -104,10 +109,16 @@ def prompt(
       A dictionary containing the parsed JSON response if response_schema is
       provided, or a raw string containing the response text otherwise.
     """
+    http_options = (
+        types.HttpOptions(headers=get_api_client_headers(tracking_type))
+        if tracking_type
+        else None
+    )
     client = genai.Client(
         vertexai=True,
         project=gcp_project,
         location=location,
+        http_options=http_options,
     )
 
     parts = [types.Part.from_text(text=text_prompt)]
@@ -119,6 +130,7 @@ def prompt(
                 file_uri=file_uri, mime_type=get_mime_type(file_uri)
             )
         )
+
     contents = [types.Content(role="user", parts=parts)]
 
     safety_settings = [
@@ -152,6 +164,7 @@ def prompt(
         safety_settings=safety_settings,
         thinking_config=_get_thinking_config(model),
     )
+
     response = client.models.generate_content(
         model=model,
         contents=contents,
@@ -172,3 +185,4 @@ def prompt(
         return remove_md_notation(output)
 
     return output
+

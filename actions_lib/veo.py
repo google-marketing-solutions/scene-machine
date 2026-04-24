@@ -48,7 +48,9 @@ def generate(
       vertexai=True,
       project=gcp_project,
       location=gcp_location,
-      http_options=types.HttpOptions(headers=get_api_client_headers()),
+      http_options=types.HttpOptions(
+          headers=get_api_client_headers(TrackingType.VIDEO)
+      ),
   )
   # Note: Below, types.GenerateVideosConfigDict led to linting problems.
   config_params: dict[str, Any] = {

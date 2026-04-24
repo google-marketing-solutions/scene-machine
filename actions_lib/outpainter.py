@@ -29,6 +29,10 @@ from google import genai
 from google.genai import types as gtypes
 import PIL.Image
 
+from common import get_api_client_headers
+from common import TrackingType
+
+
 
 _IMAGE_MODEL = "gemini-2.5-flash-image"
 
@@ -58,9 +62,17 @@ def outpaint_image(
 
     outpaint_prompt = "Outpaint the image to the required aspect ratio"
 
-    client = genai.Client(
-        vertexai=True, project=gcp_project, location=gcp_location
+    http_options = gtypes.HttpOptions(
+        headers=get_api_client_headers(TrackingType.IMAGE)
     )
+
+    client = genai.Client(
+        vertexai=True,
+        project=gcp_project,
+        location=gcp_location,
+        http_options=http_options,
+    )
+
     contents = [outpaint_prompt, image]
     generate_config = gtypes.GenerateContentConfig(
         response_modalities=["IMAGE"],
