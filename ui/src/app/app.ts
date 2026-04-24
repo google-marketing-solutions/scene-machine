@@ -23,6 +23,7 @@ import {
   ViewChild,
 } from '@angular/core';
 import {Auth, GoogleAuthProvider, signInWithPopup} from '@angular/fire/auth';
+import {MatButtonModule} from '@angular/material/button';
 import {MatSidenavContainer, MatSidenavModule} from '@angular/material/sidenav';
 import {NavigationEnd, Router, RouterOutlet} from '@angular/router';
 import {filter} from 'rxjs/operators';
@@ -34,7 +35,7 @@ import {Sidebar} from './sidebar/sidebar';
  */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, MatSidenavModule, Sidebar],
+  imports: [MatButtonModule, MatSidenavModule, RouterOutlet, Sidebar],
   templateUrl: './app.html',
   styleUrl: './app.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -50,6 +51,17 @@ export class App implements OnInit {
   protected showLoginMessage = signal(false);
 
   @ViewChild(MatSidenavContainer) sidenavContainer!: MatSidenavContainer;
+
+  login() {
+    signInWithPopup(this.auth, new GoogleAuthProvider())
+      .then(() => {
+        this.loggedIn.set(true);
+        window.location.reload();
+      })
+      .catch(error => {
+        console.log(error);
+      });
+  }
 
   async ngOnInit() {
     // This handles the initial page load for a project.
@@ -82,14 +94,7 @@ export class App implements OnInit {
     } else {
       this.loggedIn.set(false);
       this.showLoginMessage.set(true);
-      signInWithPopup(this.auth, new GoogleAuthProvider())
-        .then(() => {
-          this.loggedIn.set(true);
-          window.location.reload();
-        })
-        .catch(error => {
-          console.log(error);
-        });
+      this.login();
     }
   }
 }
