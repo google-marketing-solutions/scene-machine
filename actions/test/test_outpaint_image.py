@@ -57,7 +57,9 @@ class TestOutpaintImage(unittest.TestCase):
         self.mock_gcs,
         self.mock_workflow_params,
         self.mock_image,
-        target_ratio
+        target_ratio,
+        'gemini-3.1-flash-image-preview',
+        'test-location'
     )
 
     # Assertions
@@ -97,7 +99,9 @@ class TestOutpaintImage(unittest.TestCase):
         self.mock_gcs,
         self.mock_workflow_params,
         self.mock_image,
-        target_ratio
+        target_ratio,
+        'gemini-3.1-flash-image-preview',
+        'test-location'
     )
 
     # Verify store was called with DIFFERENT bytes (resized)
@@ -130,7 +134,9 @@ class TestOutpaintImage(unittest.TestCase):
         self.mock_gcs,
         self.mock_workflow_params,
         self.mock_image,
-        target_ratio
+        target_ratio,
+        'gemini-3.1-flash-image-preview',
+        'test-location'
     )
 
     # Assertions
@@ -154,7 +160,9 @@ class TestOutpaintImage(unittest.TestCase):
           self.mock_gcs,
           self.mock_workflow_params,
           self.mock_image,
-          target_ratio
+          target_ratio,
+          'gemini-3.1-flash-image-preview',
+          'test-location'
       )
 
   @mock.patch('actions_lib.outpainter.outpaint_image')
@@ -191,7 +199,9 @@ class TestOutpaintImage(unittest.TestCase):
             self.mock_gcs,
             self.mock_workflow_params,
             self.mock_image,
-            ratio
+            ratio,
+            'gemini-3.1-flash-image-preview',
+            'test-location'
         )
 
         # Assert store was called and check dimensions

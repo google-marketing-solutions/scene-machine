@@ -33,12 +33,12 @@ from common import get_api_client_headers
 from common import TrackingType
 
 
-
-_IMAGE_MODEL = "gemini-2.5-flash-image"
-
-
 def outpaint_image(
-    image_bytes: bytes, gcp_project: str, gcp_location: str, target_ratio: str
+    image_bytes: bytes,
+    gcp_project: str,
+    gcp_location: str,
+    outpainter_model: str,
+    target_ratio: str,
 ) -> Tuple[bytes, str]:
     """Outpaints the given image using Google Gemini Image.
 
@@ -82,7 +82,7 @@ def outpaint_image(
     )
 
     outpaint_response = client.models.generate_content(
-        model=_IMAGE_MODEL, contents=contents, config=generate_config
+        model=outpainter_model, contents=contents, config=generate_config
     )
 
     if not outpaint_response.candidates:
