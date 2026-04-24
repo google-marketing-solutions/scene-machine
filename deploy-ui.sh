@@ -167,7 +167,7 @@ if [[ "${1:-}" != "local" ]]; then
   echo "Deploying UI (AppEngine)"
   (
     cd ui \
-      && npm install --legacy-peer-deps \
+      && npm ci --legacy-peer-deps \
       && npx ng build --configuration production
   ) \
     && (
