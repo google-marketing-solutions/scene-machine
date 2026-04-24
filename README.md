@@ -91,6 +91,11 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
     *   Run `./deploy-ui.sh` (if you skipped it during backend deployment).
     *   If requested, perform any required manual steps indicated by the script (e.g. linking buckets or configuring OAuth).
 
+5.  **Set up Identity-Aware Proxy**:
+    *   In the [App Engine settings](https://console.cloud.google.com/appengine/settings?serviceId=default), under "Identity-Aware Proxy" select "Configure Now".
+    *   Turn on Identity-Aware Proxy for "App Engine app".
+    *   In the ⋮ menu, select "Settings", then "Custom OAuth", then "Auto-generate credentials".
+
 Once successfully deployed, `./deploy-ui.sh` will output the URL where Scene Machine is available. Note this down to open it in your browser.
 
 To help debug problems with the deployment scripts, you can change their top line `set -eu` to `set -eux`, which will output every single command executed.
