@@ -176,6 +176,10 @@ export class RemixEngineService {
             geminiLocation:
               this.configService.globalConfig.value()!.geminiLocation,
             aspectRatio: this.configService.projectConfig.value().aspectRatio,
+            outpainterModel:
+              this.configService.globalConfig.value()!.outpainterModel,
+            outpainterLocation:
+              this.configService.globalConfig.value()!.outpainterLocation,
           },
           products,
         ),
@@ -254,6 +258,8 @@ export class RemixEngineService {
           },
           parameters: {
             target_ratio: params.aspectRatio,
+            outpainter_model: params.outpainterModel,
+            outpainter_model_location: params.outpainterLocation,
           },
         },
         n_storyboard: {
