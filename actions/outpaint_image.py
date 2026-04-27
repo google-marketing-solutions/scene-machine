@@ -104,6 +104,8 @@ def execute(
     workflow_params: Params,
     image: NodeInput,
     target_ratio: str,
+    outpainter_model: str,
+    outpainter_model_location: str,
 ) -> NodeOutput:
   """Executes the action.
 
@@ -147,7 +149,8 @@ def execute(
     image_bytes, mime_type = outpainter.outpaint_image(
         image_bytes,
         workflow_params[Key.GCP_PROJECT.value],
-        workflow_params[Key.GCP_LOCATION.value],
+        outpainter_model_location,
+        outpainter_model,
         target_ratio,
     )
 

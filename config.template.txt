@@ -1,19 +1,38 @@
 # This is an example of config.txt file with preset values
 # You can use it as a template for your own config.txt file
+# NOTE: Please use only double quotes if you need to wrap a variable below.
 #
 # How to use:
 # 1. cp config.template.txt config.txt
 # 2. Replace <YOUR_PROJECT_ID> with your GCP Project ID parameter
 # 3. Run ./deploy.sh and ./deploy-ui.sh
 
-export PROJECT=<YOUR_PROJECT_ID> # your Project ID
+export PROJECT=<YOUR_PROJECT_ID>
 
-# Preset values
-export REGION=us-central1 # choose from: https://docs.cloud.google.com/tasks/docs/locations
-export GEMINI_REGION=us-central1 # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models
-export GEMINI_MODEL=gemini-2.5-pro # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models#gemini-models
+# Deployment region, choose from: https://docs.cloud.google.com/tasks/docs/locations
+export REGION=us-central1
+
+# Text model.
+# All available models can be found at:
+# https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models#gemini-models
+# Recommended models: gemini-2.5-pro, gemini-3.1-pro-preview
+export GEMINI_MODEL=gemini-2.5-pro
+export GEMINI_REGION=global # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models
+
+# Video generation model.
+# All available models can be found at:
+# https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models#veo-models
+# Recommended models: veo-3.1-generate-001, veo-3.1-fast-generate-001, veo-3.1-lite-generate-001
+export VEO_MODEL=veo-3.1-generate-001
 export VEO_REGION=global # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models
-export VEO_MODEL=veo-3.1-generate-001 # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models#veo-models
+
+# Image outpainting model.
+# All available models can be found at:
+# https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models#gemini-models
+# Recommended models: gemini-2.5-flash-image, gemini-3-pro-image-preview
+export OUTPAINTER_MODEL=gemini-2.5-flash-image
+export OUTPAINTER_REGION=global # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models
+
 API_GATEWAY_REGION=us-central1 # europe-west1 | europe-west2 | us-central1
 APP_ENGINE_REGION=us-central # europe-west | europe-west2/3/6 | us-central
 

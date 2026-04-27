@@ -28,6 +28,7 @@ class TestOutpainter(unittest.TestCase):
         self.mock_image_bytes = b"mock_image_data"
         self.mock_gcp_project = "test-project"
         self.mock_gcp_location = "us-central1"
+        self.mock_outpainter_model = "gemini-3.1-flash-image-preview"
         self.mock_target_ratio = "16:9"
         self.mock_description = "a test image"
         self.mock_outpainted_bytes = b"mock_outpainted_image_bytes"
@@ -69,6 +70,7 @@ class TestOutpainter(unittest.TestCase):
             self.mock_image_bytes,
             self.mock_gcp_project,
             self.mock_gcp_location,
+            self.mock_outpainter_model,
             self.mock_target_ratio,
         )
 
@@ -86,7 +88,7 @@ class TestOutpainter(unittest.TestCase):
         mock_client_instance.models.generate_content.assert_called_once()
         _, kwargs = mock_client_instance.models.generate_content.call_args
         # Fix: IMAGE_MODEL is now private _IMAGE_MODEL
-        self.assertEqual(kwargs["model"], outpainter._IMAGE_MODEL)
+        self.assertEqual(kwargs["model"], self.mock_outpainter_model)
         self.assertIn(
             "Outpaint the image to the required aspect ratio",
             kwargs["contents"][0],
@@ -111,6 +113,7 @@ class TestOutpainter(unittest.TestCase):
                 self.mock_image_bytes,
                 self.mock_gcp_project,
                 self.mock_gcp_location,
+                self.mock_outpainter_model,
                 self.mock_target_ratio,
             )
 
@@ -138,6 +141,7 @@ class TestOutpainter(unittest.TestCase):
                 self.mock_image_bytes,
                 self.mock_gcp_project,
                 self.mock_gcp_location,
+                self.mock_outpainter_model,
                 self.mock_target_ratio,
             )
 
@@ -150,6 +154,7 @@ class TestOutpainter(unittest.TestCase):
                 self.mock_image_bytes,
                 self.mock_gcp_project,
                 self.mock_gcp_location,
+                self.mock_outpainter_model,
                 self.mock_target_ratio,
             )
 
@@ -167,6 +172,7 @@ class TestOutpainter(unittest.TestCase):
                 self.mock_image_bytes,
                 self.mock_gcp_project,
                 self.mock_gcp_location,
+                self.mock_outpainter_model,
                 self.mock_target_ratio,
             )
 
@@ -193,6 +199,7 @@ class TestOutpainter(unittest.TestCase):
                 self.mock_image_bytes,
                 self.mock_gcp_project,
                 self.mock_gcp_location,
+                self.mock_outpainter_model,
                 self.mock_target_ratio,
             )
 

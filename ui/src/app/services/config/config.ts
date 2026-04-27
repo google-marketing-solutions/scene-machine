@@ -92,6 +92,10 @@ interface GlobalConfig {
   geminiModel: string;
   geminiLocation: string;
 
+  // Outpainter
+  outpainterModel: string;
+  outpainterLocation: string;
+
   // Veo
   veoLocation: string;
   veoModel: string;
