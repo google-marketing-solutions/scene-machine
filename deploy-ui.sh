@@ -187,5 +187,17 @@ curl -X PATCH "https://identitytoolkit.googleapis.com/v2/projects/${PROJECT}/con
 
 echo
 echo "Scene Machine UI is deployed, now you can open:"
-echo "https://$(gcloud app describe --format='value(defaultHostname)')"
+if [[ "${1:-}" == "local" ]]; then
+  echo "http://localhost:4200/"
+else
+  echo "https://$(gcloud app describe --format='value(defaultHostname)')"
+fi
+
+echo
+echo "============================================================"
+echo "MANUAL STEP REQUIRED: Set up Identity-Aware Proxy."
+echo "* In the App Engine settings (https://console.cloud.google.com/appengine/settings?serviceId=default), under 'Identity-Aware Proxy' select 'Configure Now'."
+echo "* Turn on Identity-Aware Proxy for 'App Engine app'."
+echo "* In the ⋮ menu, select 'Settings', then 'Custom OAuth', then 'Auto-generate credentials'."
+echo "============================================================"
 echo

@@ -46,43 +46,57 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
 
 ## Deployment
 
-1. In the terminal environment from which you conduct the deployment (which could be the project's Cloud Shell),
-   - Ensure you have [Node.js](https://nodejs.org/en/download) ≥v22 installed.
-   - Ensure you have `git` installed.
-1. Configure your GoogleSource access [here](https://www.googlesource.com/new-password).
-1. Clone the repository with `git clone https://professional-services.googlesource.com/solutions/scene_machine` and switch to its root folder.
-1. Fill `config.txt` based on `config.template.txt`, e.g. create via `cp config.template.txt config.txt` and then edit with `nano config.txt`. Entities like the GCS bucket or Firestore database you specify will be created if they don't yet exist. If they do, deployment would still try to proceed and inform you of their location. Note:
-   - Adhere to the syntax restrictions for the various entities. To be safe, restrict yourself to alphanumerical names (possibly with hyphens) for the databases etc.
-   - If you specify an existing GCS bucket, it must use a non-hierarchical namespace.
-   - The models that you configure will not be available indefinitely. Future versions may remind you to choose newer models if outdated ones are found in `config.txt`, but if you don't update, the application may simply stop working if Google discontinued the configured (and supported) models.
-   - When choosing locations, consider where the required models are actually available. For example, as of writing this, Veo is not available from european endpoints. You can find the available locations [here](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models).
-   - There are some default settings in `firestore_config_ui.template.json` that you could also choose to change prior to deployment. At the moment, the only entries not dependent on `config.txt` nor modifiable in the user interface are two parameters for the "encodingSpeed" and "qualityLevel", both of which refer to the final step of merging scenes into the output video file. However, changing this file may lead to merge conflicts should you want to update your deployment at a later date.
-1. Execute `./deploy.sh` and confirm that you filled `config.txt` by pressing a key.
-   - The script will output estimates of how long individual deployment actions are expected to take, so you know what to expect and when something seems wrong.
-   - In case the Firebase project creation fails:
-     - Stop execution with Ctrl+C.
-     - Open the [Firebase configuration](https://console.cloud.google.com/firebase).
-     - Select "Get started" under "Cloud Storage for Firebase".
-     - Accept the terms of service.
-     - Re-run `./deploy.sh`.
-   - In case you realise that you need to change `config.txt`, depending on the nature of that change you may need to manually remove entities on Google Cloud Platform that the deployment script does not touch if they already exist.
-1. Set up Firebase Storage:
-   - In the [Firebase console](https://console.firebase.google.com), select "Project" on the right, then "Build" on the left, then "Storage", then "Get started".
-   - Via "Continue" and "Create", create a new bucket with default settings.
-   - Select "Add Bucket" from the drop-down menu next to the title "Storage", then "Import existing Google Cloud Storage buckets".
-   - Select the bucket you configured in `config.txt` and confirm by clicking "Import".
-   - Open the "Rules" tab (under the title "Storage"), change `false` to `request.auth != null` and click "Publish".
-1. Ensure you have `@angular/cli` and `firebase-tools` installed, by running `npm i -g firebase-tools`.
-1. Execute `./deploy-ui.sh` and confirm that you filled `config.txt` by pressing a key. At the end, note down the address provided for later opening in your browser.
-1. Set up Firebase Storage Authentication:
-   - In the [Firebase console](https://console.firebase.google.com), select "Project" on the right, "Build" on the left, then "Authentication" and "Get started".
-   - Under "Additional providers" click "Google" and then toggle the "Enable" switch.
-   - Click "Settings", then "Authorized domains".
-   - Add the domain of the App Engine app (e.g. `[PROJECT_ID].[**].r.appspot.com`).
-1. Set up Identity-Aware Proxy:
-   - In the [App Engine settings](https://console.cloud.google.com/appengine/settings?serviceId=default), under "Identity-Aware Proxy" select "Configure Now".
-   - Turn on Identity-Aware Proxy for "App Engine app".
-   - In the ⋮ menu, select "Settings", then "Custom OAuth", then "Auto-generate credentials".
+#### Prerequisites
+*   **Google Cloud Project**: A project on Google Cloud Platform **with billing enabled** and ideally without any existing App Engine apps. *(Note: If an App Engine app already exists, deployment will proceed but will overwrite the `default` service, and you will not be able to change the region.)*
+*   **Permissions**: We recommend having the **Project Owner** role on the Google Cloud project to conduct the deployment successfully.
+*   **Node.js**: Ensure you have [Node.js](https://nodejs.org/en/download) (≥v22) installed.
+*   **Git**: Ensure you have `git` installed.
+*   **Google Cloud SDK (gcloud)**: Ensure you have the [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) installed and initialized.
+*   **Firebase Tools**: Install with `npm i -g firebase-tools`.
+*   **envsubst**: Ensure you have `envsubst` installed (typically via the `gettext` package, e.g., `sudo apt-get install gettext` on Debian/Ubuntu, `brew install gettext` on macOS).
+
+#### Step-by-Step Deployment
+
+1.  **Clone the Repository**
+    ```bash
+    git clone https://github.com/google-marketing-solutions/scene-machine
+    cd scene-machine
+    ```
+
+2.  **Configure the Application**
+    *   Create `config.txt` from the template:
+        ```bash
+        cp config.template.txt config.txt
+        ```
+    *   Edit `config.txt` in your favorite editor (e.g., `nano config.txt`).
+    *   **Important Notes for Configuration:**
+        *   **Naming:** Use alphanumerical names (with hyphens) for entities like databases.
+        *   **Storage:** If using an existing bucket, it must use a non-hierarchical namespace.
+        *   **Locations:** Match model availability (e.g. Veo might not be available in all regions). Check [Google Cloud AI Platform documentation](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations) for locations.
+        *   **Model Lifespans:** Prefer using current models as older ones are discontinued over time. Check [Google Cloud AI Platform documentation](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models) for model lifespans.
+
+3.  **Execute Deployment**
+    *   Run the main deployment script:
+        ```bash
+        ./deploy.sh
+        ```
+    *   *Note: The script outputs estimates regarding run times.*
+    *   *Note: You might be prompted to run the UI deployment script immediately at the end.*
+
+    > [!TIP]
+    > **Troubleshooting Firebase project creation:**
+    > If it fails, stop execution (`Ctrl+C`), go to the [Firebase console](https://console.cloud.google.com/firebase), select "Get started" under "Cloud Storage for Firebase", accept the terms, and re-run `./deploy.sh`.
+
+4.  **Deploy UI**
+    *   Run `./deploy-ui.sh` (if you skipped it during backend deployment).
+    *   If requested, perform any required manual steps indicated by the script (e.g. linking buckets or configuring OAuth).
+
+5.  **Set up Identity-Aware Proxy**:
+    *   In the [App Engine settings](https://console.cloud.google.com/appengine/settings?serviceId=default), under "Identity-Aware Proxy" select "Configure Now".
+    *   Turn on Identity-Aware Proxy for "App Engine app".
+    *   In the ⋮ menu, select "Settings", then "Custom OAuth", then "Auto-generate credentials".
+
+Once successfully deployed, `./deploy-ui.sh` will output the URL where Scene Machine is available. Note this down to open it in your browser.
 
 To help debug problems with the deployment scripts, you can change their top line `set -eu` to `set -eux`, which will output every single command executed.
 
