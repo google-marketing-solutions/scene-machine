@@ -47,6 +47,7 @@ def outpaint_image(
         image.
       gcp_project: the ID of Google Cloud project to use with Imagen.
       gcp_location: the Google Cloud location to use with the model.
+      outpainter_model: the model to use for outpainting.
       target_ratio: the aspect ratio of the outpainted image. This is a string in
         the form of "width:height" (e.g. "16:9")
 
