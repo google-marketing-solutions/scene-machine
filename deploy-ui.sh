@@ -196,10 +196,20 @@ else
 fi
 
 echo
+IAP_ENABLED=$(gcloud app describe --project=$PROJECT --format="value(iap.enabled)" 2>/dev/null || echo "")
+
+if [[ ! "${IAP_ENABLED:-}" =~ [tT]rue ]]; then
+  echo "============================================================"
+  echo "MANUAL STEP REQUIRED: Set up Identity-Aware Proxy."
+  echo "* In the App Engine settings (https://console.cloud.google.com/appengine/settings?serviceId=default), under 'Identity-Aware Proxy' select 'Configure Now'."
+  echo "* Turn on Identity-Aware Proxy for 'App Engine app'."
+  echo "* In the ⋮ menu, select 'Settings', then 'Custom OAuth', then 'Auto-generate credentials'."
+  echo "============================================================"
+  echo
+fi
+
 echo "============================================================"
-echo "MANUAL STEP REQUIRED: Set up Identity-Aware Proxy."
-echo "* In the App Engine settings (https://console.cloud.google.com/appengine/settings?serviceId=default), under 'Identity-Aware Proxy' select 'Configure Now'."
-echo "* Turn on Identity-Aware Proxy for 'App Engine app'."
-echo "* In the ⋮ menu, select 'Settings', then 'Custom OAuth', then 'Auto-generate credentials'."
+echo "MANUAL STEP REQUIRED: Grant User Access."
+echo "* Remember to grant users the 'Remix Engine role' in IAM so they can access the app!"
 echo "============================================================"
 echo
