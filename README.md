@@ -111,8 +111,9 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
     > [!TIP]
     > **Troubleshooting Firebase deployment failures:**
     > If `./deploy.sh` fails at the Firebase step with an error like `Error: Project not found`, it usually means the Firebase CLI cannot access the project or terms have not been accepted.
-    > 
+    >
     > **How to fix it:**
+    >
     > 1. **Check Login:** Ensure you are logged in by running `firebase login` in your terminal.
     > 2. **Manual Fallback (Accept Terms):** If still failing, go to the [Firebase Console](https://console.firebase.google.com/).
     > 3. Click **Add Project** and select your existing Google Cloud project from the dropdown list.
@@ -129,11 +130,21 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
     - Go to the [Firebase console](https://console.firebase.google.com/), select your project then click **Authentication > Sign-in method**.
     - Click **Add new provider**, choose **Google** then enable and save it.
 
-6.  **Deploy UI**
+6.  **Link Storage Bucket to Firebase**
+    - Go to the [Firebase console](https://console.firebase.google.com/).
+    - Select your project from the list.
+    - Hover over **Databases & Storage** on the left menu and select **Storage**.
+    - Click **Get started** (if prompted) and ensure the location selected is the same as you selected for the project.
+    - _Note: No-cost locations are only available in the USA._
+    - Click on the bucket name dropdown and select **+ Add bucket** (if not automatically prompted).
+    - Select **Import existing Google Cloud Storage buckets**.
+    - Select your project bucket and confirm.
+
+7.  **Deploy UI**
     - Run `./deploy-ui.sh` (if you skipped it during backend deployment).
     - If requested, perform any required manual steps indicated by the script (e.g. linking buckets or configuring OAuth).
 
-7.  **Set up Identity-Aware Proxy**:
+8.  **Set up Identity-Aware Proxy**:
     - In the [App Engine settings](https://console.cloud.google.com/appengine/settings?serviceId=default), under "Identity-Aware Proxy" select "Configure Now".
     - Turn on Identity-Aware Proxy for "App Engine app".
     - In the ⋮ menu, select "Settings", then "Custom OAuth", then "Auto-generate credentials".
