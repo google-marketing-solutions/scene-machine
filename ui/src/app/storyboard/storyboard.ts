@@ -46,13 +46,13 @@ import {MatSlideToggleModule} from '@angular/material/slide-toggle';
 import {MatSliderModule} from '@angular/material/slider';
 import {MatTabsModule} from '@angular/material/tabs';
 import {MatTooltipModule} from '@angular/material/tooltip';
+import {ClientMediaService} from '../services/client-media/client-media';
 import {
   ConfigService,
   GeneratedScene,
   ProvidedVideoScene,
   toDecimals,
 } from '../services/config/config';
-import {GenerateThumbnailService} from '../services/generate-thumbnail/generate-thumbnail';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {
   AddSceneDialog,
@@ -96,7 +96,7 @@ export class Storyboard {
   config = inject(ConfigService);
   protected remixEngineService = inject(RemixEngineService);
   private dialog = inject(MatDialog);
-  private generateThumbnailService = inject(GenerateThumbnailService);
+  private clientMediaService = inject(ClientMediaService);
 
   videoElement = viewChild<ElementRef<HTMLVideoElement>>('mainVideo');
   timelineTrack = viewChild<ElementRef<HTMLElement>>('timelineTrack');
@@ -518,12 +518,12 @@ export class Storyboard {
             path: uploadResult.path,
           };
           scene.durationSeconds = duration;
-          scene.lowQualityThumbnail = await this.generateThumbnailService
+          scene.lowQualityThumbnail = await this.clientMediaService
             .generateLowQualityThumbnail(result.file, 'video')
-            .then(blob => this.generateThumbnailService.toBase64(blob));
-          scene.highQualityThumbnail = await this.generateThumbnailService
+            .then(blob => this.clientMediaService.toBase64(blob));
+          scene.highQualityThumbnail = await this.clientMediaService
             .generateHighQualityThumbnail(result.file, 'video')
-            .then(blob => this.generateThumbnailService.toFile(blob))
+            .then(blob => this.clientMediaService.toFile(blob))
             .then(file => this.remixEngineService.uploadThumbnail(file));
           this.updateScenes(scene);
         }
@@ -648,6 +648,22 @@ export class Storyboard {
     console.log('Upload triggered for file:', file.name);
     const sceneId = this.selectedSceneId();
     if (this.config.isGeneratedScene(this.selectedScene()) && sceneId) {
+      if (
+        file.type.startsWith('image/') &&
+        !['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)
+      ) {
+        const newFileName =
+          file.name.split('.').slice(0, -1).join('.') + '.jpeg';
+        file = new File(
+          [
+            await this.clientMediaService.convertImage(file, {
+              mimeType: 'image/jpeg',
+            }),
+          ],
+          newFileName,
+          {type: 'image/jpeg'},
+        );
+      }
       const {path, url} = await this.remixEngineService.uploadMedia(file);
       const scene = this.config.projectConfig
         .value()
@@ -657,21 +673,21 @@ export class Storyboard {
         try {
           const [lowQualityThumbnail, highQualityThumbnail] = await Promise.all(
             [
-              this.generateThumbnailService.generateLowQualityThumbnail(
+              this.clientMediaService.generateLowQualityThumbnail(
                 file,
                 'image',
               ),
-              this.generateThumbnailService.generateHighQualityThumbnail(
+              this.clientMediaService.generateHighQualityThumbnail(
                 file,
                 'image',
               ),
             ],
           );
           scene.lowQualityThumbnail =
-            await this.generateThumbnailService.toBase64(lowQualityThumbnail);
+            await this.clientMediaService.toBase64(lowQualityThumbnail);
           scene.highQualityThumbnail =
             await this.remixEngineService.uploadThumbnail(
-              this.generateThumbnailService.toFile(highQualityThumbnail),
+              this.clientMediaService.toFile(highQualityThumbnail),
             );
         } catch (error) {
           console.log(error);

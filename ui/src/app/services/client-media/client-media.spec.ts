@@ -16,16 +16,16 @@
 
 import {TestBed} from '@angular/core/testing';
 import {beforeEach, describe, expect, it} from 'vitest';
-import {GenerateThumbnailService} from './generate-thumbnail';
+import {ClientMediaService} from './client-media';
 
-describe('GenerateThumbnailService', () => {
-  let service: GenerateThumbnailService;
+describe('ClientMediaService', () => {
+  let service: ClientMediaService;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
-      providers: [GenerateThumbnailService],
+      providers: [ClientMediaService],
     });
-    service = TestBed.inject(GenerateThumbnailService);
+    service = TestBed.inject(ClientMediaService);
   });
 
   it('should be created', () => {

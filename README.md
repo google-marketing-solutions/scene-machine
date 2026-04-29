@@ -157,7 +157,7 @@ To help debug problems with the deployment scripts, you can change their top lin
 
 ## Adding Users
 
-Each person intending to use Scene Machine needs to be given the "Remix Engine user" role in the Google Cloud project in which the tool is deployed.
+Each person intending to use Scene Machine needs to be given the "Scene Machine User" role in the Google Cloud project in which the tool is deployed.
 
 ## Using Scene Machine
 

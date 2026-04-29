@@ -32,6 +32,7 @@ import {
 } from '@angular/fire/storage';
 import {MatSnackBar} from '@angular/material/snack-bar';
 import {filter, firstValueFrom, Observable, repeat, retry, tap} from 'rxjs';
+import {ClientMediaService} from '../client-media/client-media';
 import {
   ASPECT_RATIO_DEVIATION_THRESHOLD,
   AudioTrack,
@@ -46,7 +47,6 @@ import {
   Resolution,
   VisualOverlay,
 } from '../config/config';
-import {GenerateThumbnailService} from '../generate-thumbnail/generate-thumbnail';
 import {
   CombineVideoArrangement as CombineScenesArrangement,
   CombineScenesWorkflowParameters,
@@ -76,7 +76,7 @@ export class RemixEngineService {
   private httpClient = inject(HttpClient);
   private injector = inject(EnvironmentInjector);
   private storage = inject(Storage);
-  private thumbnailService = inject(GenerateThumbnailService);
+  private clientMediaService = inject(ClientMediaService);
 
   private startWorkflow(
     workflowDefinition: object,
@@ -571,16 +571,16 @@ export class RemixEngineService {
             return getDownloadURL(reference);
           });
 
-          const lowQualityThumbnail = await this.thumbnailService
+          const lowQualityThumbnail = await this.clientMediaService
             .generateLowQualityThumbnail(url, 'video')
-            .then(blob => this.thumbnailService.toBase64(blob))
+            .then(blob => this.clientMediaService.toBase64(blob))
             .catch(e => {
               console.log(e);
               return undefined;
             });
-          const highQualityThumbnail = await this.thumbnailService
+          const highQualityThumbnail = await this.clientMediaService
             .generateHighQualityThumbnail(url, 'video')
-            .then(blob => this.thumbnailService.toFile(blob))
+            .then(blob => this.clientMediaService.toFile(blob))
             .then(file => this.uploadThumbnail(file))
             .catch(e => {
               console.log(e);
