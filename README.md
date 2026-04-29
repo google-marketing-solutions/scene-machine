@@ -47,54 +47,56 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
 ## Deployment
 
 #### Prerequisites
-*   **Google Cloud Project**: A project on Google Cloud Platform **with billing enabled** and ideally without any existing App Engine apps. *(Note: If an App Engine app already exists, deployment will proceed but will overwrite the `default` service, and you will not be able to change the region.)*
-*   **Permissions**: We recommend having the **Project Owner** role on the Google Cloud project to conduct the deployment successfully.
-*   **Node.js**: Ensure you have [Node.js](https://nodejs.org/en/download) (≥v22) installed.
-*   **Git**: Ensure you have `git` installed.
-*   **Google Cloud SDK (gcloud)**: Ensure you have the [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) installed and initialized.
-*   **Firebase Tools**: Install with `npm i -g firebase-tools`.
-*   **envsubst**: Ensure you have `envsubst` installed (typically via the `gettext` package, e.g., `sudo apt-get install gettext` on Debian/Ubuntu, `brew install gettext` on macOS).
+
+- **Google Cloud Project**: A project on Google Cloud Platform **with billing enabled** and ideally without any existing App Engine apps. _(Note: If an App Engine app already exists, deployment will proceed but will overwrite the `default` service, and you will not be able to change the region.)_
+- **Permissions**: We recommend having the **Project Owner** role on the Google Cloud project to conduct the deployment successfully.
+- **Node.js**: Ensure you have [Node.js](https://nodejs.org/en/download) (≥v22) installed.
+- **Git**: Ensure you have `git` installed.
+- **Google Cloud SDK (gcloud)**: Ensure you have the [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) installed and initialized.
+- **Firebase Tools**: Install with `npm i -g firebase-tools`.
+- **envsubst**: Ensure you have `envsubst` installed (typically via the `gettext` package, e.g., `sudo apt-get install gettext` on Debian/Ubuntu, `brew install gettext` on macOS).
 
 #### Step-by-Step Deployment
 
 1.  **Clone the Repository**
+
     ```bash
     git clone https://github.com/google-marketing-solutions/scene-machine
     cd scene-machine
     ```
 
 2.  **Configure the Application**
-    *   Create `config.txt` from the template:
-        ```bash
-        cp config.template.txt config.txt
-        ```
-    *   Edit `config.txt` in your favorite editor (e.g., `nano config.txt`).
-    *   **Important Notes for Configuration:**
-        *   **Naming:** Use alphanumerical names (with hyphens) for entities like databases.
-        *   **Storage:** If using an existing bucket, it must use a non-hierarchical namespace.
-        *   **Locations:** Match model availability (e.g. Veo might not be available in all regions). Check [Google Cloud AI Platform documentation](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations) for locations.
-        *   **Model Lifespans:** Prefer using current models as older ones are discontinued over time. Check [Google Cloud AI Platform documentation](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models) for model lifespans.
+    - Create `config.txt` from the template:
+      ```bash
+      cp config.template.txt config.txt
+      ```
+    - Edit `config.txt` in your favorite editor (e.g., `nano config.txt`).
+    - **Important Notes for Configuration:**
+      - **Naming:** Use alphanumerical names (with hyphens) for entities like databases.
+      - **Storage:** If using an existing bucket, it must use a non-hierarchical namespace.
+      - **Locations:** Match model availability (e.g. Veo might not be available in all regions). Check [Google Cloud AI Platform documentation](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations) for locations.
+      - **Model Lifespans:** Prefer using current models as older ones are discontinued over time. Check [Google Cloud AI Platform documentation](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models) for model lifespans.
 
 3.  **Execute Deployment**
-    *   Run the main deployment script:
-        ```bash
-        ./deploy.sh
-        ```
-    *   *Note: The script outputs estimates regarding run times.*
-    *   *Note: You might be prompted to run the UI deployment script immediately at the end.*
+    - Run the main deployment script:
+      ```bash
+      ./deploy.sh
+      ```
+    - _Note: The script outputs estimates regarding run times._
+    - _Note: You might be prompted to run the UI deployment script immediately at the end._
 
     > [!TIP]
     > **Troubleshooting Firebase project creation:**
     > If it fails, stop execution (`Ctrl+C`), go to the [Firebase console](https://console.cloud.google.com/firebase), select "Get started" under "Cloud Storage for Firebase", accept the terms, and re-run `./deploy.sh`.
 
 4.  **Deploy UI**
-    *   Run `./deploy-ui.sh` (if you skipped it during backend deployment).
-    *   If requested, perform any required manual steps indicated by the script (e.g. linking buckets or configuring OAuth).
+    - Run `./deploy-ui.sh` (if you skipped it during backend deployment).
+    - If requested, perform any required manual steps indicated by the script (e.g. linking buckets or configuring OAuth).
 
 5.  **Set up Identity-Aware Proxy**:
-    *   In the [App Engine settings](https://console.cloud.google.com/appengine/settings?serviceId=default), under "Identity-Aware Proxy" select "Configure Now".
-    *   Turn on Identity-Aware Proxy for "App Engine app".
-    *   In the ⋮ menu, select "Settings", then "Custom OAuth", then "Auto-generate credentials".
+    - In the [App Engine settings](https://console.cloud.google.com/appengine/settings?serviceId=default), under "Identity-Aware Proxy" select "Configure Now".
+    - Turn on Identity-Aware Proxy for "App Engine app".
+    - In the ⋮ menu, select "Settings", then "Custom OAuth", then "Auto-generate credentials".
 
 Once successfully deployed, `./deploy-ui.sh` will output the URL where Scene Machine is available. Note this down to open it in your browser.
 
@@ -102,7 +104,7 @@ To help debug problems with the deployment scripts, you can change their top lin
 
 ## Adding Users
 
-Each person intending to use Scene Machine needs to be given the "Remix Engine user" role in the Google Cloud project in which the tool is deployed.
+Each person intending to use Scene Machine needs to be given the "Scene Machine User" role in the Google Cloud project in which the tool is deployed.
 
 ## Using Scene Machine
 

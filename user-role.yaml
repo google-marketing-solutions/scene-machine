@@ -12,9 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-title: 'Remix Engine user'
-description: 'Role needed to use an application based on Remix Engine.'
-stage: 'BETA'
+title: "Scene Machine User"
+description: "Role needed to use an application based on Remix Engine."
+stage: "BETA"
 includedPermissions:
   - iap.webServiceVersions.accessViaIAP
   - resourcemanager.projects.get
