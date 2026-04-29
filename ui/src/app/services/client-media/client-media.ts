@@ -78,17 +78,7 @@ export class ClientMediaService {
     return canvas;
   }
 
-  /**
-   * Generates a thumbnail from a video URL with optional size constraints.
-   *
-   * @param videoUrl The URL of the video.
-   * @param options Optional parameters for the thumbnail generation.
-   * @param options.seekTimeSeconds The time in seconds to extract the frame from. Defaults to 1.
-   * @param options.maxWidth Optional maximum width for the thumbnail.
-   * @param options.maxHeight Optional maximum height for the thumbnail.
-   * @returns A Promise that resolves with the data URL of the thumbnail image.
-   */
-  convertVideo(
+  convertVideoToImage(
     videoSource: string | File | Blob,
     options: {
       seekTimeSeconds: number;
@@ -244,7 +234,7 @@ export class ClientMediaService {
     type: 'video' | 'image',
   ) {
     if (type === 'video') {
-      return this.convertVideo(src, {
+      return this.convertVideoToImage(src, {
         seekTimeSeconds: 1,
         maxWidth: 20,
         maxHeight: 20,
@@ -266,7 +256,7 @@ export class ClientMediaService {
     type: 'video' | 'image',
   ) {
     if (type === 'video') {
-      return this.convertVideo(src, {
+      return this.convertVideoToImage(src, {
         seekTimeSeconds: 1,
         maxWidth: 500,
         maxHeight: 500,
