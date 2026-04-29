@@ -41,6 +41,7 @@ import {MatSliderModule} from '@angular/material/slider';
 import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {MatTooltipModule} from '@angular/material/tooltip';
 import {ActivatedRoute, Router, RouterLink} from '@angular/router';
+import {ClientMediaService} from '../services/client-media/client-media';
 import {
   ASPECT_RATIO_DEVIATION_THRESHOLD,
   AspectRatio,
@@ -95,6 +96,7 @@ export class Setup {
   private readonly route = inject(ActivatedRoute);
   private readonly snackBar = inject(MatSnackBar);
   readonly config = inject(ConfigService);
+  readonly clientMediaService = inject(ClientMediaService);
   readonly templatesService = inject(TemplatesService);
   readonly auth = inject(Auth);
 
@@ -288,6 +290,19 @@ export class Setup {
     void Promise.all(
       fileArray.map(async file => {
         if (file.type.startsWith('image/')) {
+          if (!['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)) {
+            const newFileName =
+              file.name.split('.').slice(0, -1).join('.') + '.jpeg';
+            file = new File(
+              [
+                await this.clientMediaService.convertImage(file, {
+                  mimeType: 'image/jpeg',
+                }),
+              ],
+              newFileName,
+              {type: 'image/jpeg'},
+            );
+          }
           const {path, url} = await this.remixEngineService.uploadMedia(file);
           return {
             path,

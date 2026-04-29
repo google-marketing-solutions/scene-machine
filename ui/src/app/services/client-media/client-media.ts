@@ -17,13 +17,15 @@
 import {Injectable} from '@angular/core';
 
 /**
- * Service for generating thumbnails from video URLs on the frontend.
+ * Service for transforming media using canvas, e.g. for generating thumbnails.
  */
 @Injectable({
   providedIn: 'root',
 })
-export class GenerateThumbnailService {
+export class ClientMediaService {
   constructor() {}
+
+  private readonly defaultMimeType = 'image/jpeg';
 
   private canvasFromMedia(
     src: HTMLImageElement | HTMLVideoElement,
@@ -76,26 +78,17 @@ export class GenerateThumbnailService {
     return canvas;
   }
 
-  /**
-   * Generates a thumbnail from a video URL with optional size constraints.
-   *
-   * @param videoUrl The URL of the video.
-   * @param options Optional parameters for the thumbnail generation.
-   * @param options.seekTimeSeconds The time in seconds to extract the frame from. Defaults to 1.
-   * @param options.maxWidth Optional maximum width for the thumbnail.
-   * @param options.maxHeight Optional maximum height for the thumbnail.
-   * @returns A Promise that resolves with the data URL of the thumbnail image.
-   */
-  generateThumbnailFromVideo(
+  convertVideoToImage(
     videoSource: string | File | Blob,
     options: {
       seekTimeSeconds: number;
+      mimeType?: string;
+      quality?: number;
       maxWidth?: number;
       maxHeight?: number;
       blur?: number;
     } = {seekTimeSeconds: 1},
   ): Promise<Blob> {
-    const {seekTimeSeconds} = options;
     return new Promise((resolve, reject) => {
       const video = document.createElement('video');
       video.crossOrigin = 'anonymous';
@@ -111,18 +104,22 @@ export class GenerateThumbnailService {
       video.muted = true;
 
       video.onloadedmetadata = () => {
-        video.currentTime = seekTimeSeconds;
+        video.currentTime = options.seekTimeSeconds;
       };
 
       video.onseeked = () => {
         try {
           const canvas = this.canvasFromMedia(video, options);
-          canvas.toBlob(blob => {
-            if (!blob) {
-              throw new Error('Failed to generate thumbnail');
-            }
-            resolve(blob);
-          });
+          canvas.toBlob(
+            blob => {
+              if (!blob) {
+                throw new Error('Failed to generate thumbnail');
+              }
+              resolve(blob);
+            },
+            options.mimeType || this.defaultMimeType,
+            options.quality,
+          );
         } catch (error) {
           reject(error);
         } finally {
@@ -145,13 +142,15 @@ export class GenerateThumbnailService {
     });
   }
 
-  generateThumbnailFromImage(
+  convertImage(
     imageSrc: string | File | Blob,
     options: {
-      maxWidth: number;
-      maxHeight: number;
+      mimeType?: string;
+      quality?: number;
+      maxWidth?: number;
+      maxHeight?: number;
       blur?: number;
-    },
+    } = {},
   ): Promise<Blob> {
     return new Promise<Blob>((resolve, reject) => {
       const imageElement = document.createElement('img');
@@ -167,13 +166,22 @@ export class GenerateThumbnailService {
 
       imageElement.onload = () => {
         try {
-          const canvas = this.canvasFromMedia(imageElement, options);
-          canvas.toBlob(blob => {
-            if (!blob) {
-              throw new Error('Failed to generate thumbnail');
-            }
-            resolve(blob);
+          const canvas = this.canvasFromMedia(imageElement, {
+            maxWidth: options.maxWidth,
+            maxHeight: options.maxHeight,
+            blur: options.blur,
           });
+
+          canvas.toBlob(
+            blob => {
+              if (!blob) {
+                throw new Error('Failed to convert image');
+              }
+              resolve(blob);
+            },
+            options.mimeType || this.defaultMimeType,
+            options.quality,
+          );
         } catch (error) {
           reject(error);
         } finally {
@@ -208,12 +216,17 @@ export class GenerateThumbnailService {
 
   toFile(
     blob: Blob,
-    options: {mimeType: string; fileName: string} = {
-      mimeType: 'image/jpeg',
-      fileName: 'thumbnail.jpg',
-    },
+    options: {mimeType?: string; fileName?: string} = {},
   ): File {
-    return new File([blob], options.fileName, {type: options.mimeType});
+    const mimeType = options.mimeType || blob.type || this.defaultMimeType;
+    let fileName = options.fileName;
+
+    if (!fileName) {
+      const extension = mimeType.split('/')[1];
+      fileName = `thumbnail.${extension}`;
+    }
+
+    return new File([blob], fileName, {type: mimeType});
   }
 
   generateLowQualityThumbnail(
@@ -221,14 +234,14 @@ export class GenerateThumbnailService {
     type: 'video' | 'image',
   ) {
     if (type === 'video') {
-      return this.generateThumbnailFromVideo(src, {
+      return this.convertVideoToImage(src, {
         seekTimeSeconds: 1,
         maxWidth: 20,
         maxHeight: 20,
         blur: 2,
       });
     } else if (type === 'image') {
-      return this.generateThumbnailFromImage(src, {
+      return this.convertImage(src, {
         maxWidth: 20,
         maxHeight: 20,
         blur: 2,
@@ -243,14 +256,14 @@ export class GenerateThumbnailService {
     type: 'video' | 'image',
   ) {
     if (type === 'video') {
-      return this.generateThumbnailFromVideo(src, {
+      return this.convertVideoToImage(src, {
         seekTimeSeconds: 1,
         maxWidth: 500,
         maxHeight: 500,
       });
     }
     if (type === 'image') {
-      return this.generateThumbnailFromImage(src, {
+      return this.convertImage(src, {
         maxWidth: 500,
         maxHeight: 500,
       });
