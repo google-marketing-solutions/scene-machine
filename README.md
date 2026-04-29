@@ -116,9 +116,9 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
     >
     > 1. **Check Login:** Ensure you are logged in by running `firebase login` in your terminal.
     > 2. **Manual Fallback (Accept Terms):** If still failing, go to the [Firebase Console](https://console.firebase.google.com/).
-    > 3. Click **Add Project** and select your existing Google Cloud project from the dropdown list.
-    > 4. Follow the prompts to add Firebase resources. This process will guide you through accepting the necessary terms of service.
-    > 5. Once completed in the console, return to your terminal and re-run `./deploy.sh`.
+    >   1. Click **Add Project** and select your existing Google Cloud project from the dropdown list.
+    >   2. Follow the prompts to add Firebase resources. This process will guide you through accepting the necessary terms of service.
+    >   3. Once completed in the console, return to your terminal and re-run `./deploy.sh`.
 
 4.  **Set up OAuth consent screen:**
     - In your Google Cloud console, go to **API & Services > Credentials > OAuth consent screen**.
@@ -135,7 +135,8 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
     - Select your project from the list.
     - Hover over **Databases & Storage** on the left menu and select **Storage**.
     - Click **Get started** (if prompted) and ensure the location selected is the same as you selected for the project.
-    - _Note: No-cost locations are only available in the USA._
+      - _Note: No-cost locations are only available in the USA._
+    - If asked, start in production mode to ensure the data in firebase is kept private.
     - Click on the bucket name dropdown and select **+ Add bucket** (if not automatically prompted).
     - Select **Import existing Google Cloud Storage buckets**.
     - Select your project bucket and confirm.
@@ -148,6 +149,7 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
     - In the [App Engine settings](https://console.cloud.google.com/appengine/settings?serviceId=default), under "Identity-Aware Proxy" select "Configure Now".
     - Turn on Identity-Aware Proxy for "App Engine app".
     - In the ⋮ menu, select "Settings", then "Custom OAuth", then "Auto-generate credentials".
+      - _Note: You will not need to download the credentials._
 
 Once successfully deployed, `./deploy-ui.sh` will output the URL where Scene Machine is available. Note this down to open it in your browser.
 
