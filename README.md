@@ -109,8 +109,15 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
     - _Note: You might be prompted to run the UI deployment script immediately at the end._
 
     > [!TIP]
-    > **Troubleshooting Firebase project creation:**
-    > If it fails, stop execution (`Ctrl+C`), go to the [Firebase console](https://console.cloud.google.com/firebase), select "Get started" under "Cloud Storage for Firebase", accept the terms, and re-run `./deploy.sh`.
+    > **Troubleshooting Firebase deployment failures:**
+    > If `./deploy.sh` fails at the Firebase step with an error like `Error: Project not found`, it usually means the Firebase CLI cannot access the project or terms have not been accepted.
+    > 
+    > **How to fix it:**
+    > 1. **Check Login:** Ensure you are logged in by running `firebase login` in your terminal.
+    > 2. **Manual Fallback (Accept Terms):** If still failing, go to the [Firebase Console](https://console.firebase.google.com/).
+    > 3. Click **Add Project** and select your existing Google Cloud project from the dropdown list.
+    > 4. Follow the prompts to add Firebase resources. This process will guide you through accepting the necessary terms of service.
+    > 5. Once completed in the console, return to your terminal and re-run `./deploy.sh`.
 
 4.  **Set up OAuth consent screen:**
     - In your Google Cloud console, go to **API & Services > Credentials > OAuth consent screen**.
