@@ -210,6 +210,6 @@ fi
 
 echo "============================================================"
 echo "MANUAL STEP REQUIRED: Grant User Access."
-echo "* Remember to grant users the 'Remix Engine role' in IAM so they can access the app!"
+echo "* Remember to grant users the 'Scene Machine User' role in IAM so they can access the app!"
 echo "============================================================"
 echo
