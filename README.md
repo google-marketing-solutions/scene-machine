@@ -74,6 +74,7 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
     - Edit `config.txt` in your favorite editor (e.g., `nano config.txt`).
 
     **Variables defined in `config.txt`:**
+    Check [available models and their regions](https://ai.google.dev/gemini-api/docs/models) to advise users to check the latest available models and their regions.
 
     | Variable Name          | Description                                                | Recommended Values / Notes                           |
     | :--------------------- | :--------------------------------------------------------- | :--------------------------------------------------- |
@@ -116,9 +117,9 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
     >
     > 1. **Check Login:** Ensure you are logged in by running `firebase login` in your terminal.
     > 2. **Manual Fallback (Accept Terms):** If still failing, go to the [Firebase Console](https://console.firebase.google.com/).
-    >   1. Click **Add Project** and select your existing Google Cloud project from the dropdown list.
-    >   2. Follow the prompts to add Firebase resources. This process will guide you through accepting the necessary terms of service.
-    >   3. Once completed in the console, return to your terminal and re-run `./deploy.sh`.
+    > 3. Click **Add Project** and select your existing Google Cloud project from the dropdown list.
+    > 4. Follow the prompts to add Firebase resources. This process will guide you through accepting the necessary terms of service.
+    > 5. Once completed in the console, return to your terminal and re-run `./deploy.sh`.
 
 4.  **Set up OAuth consent screen:**
     - In your Google Cloud console, go to **API & Services > Credentials > OAuth consent screen**.
