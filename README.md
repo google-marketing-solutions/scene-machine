@@ -27,10 +27,10 @@ _Disclaimer: This is not an officially supported Google product._
 
 In the generation steps, the user has full control, but can also rely on the tool's recommendations.
 
-[Technical Requirements](#requirements) •
+[Technical Requirements](#technical-requirements) •
 [Deployment](#deployment) •
 [Using Scene Machine](#using-scene-machine) •
-[Alternatives](#alternatives) •
+[Alternatives](#alternatives-to-scene-machine) •
 [Developers' Guide](DEVELOPING.md)
 
 ## Technical Requirements
@@ -41,6 +41,38 @@ To deploy this application, you need a **project on Google Cloud Platform withou
 - The actual processing is performed by **Remix Engine**, a modular Python application on Cloud Run. See the [Developers' Guide](DEVELOPING.md) for details.
 
 Scene Machine sends workflow definitions to Remix Engine, which orchestrates its functional modules (e.g. turning images into videos) and reports back on results.
+
+### Google Cloud APIs Used
+
+The following APIs are used by Scene Machine:
+
+- Vertex AI API ( aiplatform.googleapis.com ): Used for accessing Gemini and Veo models for text, image, and video generation.
+- API Gateway API ( apigateway.googleapis.com ): Used to create and manage the API Gateway that routes traffic to the backend.
+- Artifact Registry API ( artifactregistry.googleapis.com ): Used to store the Docker container images for the backend service.
+- Cloud Build API ( cloudbuild.googleapis.com ): Used to build the container images for Cloud Run.
+- Cloud Tasks API ( cloudtasks.googleapis.com ): Used for managing task queues for asynchronous processing (e.g., video generation).
+- Cloud Firestore API ( firestore.googleapis.com ): Used for the database storing application state and configurations.
+- Cloud Run API ( run.googleapis.com ): Used to host and run the backend service.
+- Service Control API ( servicecontrol.googleapis.com ): Required by API Gateway for managed services.
+- Identity-Aware Proxy (IAP) API ( iap.googleapis.com ): Used to secure the application and manage access.
+- Firebase API ( firebase.googleapis.com ): Used for Firebase integration, project management, and rules deployment.
+- Identity Toolkit API ( identitytoolkit.googleapis.com ): Used for Firebase Authentication and managing user domains.
+
+_Please note that most of the APIs are enabled automatically when you run the deployment script. Cloud Storage and Cloud Logging are normally enabled by default. If your organization disables these APIs, you will need to enable them manually._
+
+  ### APIs Required by Commands in Scripts (But Not Explicitly Enabled)
+
+  The scripts use commands that interact with these APIs, so they should be enabled on the project:
+
+  • App Engine Admin API ( appengine.googleapis.com ): The UI is deployed to App Engine (see  deploy-ui.sh  line 179).
+  • API Keys API ( apikeys.googleapis.com ): Used to create and manage API keys for the API Gateway (see  deploy.sh  line 229).
+
+  ### Core APIs (Usually Enabled by Default)
+
+  These APIs are used by the application and are typically enabled by default in new projects, but you should verify they are active:
+
+  • Cloud Storage API ( storage.googleapis.com ): Used for storing assets, examples, and generated content.
+  • Cloud Logging API ( logging.googleapis.com ): Used for application logging (referenced in  requirements.in ).
 
 ## Deployment
 
