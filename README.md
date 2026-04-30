@@ -27,10 +27,10 @@ _Disclaimer: This is not an officially supported Google product._
 
 In the generation steps, the user has full control, but can also rely on the tool's recommendations.
 
-[Technical Requirements](#requirements) •
+[Technical Requirements](#technical-requirements) •
 [Deployment](#deployment) •
 [Using Scene Machine](#using-scene-machine) •
-[Alternatives](#alternatives) •
+[Alternatives](#alternatives-to-scene-machine) •
 [Developers' Guide](DEVELOPING.md)
 
 ## Technical Requirements
