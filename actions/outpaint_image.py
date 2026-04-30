@@ -60,7 +60,9 @@ def _check_aspect_ratio(
   """
   width, height = img.size
   current_ratio = width / height
-  if current_ratio > expected_ratio:
+  if current_ratio == expected_ratio:
+    return width, height, True
+  elif current_ratio > expected_ratio:
     target_width = round(height * expected_ratio)
     target_height = height
   else:
@@ -163,8 +165,8 @@ def execute(
     if not correct_ratio:
       logger.info('Cropping image...')
       img = _crop_image(img, target_width, target_height)
-      mime_type = ContentType.PNG.value
-      save_format = 'PNG'
+      mime_type = ContentType.JPEG.value
+      save_format = 'JPEG'
       image_bytes = _image_to_bytes(img, save_format)
     elif not mime_type:
       detected_mime = PIL.Image.MIME.get(img.format) if img.format else None
