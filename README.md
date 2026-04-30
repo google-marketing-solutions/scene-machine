@@ -16,8 +16,6 @@ limitations under the License.
 
 _Disclaimer: This is not an officially supported Google product._
 
-# ⚠️ Don't use – code is still being populated.
-
 # Scene Machine
 
 **Scene Machine** is a tool allowing the creation of ad videos from product images: in a graphical interface, the user is guided through the following steps:
@@ -74,7 +72,7 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
     - Edit `config.txt` in your favorite editor (e.g., `nano config.txt`).
 
     **Variables defined in `config.txt`:**
-    Check [available models and their regions](https://ai.google.dev/gemini-api/docs/models) to advise users to check the latest available models and their regions.
+    You can check [available models and their regions](https://ai.google.dev/gemini-api/docs/models) to ensure you are using the most up to date models available in your selected region.
 
     | Variable Name          | Description                                                | Recommended Values / Notes                           |
     | :--------------------- | :--------------------------------------------------------- | :--------------------------------------------------- |
