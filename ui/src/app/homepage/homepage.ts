@@ -27,6 +27,7 @@ import {MatButtonModule} from '@angular/material/button';
 import {MatCardModule} from '@angular/material/card';
 import {MatDialog, MatDialogModule} from '@angular/material/dialog';
 import {MatIconModule} from '@angular/material/icon';
+import {MatMenuModule} from '@angular/material/menu';
 import {MatSlideToggleModule} from '@angular/material/slide-toggle';
 import {RouterModule} from '@angular/router';
 import {
@@ -49,6 +50,7 @@ import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialo
     MatSlideToggleModule,
     DatePipe,
     MatDialogModule,
+    MatMenuModule,
   ],
   templateUrl: './homepage.html',
   styleUrl: './homepage.scss',
@@ -59,6 +61,8 @@ export class Homepage {
   private auth = inject(Auth);
   private dialog = inject(MatDialog);
   projects = signal<ProjectConfig[]>([]);
+  theme = this.config.theme;
+  primaryColor = this.config.primaryColor;
   myProjectsOnly = signal<boolean>(true);
   userEmail = computed(() => this.auth.currentUser?.email ?? null);
 
