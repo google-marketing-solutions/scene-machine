@@ -31,14 +31,15 @@ class TestOutpaintImage(unittest.TestCase):
     self.mock_gcs = mock.Mock()
     self.mock_workflow_params = {
         Key.GCP_PROJECT.value: 'test-project',
-        Key.GCP_LOCATION.value: 'test-location'
+        Key.GCP_LOCATION.value: 'test-location',
     }
-    self.mock_image = [{
-        Key.FILE.value: 'path/to/image.jpg'
-    }]
+    self.mock_image = [{Key.FILE.value: 'path/to/image.jpg'}]
 
   @mock.patch('actions_lib.outpainter.outpaint_image')
-  def test_execute_correct_ratio(self, mock_outpainter_func):
+  @mock.patch('actions.outpaint_image._crop_image')
+  def test_execute_correct_ratio(
+      self, mock_outpainter_func, mock_crop_image_func
+  ):
     """Tests that no resizing happens if the ratio is already correct."""
     # Setup
     target_ratio = '16:9'
@@ -59,12 +60,14 @@ class TestOutpaintImage(unittest.TestCase):
         self.mock_image,
         target_ratio,
         'gemini-3.1-flash-image-preview',
-        'test-location'
+        'test-location',
     )
 
     # Assertions
     # Outpainting should not be called
     mock_outpainter_func.assert_not_called()
+    # Crop should not be called - as ratio is already correct
+    mock_crop_image_func.assert_not_called()
     # But image should still be read from GCS
     self.mock_gcs.load_bytes.assert_called_once_with('path/to/image.jpg')
     # And then WRITTEN back to GCS, as per user feedback
@@ -101,7 +104,7 @@ class TestOutpaintImage(unittest.TestCase):
         self.mock_image,
         target_ratio,
         'gemini-3.1-flash-image-preview',
-        'test-location'
+        'test-location',
     )
 
     # Verify store was called with DIFFERENT bytes (resized)
@@ -136,7 +139,7 @@ class TestOutpaintImage(unittest.TestCase):
         self.mock_image,
         target_ratio,
         'gemini-3.1-flash-image-preview',
-        'test-location'
+        'test-location',
     )
 
     # Assertions
@@ -147,8 +150,7 @@ class TestOutpaintImage(unittest.TestCase):
 
     # Needs to return the original file location directly
     self.assertEqual(
-        result,
-        {'outpainted_image': [{Key.FILE.value: 'path/to/image.jpg'}]}
+        result, {'outpainted_image': [{Key.FILE.value: 'path/to/image.jpg'}]}
     )
 
   def test_execute_invalid_ratio_raises_error(self):
@@ -162,7 +164,7 @@ class TestOutpaintImage(unittest.TestCase):
           self.mock_image,
           target_ratio,
           'gemini-3.1-flash-image-preview',
-          'test-location'
+          'test-location',
       )
 
   @mock.patch('actions_lib.outpainter.outpaint_image')
@@ -170,8 +172,8 @@ class TestOutpaintImage(unittest.TestCase):
     """Tests that resizing fallback works for landscape and portrait formats."""
     # (target_ratio, outpainter_mock_dim, expected_resized_dim)
     test_cases = [
-        ('16:9', (160, 100), (160, 90)),   # Trim height
-        ('9:16', (100, 160), (90, 160)),   # Trim width
+        ('16:9', (160, 100), (160, 90)),  # Trim height
+        ('9:16', (100, 160), (90, 160)),  # Trim width
     ]
 
     for ratio, mock_dim, expected_dim in test_cases:
@@ -192,7 +194,8 @@ class TestOutpaintImage(unittest.TestCase):
         img_byte_arr = io.BytesIO()
         mock_img.save(img_byte_arr, format='PNG')
         mock_outpainter_func.return_value = (
-            img_byte_arr.getvalue(), 'image/png'
+            img_byte_arr.getvalue(),
+            'image/png',
         )
 
         outpaint_image.execute(
@@ -201,7 +204,7 @@ class TestOutpaintImage(unittest.TestCase):
             self.mock_image,
             ratio,
             'gemini-3.1-flash-image-preview',
-            'test-location'
+            'test-location',
         )
 
         # Assert store was called and check dimensions
@@ -210,8 +213,8 @@ class TestOutpaintImage(unittest.TestCase):
         with io.BytesIO(stored_bytes) as input_stream:
           img = PIL.Image.open(input_stream)
           self.assertEqual(
-              img.size, expected_dim,
+              img.size,
+              expected_dim,
               f'Failed for ratio {ratio}: expected '
-              f'{expected_dim}, got {img.size}')
-
-
+              f'{expected_dim}, got {img.size}',
+          )
