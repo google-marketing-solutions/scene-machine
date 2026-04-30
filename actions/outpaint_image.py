@@ -163,8 +163,8 @@ def execute(
     if not correct_ratio:
       logger.info('Cropping image...')
       img = _crop_image(img, target_width, target_height)
-      mime_type = ContentType.PNG.value
-      save_format = 'PNG'
+      mime_type = ContentType.JPEG.value
+      save_format = 'JPEG'
       image_bytes = _image_to_bytes(img, save_format)
     elif not mime_type:
       detected_mime = PIL.Image.MIME.get(img.format) if img.format else None
