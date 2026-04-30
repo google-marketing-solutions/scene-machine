@@ -251,11 +251,11 @@ generate_config
 envsubst < ./gcs-cors-config.template.json > ./gcs-cors-config.json
 gcloud storage buckets update gs://$GCS_BUCKET --cors-file=./gcs-cors-config.json --project=$PROJECT
 
-if ! gcloud iam roles describe RemixEngineUser --project=$PROJECT &> /dev/null; then
-  echo "RemixEngineUser role doesn't exist. Creating it..."
-  gcloud iam roles create RemixEngineUser --project=$PROJECT --file=./user-role.yaml
+if ! gcloud iam roles describe SceneMachineUser --project=$PROJECT &> /dev/null; then
+  echo "SceneMachineUser role doesn't exist. Creating it..."
+  gcloud iam roles create SceneMachineUser --project=$PROJECT --file=./user-role.yaml
 else
-  echo "RemixEngineUser role already exists. Skipping."
+  echo "SceneMachineUser role already exists. Skipping."
 fi
 
 # 6) Upload example files

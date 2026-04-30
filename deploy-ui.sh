@@ -57,7 +57,9 @@ export API_KEY=$(gcloud services api-keys get-key-string $API_UID --project=$PRO
 export API_GATEWAY_HOST=$(gcloud api-gateway gateways describe scenemachine-api-gateway --project=$PROJECT --location=$API_GATEWAY_REGION --format="value(defaultHostname)")
 export FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
 export FIREBASE_AUTH_DOMAIN=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"authDomain":' | awk -F '"' '{print $4}')
+export UI_HOST=$(gcloud app describe --project=$PROJECT --format="value(defaultHostname)")
 
+envsubst < ./ui/definitions/config.template.json > ./ui/definitions/config.json
 envsubst < ./ui/src/env.template.txt > ./ui/src/env.ts
 
 echo "Enabling Identity Toolkit API (needed for Auth config)"
@@ -210,6 +212,6 @@ fi
 
 echo "============================================================"
 echo "MANUAL STEP REQUIRED: Grant User Access."
-echo "* Remember to grant users the 'Remix Engine role' in IAM so they can access the app!"
+echo "* Remember to grant users the 'Scene Machine User' role in IAM so they can access the app!"
 echo "============================================================"
 echo
