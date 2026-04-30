@@ -60,7 +60,9 @@ def _check_aspect_ratio(
   """
   width, height = img.size
   current_ratio = width / height
-  if current_ratio > expected_ratio:
+  if current_ratio == expected_ratio:
+    return width, height, True
+  elif current_ratio > expected_ratio:
     target_width = round(height * expected_ratio)
     target_height = height
   else:
