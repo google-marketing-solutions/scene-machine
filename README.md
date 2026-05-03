@@ -32,10 +32,9 @@ Scene Machine is a Google Cloud-based, open-source workbench that leverages gene
 > [!TIP]
 > For a step-by-step guide with screen recordings, see [`docs/walkthrough.md`](./docs/walkthrough.md).
 
-Scene Machine guides users through four core stages to turn a set of static images into a video asset.
+![Scene Machine Promo](./docs/media/00_read_me_scene_machine_promo.gif)
 
-> [!CAUTION]
-> **Video / Animation Placeholder:** _A demo animation showcasing the end-to-end video ad creation process will be added here._
+Scene Machine guides users through four core stages to turn a set of static images into a video asset.
 
 ### 1. Setup (Storyboard Generation)
 Upload images and business context (such as target audience and brand guidelines) to have Gemini automatically generate a structured, prompt-driven storyboard. Users can optionally apply predefined Creative Templates to guide scene structure, or start with an empty storyboard to build the timeline manually.
@@ -208,7 +207,8 @@ Each person intending to use Scene Machine needs to be given the "Scene Machine 
 
 ## Using Scene Machine
 
-A full step-by-step walkthrough guide with screen recordings demonstrating how to configure, build, refine, and render video ads is in [`docs/walkthrough.md`](./docs/walkthrough.md). 
+> [!TIP]
+> For a step-by-step guide with screen recordings, see [`docs/walkthrough.md`](./docs/walkthrough.md).
 
 It covers how to set up a project name and resolution, upload product images, apply compositional Creative Templates, trim video candidates, and add custom branding slates, transitions, audio tracks, and image overlays.
 
