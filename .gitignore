@@ -13,3 +13,6 @@ apispec.yaml
 deployed_version.txt
 firebase/firebase.json
 firebase/.firebaserc
+.agents/skills.json
+.agents/skills/walkthrough.md
+.agents/skills/walkthrough/SKILL.md
