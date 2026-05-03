@@ -16,22 +16,48 @@ limitations under the License.
 
 _Disclaimer: This is not an officially supported Google product._
 
-# Scene Machine
+# Scene Machine: Storyboard-Driven Generative AI Video Ad Creation
 
-**Scene Machine** is a tool allowing the creation of ad videos from product images: in a graphical interface, the user is guided through the following steps:
+Scene Machine is a Google Cloud-based, open-source workbench that leverages generative AI models to facilitate storyboard-driven video ad creation. While its primary use case is transforming product or service images (such as in retail, food delivery, or travel) into video ads, it also serves as a robust video prototyping platform for rapidly sharing and iterating on ideas.
 
-1. upload of product images
-2. generation of a suitable sequence of scenes
-3. generation of those individual scenes
-4. composition of the complete ad video with superimposed logos, background music etc.
+## TL;DR
+- **Production Speed:** Automates and parallelizes scene generation, reducing a lengthy asset workflow to minutes.
+- **Target Audience:** Advertisers, developers, and creative teams seeking a video generation workbench built natively on Google Cloud.
+- **Key Technology:** Harnesses [Gemini](https://deepmind.google/models/gemini/) for intelligent prompt design and the [Veo model](https://deepmind.google/models/veo/) for high-fidelity, parallel image-to-video generation. The entire workflow is orchestrated through a single intuitive web interface.
 
-In the generation steps, the user has full control, but can also rely on the tool's recommendations.
+---
+
+## How it Works
+
+> [!TIP]
+> For a step-by-step guide with screen recordings, see [`docs/walkthrough.md`](./docs/walkthrough.md).
+
+Scene Machine guides users through four core stages to turn a set of static images into a video asset.
+
+> [!CAUTION]
+> **Video / Animation Placeholder:** _A demo animation showcasing the end-to-end video ad creation process will be added here._
+
+### 1. Setup (Storyboard Generation)
+Upload images and business context (such as target audience and brand guidelines) to have Gemini automatically generate a structured, prompt-driven storyboard. Users can optionally apply predefined Creative Templates to guide scene structure, or start with an empty storyboard to build the timeline manually.
+
+### 2. Storyboard (Video Generation & Scene-by-Scene Iteration)
+The backend sends parallel video generation requests to Google's Veo model, significantly reducing the total time required. Users refine the ad by iterating on prompts and candidate variations scene-by-scene. The timeline can be expanded at any point by generating new scenes (via text-to-video or image-to-video) or by uploading existing video slates. This process is entirely non-destructive, allowing users to adjust, trim, and reorder assets without losing previously generated video scenes.
+
+### 3. Composition (Transitions, Audio, and Brand Overlays)
+Once scenes are finalized, users can enhance their ad in the Composition stage by adding transitions between scenes, custom background audio tracks (music or voice-overs), and precise pixel-positioned image overlays (such as brand logos).
+
+### 4. Output (Rendering & Export)
+Users compile all timeline assets by rendering the video, which is then available for review or direct MP4 download. Crucially, the history panel preserves all older rendered versions, enabling users to maintain and compare multiple creative variants (e.g., short vs. long versions) within the same project.
+
+---
 
 [Technical Requirements](#requirements) •
 [Deployment](#deployment) •
 [Using Scene Machine](#using-scene-machine) •
 [Alternatives](#alternatives) •
 [Developers' Guide](DEVELOPING.md)
+
+---
 
 ## Technical Requirements
 
@@ -160,67 +186,9 @@ Each person intending to use Scene Machine needs to be given the "Scene Machine 
 
 ## Using Scene Machine
 
-Scene Machine is started by calling the web address that the deployment script outputs. On the first page, the user can deal with _Projects_ or _Creative Templates_:
+A full step-by-step walkthrough guide with screen recordings demonstrating how to configure, build, refine, and render video ads is in [`docs/walkthrough.md`](./docs/walkthrough.md). 
 
-- Projects are the main container for turning images into videos. They can be deleted here directly, while creating or loading an existing one moves to the other views described below.
-- Creative Templates contain instructions how to derive a storyboard from images. The view to manage those allows their viewing, creation and editing.
-
-### Setup
-
-In the Setup step, the user can do the following:
-
-- At the top, name the project and configure parameters, like the desired aspect ratio for the videos to be generated. These can be left at their defaults. Note that the aspect ratio cannot be changed if videos already exist in the project.
-- Below, define the input to be used for the automatic storyboard generation. The types of input should be self-explanatory. Alternatively, selecting _Manually create_ omits the generation, directly skipping to the _Storyboard_ step.
-
-Once _Generate Storyboard_ is clicked, the uploaded images are analysed for how they match the configured aspect ratio, and the user may be asked how to deal with drastic deviations: the main options are:
-
-- _Crop_: symmetrically cut the shorter sides of the images
-- _Outpaint_: symmetrically add at the longer sides of the images
-- _Use as is_: essentially leave it up to the Video model, which can have different results every time
-
-#### Review Storyboard
-
-If/once everything is fine or confirmed, a storyboard suggestion is derived from the input, which may take in the order of a minute.
-
-Once ready, the user is shown a storyboard showing the proposed scenes in terms of their starting images (potentially modified to suit the aspect ratio) and the planned animation prompt, or script. They can discard the whole board (and retry with changed inputs), delete individual scenes or edit the prompts.
-
-Once they are happy with the proposal, they can click _Generate Videos_ to proceed to the next step. This will remove any existing scenes, should some have been generated already.
-
-### Storyboard
-
-In this view, the user needs to wait for the generation of the videos, but can already change the order of the scenes or add new ones – especially if they skipped here by opting to _Manually create_ at the _Setup_ step.
-
-The scenes can be optionally re-generated (_Generate Candidates_) with changed prompt or parameters, and the version to be used can be selected. Obsolete versions can be 'archived' to avoid visual clutter.
-
-#### Trimming
-
-To omit parts of a scene video near its beginning and/or end, you can specify times at which it should start or end, respectively. These can be manually entered into the respective boxes, or determined as follows:
-
-1. Play the video until (or, in the progress bar, click on) the point in time at which the desired part starts or ends.
-2. Click on the corresponding clock symbol for the start or end time, respectively.
-
-It is okay to select both times, only one, or none. You can remove a trim marker simply by deleting the contents of the text field showing the time index.
-
-Once satisfied with the result, the user can move to the next view:
-
-### Composition
-
-This shows a preview of how the (potentially trimmed) scenes would appear in sequence. The video player essentially jumps from scene to scene, so it may stutter a bit.
-
-This view also serves to add
-
-- non-generative video scenes (like an outro),
-- audio tracks (like music or voice-overs),
-- visual overlays (like logos) and
-- transitions between the scenes (e.g. fading).
-
-Each addition may have its own parameters and dialog. Note that the time index at which you are positioning audio or overlays will not be automatically updated when you change the scenes, their ordering or their transitions, and should hence always be corrected as the last step.
-
-The additional elements are not currently part of the preview, so to see their effect – or simply get the actual video without any such additions –, the user needs to click _Render Video_.
-
-### Output
-
-Here, the rendered video appears to be viewed or downloaded. It is also possible to watch older renderings, and download the videos constituent scenes.
+It covers how to set up a project name and resolution, upload product images, apply compositional Creative Templates, trim video candidates, and add custom branding slates, transitions, audio tracks, and image overlays.
 
 ### Technical problems
 
