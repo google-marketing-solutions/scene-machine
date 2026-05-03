@@ -46,7 +46,7 @@ Scene Machine sends workflow definitions to Remix Engine, which orchestrates its
 
 The following APIs are used by Scene Machine:
 
-- Vertex AI API ( aiplatform.googleapis.com ): Used for accessing Gemini and Veo models for text, image, and video generation.
+- Agent Platform API ( aiplatform.googleapis.com ): Used for accessing Gemini and Veo models for text, image, and video generation.
 - API Gateway API ( apigateway.googleapis.com ): Used to create and manage the API Gateway that routes traffic to the backend.
 - Artifact Registry API ( artifactregistry.googleapis.com ): Used to store the Docker container images for the backend service.
 - Cloud Build API ( cloudbuild.googleapis.com ): Used to build the container images for Cloud Run.
@@ -129,17 +129,17 @@ _Please note that most of the APIs are enabled automatically when you run the de
     - _Note: The script outputs estimates regarding run times._
     - _Note: You might be prompted to run the UI deployment script immediately at the end._
 
-    > [!TIP]
-    > **Troubleshooting Firebase deployment failures:**
-    > If `./deploy.sh` fails at the Firebase step with an error like `Error: Project not found`, it usually means the Firebase CLI cannot access the project or terms have not been accepted.
-    >
-    > **How to fix it:**
-    >
-    > 1. **Check Login:** Ensure you are logged in by running `firebase login` in your terminal.
-    > 2. **Manual Fallback (Accept Terms):** If still failing, go to the [Firebase Console](https://console.firebase.google.com/).
-    > 3. Click **Add Project** and select your existing Google Cloud project from the dropdown list.
-    > 4. Follow the prompts to add Firebase resources. This process will guide you through accepting the necessary terms of service.
-    > 5. Once completed in the console, return to your terminal and re-run `./deploy.sh`.
+> [!TIP]
+> **Troubleshooting Firebase deployment failures:**
+> If `./deploy.sh` fails at the Firebase step with an error like `Error: Project not found`, it usually means the Firebase CLI cannot access the project or terms have not been accepted.
+>
+> **How to fix it:**
+>
+> 1. **Check Login:** Ensure you are logged in by running `firebase login` in your terminal.
+> 2. **Manual Fallback (Accept Terms):** If still failing, go to the [Firebase Console](https://console.firebase.google.com/).
+> 3. Click **Add Project** and select your existing Google Cloud project from the dropdown list.
+> 4. Follow the prompts to add Firebase resources. This process will guide you through accepting the necessary terms of service.
+> 5. Once completed in the console, return to your terminal and re-run `./deploy.sh`.
 
 4.  **Set up OAuth consent screen:**
     - In your Google Cloud console, go to **API & Services > Credentials > OAuth consent screen**.
