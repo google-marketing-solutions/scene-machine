@@ -30,8 +30,7 @@ The Homepage serves as your central dashboard for managing all Scene Machine pro
 > - **Permissions:** Users with access to the SM deployment can manage (create, edit, delete) all projects within that instance, including those created by others.
 > - **Data Isolation:** All project data remains strictly within the hosting Google Cloud project and is not shared externally.
 
-<video src="media/00_new_project.mp4" controls autoplay loop muted playsinline>
-</video>
+![](media/00_new_project.gif)
 
 ### Actions:
 - **View Projects**: Your projects are displayed by default.
@@ -62,8 +61,7 @@ To use this flow:
 > - **Candidate Duration**: Set the length (in seconds) for each generated video.
 > - **Generate Audio**: Toggle to enable or disable audio generation for your scenes.
 
-<video src="media/01_create_new_project.mp4" controls autoplay loop muted playsinline>
-</video>
+![](media/01_create_new_project.gif)
 
 ### Actions:
 - **Configure Settings**: Enter your Project Name, and set your desired `Aspect Ratio` and `Resolution`.
@@ -82,8 +80,7 @@ Upload your product or service images to begin. For this demo, we use three imag
 
 **Tip:** You can find example assets in [media/example_assets](media/example_assets).
 
-<video src="media/02_upload_images.mp4" controls autoplay loop muted playsinline>
-</video>
+![](media/02_upload_images.gif)
 
 ### Actions:
 - **Upload Assets**: Drag and drop your product or service images into the "Drag & drop images here" zone. **Tip:** You can find example assets in [media/example_assets](media/example_assets).
@@ -105,8 +102,7 @@ For example, the [Single Product - 3 Scenes](../creative_templates/single_produc
 - Scene 2: Extreme Close-Up (Tracking Right)
 - Scene 3: Medium Shot (Pulling Out)
 
-<video src="media/03_add_description_audience_market_and_composition.mp4" controls autoplay loop muted playsinline>
-</video>
+![](media/03_add_description_audience_market_and_composition.gif)
 
 ### Actions:
 - **Select Template**: Choose your desired template, such as `Single Product - 3 Scenes`.
@@ -127,8 +123,7 @@ Scene Machine is now sending your inputs to Gemini to craft a cohesive visual st
 
 Review the generated storyboard. Scene Machine has mapped your input images to scene descriptions and created corresponding Veo prompts to animate them. Once you are satisfied with the sequence, proceed to video generation. (optional): When reviewing, you can make changes to the storyboard. You can edit the prompts or delete a scene from being generated.
 
-<video src="media/04_generate_review_change_visual_storyboard.mp4" controls autoplay loop muted playsinline>
-</video>
+![](media/04_generate_review_change_visual_storyboard.gif)
 
 ### Actions:
 - **Wait**: The generation process typically takes ~1 minute.
@@ -150,10 +145,8 @@ Review the generated storyboard. Scene Machine has mapped your input images to s
 ### Overview
 You have arrived at the Storyboard stage, where you can generate and manage video candidates scene-by-scene. Use the central timeline to reorder scenes or click the (+) button to add new content, such as an existing end slate. Scene Machine sends video generation requests to Veo in parallel, which significantly reduces the total time required for all scenes to be generated. While a single video generation by Veo typically takes 1–3 minutes, your actual experience may vary based on your chosen model, resolution, duration, and current system load.
 
-<video src="media/05_storyboard_drag_scenes_in_timeline.mp4" controls autoplay loop muted playsinline>
-</video>
-<video src="media/06_add_new_scene_from_video.mp4" controls autoplay loop muted playsinline>
-</video>
+![](media/05_storyboard_drag_scenes_in_timeline.gif)
+![](media/06_add_new_scene_from_video.gif)
 
 ### Actions:
 - **Reorder**: Drag and drop scenes directly in the timeline.
@@ -174,8 +167,7 @@ Let’s examine a specific scene. On the left, you will see a list of candidate 
 Generation typically takes 1–3 minutes, but you can navigate to different scenes to continue working effectively while the generation runs. Once you find your preferred candidate, click it in the left panel to set it as the final scene video. 
 
 
-<video src="media/08_generate_candidates.mp4" controls autoplay loop muted playsinline>
-</video>
+![](media/08_generate_candidates.gif)
 
 ### Actions:
 - **Preview**: Hover over a candidate to view a quick preview at 2x speed without sound.
@@ -189,7 +181,7 @@ Generation typically takes 1–3 minutes, but you can navigate to different scen
 > [!NOTE]
 > **Trimming Candidates (Optional):** You can trim your candidates using the video timeline. Drag the handles, or use the `Trim start` and `Trim end` fields and controls to set precise timestamps.
 > 
-> <video src="media/07_trim_candidate.mp4" controls autoplay loop muted playsinline></video>
+> ![](media/07_trim_candidate.gif)
 ---
 
 ## Step 8: Composing and Enhancing with Transitions, Audio, and Overlays
@@ -204,8 +196,7 @@ Once your storyboard scenes are finalized, proceed to the Compose stage to assem
 > - **Visual Overlays**: Upload images or GIFs, specify their visibility duration, and set their position in pixels from the top-left.
 > - **Demo Assets**: Need demo assets? You can find them in [media/example_assets](media/example_assets).
 
-<video src="media/09_compose_transitions_audio_track_overlays_render_video.mp4" controls autoplay loop muted playsinline>
-</video>
+![](media/09_compose_transitions_audio_track_overlays_render_video.gif)
 
 ### Actions:
 - **Add Transitions**: Click the `(+)` icon between scenes in the timeline and select a transition (e.g., Fade Black).
@@ -227,8 +218,7 @@ You can also download the full video or individual scenes as MP4 files for post-
 This concludes the Scene Machine demo.
 Thank you!
 
-<video src="media/10_output_review_rendered_video.mp4" controls autoplay loop muted playsinline>
-</video>
+![](media/10_output_review_rendered_video.gif)
 
 ### Actions:
 - **Play**: Play the rendered video in the central view.
