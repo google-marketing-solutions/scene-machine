@@ -27,7 +27,18 @@ Scene Machine is a Google Cloud-based, open-source workbench that leverages gene
 
 ---
 
+[How it works](#how-it-works) •
+[Technical Requirements](#technical-requirements) •
+[Deployment](#deployment) •
+[Using Scene Machine](#using-scene-machine) •
+[Alternatives](#alternatives-to-scene-machine) •
+[Developers' Guide](DEVELOPING.md)
+
+---
+
 ## How it Works
+
+[< TL;DR](#tldr) • [Top](#) • [Technical Requirements >](#technical-requirements)
 
 > [!TIP]
 > For a step-by-step guide with screen recordings, see [`docs/walkthrough.md`](./docs/walkthrough.md).
@@ -48,17 +59,9 @@ Once scenes are finalized, users can enhance their ad in the Composition stage b
 ### 4. Output (Rendering & Export)
 Users compile all timeline assets by rendering the video, which is then available for review or direct MP4 download. Crucially, the history panel preserves all older rendered versions, enabling users to maintain and compare multiple creative variants (e.g., short vs. long versions) within the same project.
 
----
-
-[Technical Requirements](#technical-requirements) •
-[Deployment](#deployment) •
-[Using Scene Machine](#using-scene-machine) •
-[Alternatives](#alternatives-to-scene-machine) •
-[Developers' Guide](DEVELOPING.md)
-
----
-
 ## Technical Requirements
+
+[< How it Works](#how-it-works) • [Top](#) • [Deployment >](#deployment)
 
 To deploy this application, you need a **project on Google Cloud Platform without any existing App Engine apps**.
 
@@ -90,6 +93,8 @@ The following APIs are used by Scene Machine:
 _Please note that most of the APIs are enabled automatically when you run the deployment script. Cloud Storage and Cloud Logging are normally enabled by default. If your organization disables these APIs, you will need to enable them manually._
 
 ## Deployment
+
+[< Technical Requirements](#technical-requirements) • [Top](#) • [Adding Users >](#adding-users)
 
 #### Prerequisites
 
@@ -203,9 +208,13 @@ To help debug problems with the deployment scripts, you can change their top lin
 
 ## Adding Users
 
+[< Deployment](#deployment) • [Top](#) • [Using Scene Machine >](#using-scene-machine)
+
 Each person intending to use Scene Machine needs to be given the "Scene Machine User" role in the Google Cloud project in which the tool is deployed.
 
 ## Using Scene Machine
+
+[< Adding Users](#adding-users) • [Top](#) • [Caveats >](#caveats)
 
 > [!TIP]
 > For a step-by-step guide with screen recordings, see [`docs/walkthrough.md`](./docs/walkthrough.md).
@@ -225,6 +234,8 @@ In case the tool does not behave as expected, there are various ways to narrow d
 To get more information about the inner workings of the tool, refer to the [Developers' Guide](DEVELOPING.md).
 
 ## Caveats
+
+[< Using Scene Machine](#using-scene-machine) • [Top](#) • [Alternatives to Scene Machine >](#alternatives-to-scene-machine)
 
 ### Data access
 
@@ -254,6 +265,8 @@ Either option is problematic because a file's creation date says nothing about w
 A Google Cloud project has certain throughput limits defined per service and location. Content-generation requests made more quickly than allowed by that quota are rejected and need to be retried. Scene Machine attempts to deal with this by assuming some default quotas and queueing tasks appropriately, the lowest-throughput class being that for video generation. Check out the [documentation](https://docs.cloud.google.com/vertex-ai/docs/quotas) of such quotas to see how to change them. If you do, it would make sense to adapt the default configuration in `deploy.sh` – just search for "queues" and change the vaules according to the [documentation](https://docs.cloud.google.com/tasks/docs/configuring-queues#rate) of rate limits and retry parameters.
 
 ## Alternatives to Scene Machine
+
+[< Caveats](#caveats) • [Top](#)
 
 There is a vast array of tools to generate video ads automatically, ranging from animations of static assets with [Auto-generated video ads for Responsive Search Ads](https://support.google.com/google-ads/answer/9848688?hl=en) to the creation of generic GenAI video using [Flow](https://labs.google/fx/tools/flow) or [Vids](https://docs.google.com/videos). As the capabilities of the tools and the models they use are in continuous flux, it makes no sense to list them here.
 
