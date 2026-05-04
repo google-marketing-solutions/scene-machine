@@ -324,20 +324,27 @@
         display: flex;
         align-items: center;
         gap: 12px;
+        min-width: 0;
 
         mat-icon {
           color: var(--mat-sys-on-surface);
+          flex-shrink: 0;
         }
 
         .track-text {
           display: flex;
           flex-direction: column;
+          min-width: 0;
 
           .track-name {
             font-weight: 500;
             font-size: 0.875rem;
             color: var(--mat-sys-on-surface);
             line-height: 1.2;
+            min-width: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
           }
 
           .track-subtitle {

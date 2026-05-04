@@ -149,7 +149,7 @@
                     <div class="track-info">
                       <mat-icon>audio_file</mat-icon>
                       <div class="track-text">
-                        <span class="track-name">{{ track.name }}</span>
+                        <span class="track-name" [title]="track.name">{{ track.name }}</span>
                         <span class="track-subtitle">
                           {{ track.startSeconds | formatTime }} -
                           @if (track.durationSeconds !== -1) {
@@ -200,7 +200,7 @@
                     <div class="track-info">
                       <mat-icon>image</mat-icon>
                       <div class="track-text">
-                        <span class="track-name">{{ overlay.name }}</span>
+                        <span class="track-name" [title]="overlay.name">{{ overlay.name }}</span>
                         <span class="track-subtitle">
                           {{ overlay.startSeconds | formatTime }} -
                           @if (overlay.durationSeconds !== -1) {
