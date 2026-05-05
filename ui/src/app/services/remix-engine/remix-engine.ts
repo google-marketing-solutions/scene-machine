@@ -886,7 +886,6 @@ export class RemixEngineService {
     for (const scene of validScenes) {
       let gcsVideoPath;
       let skipTime = 0;
-      const duration = this.getSceneVideoDuration(scene, skipTime);
       if (this.configService.isProvidedVideoScene(scene)) {
         gcsVideoPath = scene.video?.path;
         skipTime = scene.trim?.start ?? 0;
@@ -895,6 +894,7 @@ export class RemixEngineService {
         gcsVideoPath = candidate.video?.path;
         skipTime = candidate.trim?.start ?? 0;
       }
+      const duration = this.getSceneVideoDuration(scene, skipTime);
       if (!gcsVideoPath) {
         console.log(`No video for scene ${scene.id}`);
         continue;
