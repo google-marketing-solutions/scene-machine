@@ -165,8 +165,9 @@ describe('RemixEngineService', () => {
   describe('generateHash', () => {
     it('should generate hash for string', async () => {
       const hash = await service.generateHash('test content');
-      expect(hash).toBeTruthy();
-      expect(typeof hash).toBe('string');
+      expect(hash).toBe(
+        '6ae8a75555209fd6c44157c0aed8016e763ff435a19cf186f76863140143ff72',
+      );
     });
   });
 
@@ -306,7 +307,194 @@ describe('RemixEngineService', () => {
         resolution: 'LANDSCAPE' as any,
       });
 
-      expect(configServiceMock.updateProjectConfig).toHaveBeenCalled();
+      expect(configServiceMock.updateProjectConfig).toHaveBeenCalledWith({
+        storyboard: [
+          {
+            id: 'scene-1',
+            prompt: 'prompt 1',
+            candidates: [
+              {
+                runNumber: 1,
+                durationSeconds: 5,
+                prompt: 'prompt 1',
+                model: 'model-1',
+                generateAudio: false,
+                resolution: 'LANDSCAPE',
+                video: {url: 'http://mock-url', path: 'mock-path/video.mp4'},
+                lowQualityThumbnail: 'mock-base64',
+                highQualityThumbnail: {
+                  path: 'mock-thumb-path',
+                  url: 'mock-thumb-url',
+                },
+              },
+            ],
+            selectedCandidateIndex: 0,
+          },
+        ],
+      });
+    });
+
+    it('should return early if already generating candidates for the scene', async () => {
+      const mockScene = {id: 'scene-1', prompt: 'prompt 1', candidates: []};
+      service.generatingSceneIds.update(ids => {
+        const newIds = new Set(ids);
+        newIds.add('scene-1');
+        return newIds;
+      });
+
+      vi.spyOn(service, 'startVideoGenerationWorkflow');
+
+      await service.generateCandidates(mockScene as any, {
+        durationSeconds: 5,
+        model: 'model-1',
+        generateAudio: false,
+        resolution: 'LANDSCAPE' as any,
+      });
+
+      expect(service.startVideoGenerationWorkflow).not.toHaveBeenCalled();
+    });
+
+    it('should handle workflow start failure and show error snackbar', async () => {
+      const mockScene = {id: 'scene-1', prompt: 'prompt 1', candidates: []};
+
+      vi.spyOn(service, 'startVideoGenerationWorkflow').mockResolvedValue(
+        undefined,
+      );
+
+      await service.generateCandidates(mockScene as any, {
+        durationSeconds: 5,
+        model: 'model-1',
+        generateAudio: false,
+        resolution: 'LANDSCAPE' as any,
+      });
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Failed to generate video(s). Failed to start workflow',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('should handle workflow execution error and show error snackbar', async () => {
+      const mockScene = {id: 'scene-1', prompt: 'prompt 1', candidates: []};
+
+      vi.spyOn(service, 'startVideoGenerationWorkflow').mockResolvedValue(
+        of({executionId: 'mock-execution-id'}) as any,
+      );
+
+      const mockWorkflowStatus = {
+        sink: {
+          output: {
+            '0': {
+              video: [{_error: 'Mock workflow error'}],
+            },
+          },
+        },
+      };
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+        mockWorkflowStatus as any,
+      );
+
+      await service.generateCandidates(mockScene as any, {
+        durationSeconds: 5,
+        model: 'model-1',
+        generateAudio: false,
+        resolution: 'LANDSCAPE' as any,
+      });
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Failed to generate video(s). Mock workflow error',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('should handle workflow completed without output and show error snackbar', async () => {
+      const mockScene = {id: 'scene-1', prompt: 'prompt 1', candidates: []};
+
+      vi.spyOn(service, 'startVideoGenerationWorkflow').mockResolvedValue(
+        of({executionId: 'mock-execution-id'}) as any,
+      );
+
+      const mockWorkflowStatus = {
+        sink: undefined,
+      };
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+        mockWorkflowStatus as any,
+      );
+
+      await service.generateCandidates(mockScene as any, {
+        durationSeconds: 5,
+        model: 'model-1',
+        generateAudio: false,
+        resolution: 'LANDSCAPE' as any,
+      });
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Failed to generate video(s). Workflow completed without output',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('should handle thumbnail generation failure gracefully', async () => {
+      const mockScene = {id: 'scene-1', prompt: 'prompt 1', candidates: []};
+      const mockProject = {id: 'project-1', storyboard: [mockScene]};
+      configServiceMock.projectConfig.value.mockReturnValue(mockProject);
+
+      vi.spyOn(service, 'startVideoGenerationWorkflow').mockResolvedValue(
+        of({executionId: 'mock-execution-id'}) as any,
+      );
+
+      const mockWorkflowStatus = {
+        sink: {
+          output: {
+            '0': {
+              video: [{file: 'mock-path/video.mp4'}],
+            },
+          },
+        },
+      };
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+        mockWorkflowStatus as any,
+      );
+
+      (storage.getDownloadURL as any).mockResolvedValue('http://mock-url');
+
+      clientMediaServiceMock.generateLowQualityThumbnail.mockRejectedValue(
+        new Error('Thumbnail failed'),
+      );
+      clientMediaServiceMock.generateHighQualityThumbnail.mockResolvedValue(
+        new Blob(),
+      );
+      clientMediaServiceMock.toFile.mockResolvedValue(
+        new File([], 'mock-file'),
+      );
+      vi.spyOn(service, 'uploadThumbnail').mockResolvedValue({
+        path: 'mock-thumb-path',
+        url: 'mock-thumb-url',
+      });
+
+      await service.generateCandidates(mockScene as any, {
+        durationSeconds: 5,
+        model: 'model-1',
+        generateAudio: false,
+        resolution: 'LANDSCAPE' as any,
+      });
+
+      expect(configServiceMock.updateProjectConfig).toHaveBeenCalledWith(
+        expect.objectContaining({
+          storyboard: [
+            expect.objectContaining({
+              candidates: [
+                expect.objectContaining({
+                  lowQualityThumbnail: undefined,
+                }),
+              ],
+            }),
+          ],
+        }),
+      );
     });
   });
 
@@ -358,6 +546,156 @@ describe('RemixEngineService', () => {
       expect(result).toBeTruthy();
       expect(result!.length).toBe(1);
       expect(result![0].type).toBe('generated');
+    });
+
+    it('should handle workflow start failure and show error snackbar', async () => {
+      const mockProducts = [{id: 'prod-1', images: [{file: 'img1'}]}];
+
+      vi.spyOn(service, 'startStoryboardWorkflow').mockResolvedValue(undefined);
+
+      await service.generateStoryboard(
+        mockProducts as any,
+        'mock briefing',
+        'none',
+      );
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Failed to generate storyboard. Failed to start workflow',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('should handle workflow execution error and show error snackbar', async () => {
+      const mockProducts = [{id: 'prod-1', images: [{file: 'img1'}]}];
+
+      vi.spyOn(service, 'startStoryboardWorkflow').mockResolvedValue(
+        of({executionId: 'mock-execution-id'}) as any,
+      );
+
+      const mockWorkflowStatus = {
+        sink: {
+          output: {
+            '0': {
+              storyboard: [{_error: 'Mock storyboard error'}],
+            },
+          },
+        },
+      };
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+        mockWorkflowStatus as any,
+      );
+
+      await service.generateStoryboard(
+        mockProducts as any,
+        'mock briefing',
+        'none',
+      );
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Failed to generate storyboard. Mock storyboard error',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('should handle workflow completed without output and show error snackbar', async () => {
+      const mockProducts = [{id: 'prod-1', images: [{file: 'img1'}]}];
+
+      vi.spyOn(service, 'startStoryboardWorkflow').mockResolvedValue(
+        of({executionId: 'mock-execution-id'}) as any,
+      );
+
+      const mockWorkflowStatus = {
+        sink: undefined,
+      };
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+        mockWorkflowStatus as any,
+      );
+
+      await service.generateStoryboard(
+        mockProducts as any,
+        'mock briefing',
+        'none',
+      );
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Failed to generate storyboard. Workflow completed without output',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('should handle storyboard JSON file not found and show error snackbar', async () => {
+      const mockProducts = [{id: 'prod-1', images: [{file: 'img1'}]}];
+
+      vi.spyOn(service, 'startStoryboardWorkflow').mockResolvedValue(
+        of({executionId: 'mock-execution-id'}) as any,
+      );
+
+      const mockWorkflowStatus = {
+        sink: {
+          output: {
+            '0': {
+              storyboard: [{}],
+            },
+          },
+        },
+      };
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+        mockWorkflowStatus as any,
+      );
+
+      await service.generateStoryboard(
+        mockProducts as any,
+        'mock briefing',
+        'none',
+      );
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Failed to generate storyboard. Storyboard JSON file not found',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('should handle invalid storyboard JSON structure and show error snackbar', async () => {
+      const mockProducts = [{id: 'prod-1', images: [{file: 'img1'}]}];
+
+      vi.spyOn(service, 'startStoryboardWorkflow').mockResolvedValue(
+        of({executionId: 'mock-execution-id'}) as any,
+      );
+
+      const mockWorkflowStatus = {
+        sink: {
+          output: {
+            '0': {
+              storyboard: [{file: 'mock-path/storyboard.json'}],
+            },
+          },
+        },
+      };
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+        mockWorkflowStatus as any,
+      );
+
+      const mockStoryboardJson = {};
+      const mockBlob = new Blob([JSON.stringify(mockStoryboardJson)], {
+        type: 'application/json',
+      });
+      (storage.getBlob as any).mockResolvedValue(mockBlob);
+
+      await service.generateStoryboard(
+        mockProducts as any,
+        'mock briefing',
+        'none',
+      );
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Failed to generate storyboard. Storyboard JSON file is missing storyboard',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
     });
   });
 
@@ -741,6 +1079,107 @@ describe('RemixEngineService', () => {
       expect(capturedArrangement[0].transition_overlap).toBe(1);
       expect(capturedArrangement[1].file_path).toBe('mock-path/video2.mp4');
     });
+
+    it('should handle workflow start failure and show error snackbar and add failed render run', async () => {
+      const mockProject = {
+        id: 'project-1',
+        storyboard: [],
+        audioTracks: [],
+        visualOverlays: [],
+      };
+      configServiceMock.projectConfig.value.mockReturnValue(mockProject);
+
+      vi.spyOn(service, 'startCombineScenesWorkflow').mockResolvedValue(
+        undefined,
+      );
+
+      await service.combineScenes();
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Failed to start workflow',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      expect(configServiceMock.addRenderRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errorMessage: 'Failed to start workflow',
+        }),
+      );
+    });
+
+    it('should handle workflow execution error and show error snackbar and add failed render run', async () => {
+      const mockProject = {
+        id: 'project-1',
+        storyboard: [],
+        audioTracks: [],
+        visualOverlays: [],
+      };
+      configServiceMock.projectConfig.value.mockReturnValue(mockProject);
+
+      vi.spyOn(service, 'startCombineScenesWorkflow').mockResolvedValue(
+        of({executionId: 'mock-execution-id'}) as any,
+      );
+
+      const mockWorkflowStatus = {
+        sink: {
+          output: {
+            '0': {
+              video: [{_error: 'Mock combine error'}],
+            },
+          },
+        },
+      };
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+        mockWorkflowStatus as any,
+      );
+
+      await service.combineScenes();
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Mock combine error',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      expect(configServiceMock.addRenderRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errorMessage: 'Mock combine error',
+        }),
+      );
+    });
+
+    it('should handle workflow completed without output and show error snackbar and add failed render run', async () => {
+      const mockProject = {
+        id: 'project-1',
+        storyboard: [],
+        audioTracks: [],
+        visualOverlays: [],
+      };
+      configServiceMock.projectConfig.value.mockReturnValue(mockProject);
+
+      vi.spyOn(service, 'startCombineScenesWorkflow').mockResolvedValue(
+        of({executionId: 'mock-execution-id'}) as any,
+      );
+
+      const mockWorkflowStatus = {
+        sink: undefined,
+      };
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+        mockWorkflowStatus as any,
+      );
+
+      await service.combineScenes();
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Workflow completed without output',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      expect(configServiceMock.addRenderRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          errorMessage: 'Workflow completed without output',
+        }),
+      );
+    });
   });
 
   describe('startStoryboardWorkflow', () => {
@@ -779,6 +1218,39 @@ describe('RemixEngineService', () => {
 
       expect(result).toBeUndefined();
     });
+
+    it('should not upload briefing if it is empty', async () => {
+      const products = [
+        {id: 1, images: [{path: 'img1'}], description: 'prod1'},
+      ];
+      httpClientMock.post.mockReturnValue(
+        of({executionId: 'mock-execution-id'}),
+      );
+      vi.spyOn(service, 'uploadText');
+
+      await service.startStoryboardWorkflow(products as any, '', 'none');
+
+      expect(service.uploadText).not.toHaveBeenCalled();
+      expect(httpClientMock.post).toHaveBeenCalled();
+    });
+
+    it('should propagate error if startWorkflow fails', async () => {
+      const products = [
+        {id: 1, images: [{path: 'img1'}], description: 'prod1'},
+      ];
+      vi.spyOn(service, 'uploadText').mockResolvedValue('mock-briefing-path');
+      vi.spyOn(service as any, 'startWorkflow').mockRejectedValue(
+        new Error('Workflow start failed'),
+      );
+
+      await expect(
+        service.startStoryboardWorkflow(
+          products as any,
+          'mock briefing',
+          'none',
+        ),
+      ).rejects.toThrow('Workflow start failed');
+    });
   });
 
   describe('startCombineScenesWorkflow', () => {
@@ -808,6 +1280,82 @@ describe('RemixEngineService', () => {
       expect(httpClientMock.post).toHaveBeenCalled();
     });
 
+    it('should map 1080p resolution correctly', async () => {
+      const arrangement = [
+        {
+          file_type: 'video',
+          file_path: 'path',
+          start_time: 0,
+          skip_time: 0,
+          duration: 5,
+        },
+      ];
+      const mockProject = {
+        id: 'project-1',
+        resolution: '1080p',
+        aspectRatio: '16:9',
+      };
+      configServiceMock.projectConfig.value.mockReturnValue(mockProject);
+
+      httpClientMock.post.mockReturnValue(
+        of({executionId: 'mock-execution-id'}),
+      );
+      vi.spyOn(service, 'uploadText').mockResolvedValue(
+        'mock-arrangement-path',
+      );
+
+      let capturedParams: any;
+      vi.spyOn(
+        service as any,
+        'getCombineScenesWorkflowDefinition',
+      ).mockImplementation((params: any) => {
+        capturedParams = params;
+        return {};
+      });
+
+      await service.startCombineScenesWorkflow(arrangement as any, false);
+
+      expect(capturedParams.resolution).toBe('1920:1080');
+    });
+
+    it('should map 4k resolution correctly', async () => {
+      const arrangement = [
+        {
+          file_type: 'video',
+          file_path: 'path',
+          start_time: 0,
+          skip_time: 0,
+          duration: 5,
+        },
+      ];
+      const mockProject = {
+        id: 'project-1',
+        resolution: '4k',
+        aspectRatio: '16:9',
+      };
+      configServiceMock.projectConfig.value.mockReturnValue(mockProject);
+
+      httpClientMock.post.mockReturnValue(
+        of({executionId: 'mock-execution-id'}),
+      );
+      vi.spyOn(service, 'uploadText').mockResolvedValue(
+        'mock-arrangement-path',
+      );
+
+      let capturedParams: any;
+      vi.spyOn(
+        service as any,
+        'getCombineScenesWorkflowDefinition',
+      ).mockImplementation((params: any) => {
+        capturedParams = params;
+        return {};
+      });
+
+      await service.startCombineScenesWorkflow(arrangement as any, false);
+
+      expect(capturedParams.resolution).toBe('3840:2160');
+    });
+
     it('should handle error and return undefined', async () => {
       const arrangement = [
         {
@@ -828,6 +1376,28 @@ describe('RemixEngineService', () => {
       );
 
       expect(result).toBeUndefined();
+    });
+
+    it('should propagate error if startWorkflow fails', async () => {
+      const arrangement = [
+        {
+          file_type: 'video',
+          file_path: 'path',
+          start_time: 0,
+          skip_time: 0,
+          duration: 5,
+        },
+      ];
+      vi.spyOn(service, 'uploadText').mockResolvedValue(
+        'mock-arrangement-path',
+      );
+      vi.spyOn(service as any, 'startWorkflow').mockRejectedValue(
+        new Error('Workflow start failed'),
+      );
+
+      await expect(
+        service.startCombineScenesWorkflow(arrangement as any, false),
+      ).rejects.toThrow('Workflow start failed');
     });
   });
 });
