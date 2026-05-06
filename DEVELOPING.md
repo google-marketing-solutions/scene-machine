@@ -1,12 +1,20 @@
+<a id="developing-top"></a>
 # Developers' Guide for Remix Engine and its applications
 
 This repository currently comes with a single user interface, Scene Machine, which is designed to accelerate manual work on individual videos. The backend, Remix Engine, is also able to process other media, and scaled workloads. To avoid reinventing the wheel, new use cases could be added to this repository, either by "only" adding a new user interface, or by also adding functional modules should recombining the existing ones not suffice.
 
-[Creating Applications](#creating-applications-on-remix-engine) •
+[Local dependencies](#local-dependencies) •
+[Creating Applications](#creating-applications) •
+[Modules not used by Scene Machine](#modules-not-used-by-scene-machine) •
+[When to use Remix Engine](#when-to-use-remix-engine) •
+[Known Issues](#known-issues) •
 [Applications Architecture](#applications-architecture) •
-[RE Architecture](#remix-engine-architecture)
+[Remix Engine Architecture](#remix-engine-architecture) •
+[Testing](#testing)
 
 ## Local dependencies
+
+[Top](#developing-top) • [Creating Applications >](#creating-applications)
 
 To install Python dependencies (incl. formatter):
 
@@ -14,6 +22,8 @@ To install Python dependencies (incl. formatter):
 - `pip install -r requirements-dev.txt --upgrade`
 
 ## Creating Applications
+
+[< Local dependencies](#local-dependencies) • [Top](#developing-top) • [Modules not used by Scene Machine >](#modules-not-used-by-scene-machine)
 
 In the absence of a generic user interface to define workflows, each actual tool built on Remix Engine can be limited to having a fixed workflow plus a user interface that
 
@@ -30,6 +40,8 @@ It could also
 The workflow is triggered by a call to `/supplyNode`, POSTing a JSON string as described in [Workflow Definition](#workflow-definition). This returns a JSON object with a property `executionId`, which can then be used to query the status of the execution via `/getStatus/[executionId]`.
 
 ## Modules not used by Scene Machine
+
+[< Creating Applications](#creating-applications) • [Top](#developing-top) • [When to use Remix Engine >](#when-to-use-remix-engine)
 
 As Remix Engine is meant for use by various applications and can also be useful when called on the command line, without any UI, the repository contains action modules that are not referenced by the user interface.
 
@@ -59,6 +71,8 @@ The following are obsolete:
 
 ## When to use Remix Engine
 
+[< Modules not used by Scene Machine](#modules-not-used-by-scene-machine) • [Top](#developing-top) • [Known Issues >](#known-issues)
+
 The architecture could be used to realise all kinds of workflows:
 
 - Existing workflows can be easily extended.
@@ -73,6 +87,8 @@ But it is less suitable for use cases with the following properties:
 - Steps of manual intervention cannot be realised in an HTML UI that uploads and shows GCS content.
 
 ## Known Issues
+
+[< When to use Remix Engine](#when-to-use-remix-engine) • [Top](#developing-top) • [Applications Architecture >](#applications-architecture)
 
 ### Module `combine_video`
 
@@ -93,9 +109,13 @@ But it is less suitable for use cases with the following properties:
 
 ## Applications Architecture
 
+[< Known Issues](#known-issues) • [Top](#developing-top) • [Remix Engine Architecture >](#remix-engine-architecture)
+
 TO DO
 
 ## Remix Engine Architecture
+
+[< Applications Architecture](#applications-architecture) • [Top](#developing-top) • [Testing >](#testing)
 
 Remix Engine is a Cloud Run app in Python serving `/supplyNode`, which initially gets a configuration JSON to process the workflow's root node, and ultimately causes calls to itself to execute successor nodes.
 
@@ -471,6 +491,8 @@ If not, the action gets executed and its output stored in said file. For this, t
 - the easy storage of data with a filename of its choice, as name collisions are avoided because the storage automatically and transparently happens in a designated folder that is unique to the action and its input data and parameters (via a checksum).
 
 ## Testing
+
+[< Remix Engine Architecture](#remix-engine-architecture) • [Top](#developing-top)
 
 The folder `workflow_examples` contains numerous JSON files that can be used to check if the tool works. They rely on files that get uploaded to the configured GCS bucket as part of the deployment process. There are two ways of executing the examples:
 

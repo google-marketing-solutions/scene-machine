@@ -13,7 +13,7 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 -->
-
+<a id="readme-top"></a>
 _Disclaimer: This is not an officially supported Google product._
 
 # Scene Machine: Storyboard-Driven Generative AI Video Ad Creation
@@ -38,7 +38,7 @@ Scene Machine is a Google Cloud-based, open-source workbench that leverages gene
 
 ## How it Works
 
-[< TL;DR](#tldr) • [Top](#) • [Technical Requirements >](#technical-requirements)
+[< TL;DR](#tldr) • [Top](#readme-top) • [Technical Requirements >](#technical-requirements)
 
 > [!TIP]
 > For a step-by-step guide with screen recordings, see [`docs/walkthrough.md`](./docs/walkthrough.md).
@@ -61,7 +61,7 @@ Users compile all timeline assets by rendering the video, which is then availabl
 
 ## Technical Requirements
 
-[< How it Works](#how-it-works) • [Top](#) • [Deployment >](#deployment)
+[< How it Works](#how-it-works) • [Top](#readme-top) • [Deployment >](#deployment)
 
 To deploy this application, you need a **project on Google Cloud Platform without any existing App Engine apps**.
 
@@ -94,7 +94,7 @@ _Please note that most of the APIs are enabled automatically when you run the de
 
 ## Deployment
 
-[< Technical Requirements](#technical-requirements) • [Top](#) • [Adding Users >](#adding-users)
+[< Technical Requirements](#technical-requirements) • [Top](#readme-top) • [Adding Users >](#adding-users)
 
 #### Prerequisites
 
@@ -208,13 +208,13 @@ To help debug problems with the deployment scripts, you can change their top lin
 
 ## Adding Users
 
-[< Deployment](#deployment) • [Top](#) • [Using Scene Machine >](#using-scene-machine)
+[< Deployment](#deployment) • [Top](#readme-top) • [Using Scene Machine >](#using-scene-machine)
 
 Each person intending to use Scene Machine needs to be given the "Scene Machine User" role in the Google Cloud project in which the tool is deployed.
 
 ## Using Scene Machine
 
-[< Adding Users](#adding-users) • [Top](#) • [Caveats >](#caveats)
+[< Adding Users](#adding-users) • [Top](#readme-top) • [Caveats >](#caveats)
 
 > [!TIP]
 > For a step-by-step guide with screen recordings, see [`docs/walkthrough.md`](./docs/walkthrough.md).
@@ -235,7 +235,7 @@ To get more information about the inner workings of the tool, refer to the [Deve
 
 ## Caveats
 
-[< Using Scene Machine](#using-scene-machine) • [Top](#) • [Alternatives to Scene Machine >](#alternatives-to-scene-machine)
+[< Using Scene Machine](#using-scene-machine) • [Top](#readme-top) • [Alternatives to Scene Machine >](#alternatives-to-scene-machine)
 
 ### Data access
 
@@ -266,7 +266,7 @@ A Google Cloud project has certain throughput limits defined per service and loc
 
 ## Alternatives to Scene Machine
 
-[< Caveats](#caveats) • [Top](#)
+[< Caveats](#caveats) • [Top](#readme-top)
 
 There is a vast array of tools to generate video ads automatically, ranging from animations of static assets with [Auto-generated video ads for Responsive Search Ads](https://support.google.com/google-ads/answer/9848688?hl=en) to the creation of generic GenAI video using [Flow](https://labs.google/fx/tools/flow) or [Vids](https://docs.google.com/videos). As the capabilities of the tools and the models they use are in continuous flux, it makes no sense to list them here.
 

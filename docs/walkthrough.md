@@ -1,5 +1,5 @@
 _Disclaimer: This is not an officially supported Google product._
-
+<a id="walkthrough-top"></a>
 # Scene Machine Video Generation Walkthrough
 
 This walkthrough demonstrates how to use **Scene Machine** to leverage generative AI models for storyboard-driven video ad creation, transforming product or service images into video ads on Google Cloud Platform. Follow these step-by-step instructions to navigate the four main stages of the application: **Setup**, **Storyboard**, **Composition**, and **Output**.
@@ -21,7 +21,7 @@ This walkthrough demonstrates how to use **Scene Machine** to leverage generativ
 ---
 
 ## Step 1: Initiating a New Project from the Homepage
-< previous step | [Top](#scene-machine-video-generation-walkthrough) | [next step >](#step-2-configuring-project-settings-and-assets)
+< previous step | [Top](#walkthrough-top) | [next step >](#step-2-configuring-project-settings-and-assets)
 ### Overview
 The Homepage serves as your central dashboard for managing all Scene Machine projects. From here, you can view existing projects and initiate new ones.
 
@@ -40,7 +40,7 @@ The Homepage serves as your central dashboard for managing all Scene Machine pro
 ---
 
 ## Step 2: Configuring Project Settings and Assets
-[< previous step](#step-1-initiating-a-new-project-from-the-homepage) | [Top](#scene-machine-video-generation-walkthrough) | [next step >](#step-3-uploading-product-assets-and-preparing-storyboard-context)
+[< previous step](#step-1-initiating-a-new-project-from-the-homepage) | [Top](#walkthrough-top) | [next step >](#step-3-uploading-product-assets-and-preparing-storyboard-context)
 ### Overview
 The Setup stage defines the foundational settings for your project, including aspect ratio, resolution, and generative AI parameters. From here, you can either utilize the `Generate with AI` flow (recommended) to create a storyboard automatically or choose `Manually create` to start with an empty storyboard.
 
@@ -74,7 +74,7 @@ To use this flow:
 ---
 
 ## Step 3: Uploading Product Assets and Preparing Storyboard Context
-[< previous step](#step-2-configuring-project-settings-and-assets) | [Top](#scene-machine-video-generation-walkthrough) | [next step >](#step-4-applying-creative-templates-to-standardize-composition)
+[< previous step](#step-2-configuring-project-settings-and-assets) | [Top](#walkthrough-top) | [next step >](#step-4-applying-creative-templates-to-standardize-composition)
 ### Overview
 Upload your product or service images to begin. For this demo, we use three images of a couch as our input. Scene Machine uses these images - along with any optional descriptions - to generate a storyboard and create a sequence of video scenes. 
 
@@ -93,7 +93,7 @@ Upload your product or service images to begin. For this demo, we use three imag
 ---
 
 ## Step 4: Applying Creative Templates to Standardize Composition
-[< previous step](#step-3-uploading-product-assets-and-preparing-storyboard-context) | [Top](#scene-machine-video-generation-walkthrough) | [next step >](#step-5-generating-and-reviewing-the-visual-storyboard)
+[< previous step](#step-3-uploading-product-assets-and-preparing-storyboard-context) | [Top](#walkthrough-top) | [next step >](#step-5-generating-and-reviewing-the-visual-storyboard)
 ### Overview
 The Composition step guides the structure and flow of your storyboard. While Scene Machine generates results with minimal input, providing detailed compositional instructions ensures consistent, repeatable outcomes. Use Creative Templates to standardize your scene patterns. Scene Machine includes pre-installed templates to help you get started. 
 
@@ -117,7 +117,7 @@ For example, the [Single Product - 3 Scenes](../creative_templates/single_produc
 ---
 
 ## Step 5: Generating and Reviewing the Visual Storyboard
-[< previous step](#step-4-applying-creative-templates-to-standardize-composition) | [Top](#scene-machine-video-generation-walkthrough) | [next step >](#step-6-organizing-and-supplementing-the-video-timeline)
+[< previous step](#step-4-applying-creative-templates-to-standardize-composition) | [Top](#walkthrough-top) | [next step >](#step-6-organizing-and-supplementing-the-video-timeline)
 ### Overview
 Scene Machine is now sending your inputs to Gemini to craft a cohesive visual storyboard and corresponding prompts. We included this review step so you can verify the storyboard and prompts before Veo begins video generation, as generation is billed per second for each candidate.
 
@@ -141,7 +141,7 @@ Review the generated storyboard. Scene Machine has mapped your input images to s
 ---
 
 ## Step 6: Organizing and Supplementing the Video Timeline
-[< previous step](#step-5-generating-and-reviewing-the-visual-storyboard) | [Top](#scene-machine-video-generation-walkthrough) | [next step >](#step-7-generating-reviewing-and-trimming-video-candidates)
+[< previous step](#step-5-generating-and-reviewing-the-visual-storyboard) | [Top](#walkthrough-top) | [next step >](#step-7-generating-reviewing-and-trimming-video-candidates)
 ### Overview
 You have arrived at the Storyboard stage, where you can generate and manage video candidates scene-by-scene. Use the central timeline to reorder scenes or click the (+) button to add new content, such as an existing end slate. Scene Machine sends video generation requests to Veo in parallel, which significantly reduces the total time required for all scenes to be generated. While a single video generation by Veo typically takes 1–3 minutes, your actual experience may vary based on your chosen model, resolution, duration, and current system load.
 
@@ -158,7 +158,7 @@ You have arrived at the Storyboard stage, where you can generate and manage vide
 ---
 
 ## Step 7: Generating, Reviewing, and Trimming Video Candidates
-[< previous step](#step-6-organizing-and-supplementing-the-video-timeline) | [Top](#scene-machine-video-generation-walkthrough) | [next step >](#step-8-composing-and-enhancing-with-transitions-audio-and-overlays)
+[< previous step](#step-6-organizing-and-supplementing-the-video-timeline) | [Top](#walkthrough-top) | [next step >](#step-8-composing-and-enhancing-with-transitions-audio-and-overlays)
 ### Overview
 Let’s examine a specific scene. On the left, you will see a list of candidate videos generated by Veo. Hover over any candidate to preview it at 2x speed without sound. Click a candidate to load it in the central workspace for detailed review and trimming. 
 
@@ -185,7 +185,7 @@ Generation typically takes 1–3 minutes, but you can navigate to different scen
 ---
 
 ## Step 8: Composing and Enhancing with Transitions, Audio, and Overlays
-[< previous step](#step-7-generating-reviewing-and-trimming-video-candidates) | [Top](#scene-machine-video-generation-walkthrough) | [next step >](#step-9-rendering-and-reviewing-the-final-video-ad)
+[< previous step](#step-7-generating-reviewing-and-trimming-video-candidates) | [Top](#walkthrough-top) | [next step >](#step-9-rendering-and-reviewing-the-final-video-ad)
 ### Overview
 Once your storyboard scenes are finalized, proceed to the Compose stage to assemble your full video. If you do not select a specific candidate for a scene, Scene Machine defaults to the first one. Use the central workspace to preview the full sequence; if you need to reorder scenes or adjust trimming, return to the Storyboard stage. Enhance your video by adding transitions between scenes, custom audio tracks, and visual overlays. Please note that these additions do not have a live preview in this view; you must click Render Video to combine and review the final result.
 
@@ -207,7 +207,7 @@ Once your storyboard scenes are finalized, proceed to the Compose stage to assem
 ---
 
 ## Step 9: Rendering and Reviewing the Final Video Ad
-[< previous step](#step-8-composing-and-enhancing-with-transitions-audio-and-overlays) | [Top](#scene-machine-video-generation-walkthrough) | next step >
+[< previous step](#step-8-composing-and-enhancing-with-transitions-audio-and-overlays) | [Top](#walkthrough-top) | next step >
 ### Overview
 In the Output stage, review your final rendered video, which incorporates all scenes, transitions, audio, and overlays. 
 
@@ -232,7 +232,7 @@ Thank you!
 - Read the [Developers' Guide](../DEVELOPING.md) to understand the Scene Machine backend.
 - Check the [Caveats](../README.md#caveats) section in the README for important considerations.
 
-[< previous step](#step-8-composing-and-enhancing-with-transitions-audio-and-overlays) | [Top](#scene-machine-video-generation-walkthrough) | [go to readme >](../README.md)
+[< previous step](#step-8-composing-and-enhancing-with-transitions-audio-and-overlays) | [Top](#walkthrough-top) | [go to readme >](../README.md)
 
 
 [def]: #step-1-initiating-a-new-project-from-the-homepage
