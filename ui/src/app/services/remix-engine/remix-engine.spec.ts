@@ -21,8 +21,7 @@ import {EnvironmentInjector} from '@angular/core';
 import * as storage from '@angular/fire/storage';
 import {Storage} from '@angular/fire/storage';
 import {MatSnackBar} from '@angular/material/snack-bar';
-import {of, take, filter, repeat, defer} from 'rxjs';
-import {TestScheduler} from 'rxjs/testing';
+import {of} from 'rxjs';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {ClientMediaService} from '../client-media/client-media';
 import {ConfigService} from '../config/config';
@@ -217,43 +216,73 @@ describe('RemixEngineService', () => {
       expect(httpClientMock.get).toHaveBeenCalled();
     });
 
-    it('should poll until sink output is defined', () => {
-      const testScheduler = new TestScheduler((actual: any, expected: any) => {
-        expect(actual).toEqual(expected);
+    it('should poll until sink output is defined', async () => {
+      vi.useFakeTimers();
+      const mockResponse1 = {sink: {output: undefined}};
+      const mockResponse2 = {sink: {output: {'0': {video: []}}}};
+
+      let callCount = 0;
+      httpClientMock.get.mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return of(mockResponse1);
+        } else {
+          return of(mockResponse2);
+        }
       });
 
-      testScheduler.run(({expectObservable, cold}: any) => {
-        const mockResponse1 = {sink: {output: undefined}};
-        const mockResponse2 = {sink: {output: {'0': {video: []}}}};
+      const pollPromise = service.pollWorkflow(
+        'mock-execution-id',
+        'mock-project-id',
+      );
 
-        httpClientMock.get
-          .mockReturnValueOnce(cold('(a|)', {a: mockResponse1}))
-          .mockReturnValueOnce(cold('b', {b: mockResponse2}));
+      // Advance timers by 1ms to let timer(0, ...) emit
+      await vi.advanceTimersByTimeAsync(1);
 
-        // Recreate the pipe in the test to test it with marbles
-        const poll$ = defer(() =>
-          (service as any).getWorkflowStatus('mock-execution-id'),
-        ).pipe(
-          repeat({delay: 10}),
-          take(5),
-          filter((response: any) => response.sink?.output !== undefined),
-          take(1),
-        );
+      // First poll should happen immediately
+      expect(callCount).toBe(1);
 
-        expectObservable(poll$).toBe('----------(b|)', {b: mockResponse2});
-      });
-    });
+      // Advance timers by 15ms to trigger the next poll (interval is 10ms)
+      await vi.advanceTimersByTimeAsync(15);
+
+      const result = await pollPromise;
+
+      expect(result).toEqual(mockResponse2);
+      expect(callCount).toBe(2);
+
+      vi.useRealTimers();
+    }, 10000);
 
     it('should throw ProjectChangedError if project changes', async () => {
+      vi.useFakeTimers();
       const mockResponse = {sink: {output: undefined}};
-      httpClientMock.get.mockReturnValue(of(mockResponse));
+      httpClientMock.get.mockImplementation(() => {
+        console.log('Test 2: Mock HTTP GET called');
+        return of(mockResponse);
+      });
       configServiceMock.projectConfig.value.mockReturnValue({
         id: 'different-project-id',
       });
 
-      await expect(
-        service.pollWorkflow('mock-execution-id', 'mock-project-id'),
-      ).rejects.toThrow('Project changed');
+      const pollPromise = service.pollWorkflow(
+        'mock-execution-id',
+        'mock-project-id',
+      );
+      pollPromise.catch(() => {}); // Prevent unhandled rejection warning
+
+      // Advance timers by 1ms to let timer(0, ...) emit
+      await vi.advanceTimersByTimeAsync(1);
+
+      let thrownError: any;
+      try {
+        await pollPromise;
+      } catch (e) {
+        thrownError = e;
+      }
+
+      expect(thrownError).toBeTruthy();
+      expect(thrownError.message).toContain('Project changed');
+      vi.useRealTimers();
     });
   });
 
@@ -282,7 +311,7 @@ describe('RemixEngineService', () => {
         mockWorkflowStatus as any,
       );
 
-      (storage.getDownloadURL as any).mockResolvedValue('http://mock-url');
+      vi.mocked(storage.getDownloadURL).mockResolvedValue('http://mock-url');
 
       clientMediaServiceMock.generateLowQualityThumbnail.mockResolvedValue(
         new Blob(),
@@ -304,7 +333,7 @@ describe('RemixEngineService', () => {
         durationSeconds: 5,
         model: 'model-1',
         generateAudio: false,
-        resolution: 'LANDSCAPE' as any,
+        resolution: '720p',
       });
 
       expect(configServiceMock.updateProjectConfig).toHaveBeenCalledWith({
@@ -319,7 +348,7 @@ describe('RemixEngineService', () => {
                 prompt: 'prompt 1',
                 model: 'model-1',
                 generateAudio: false,
-                resolution: 'LANDSCAPE',
+                resolution: '720p',
                 video: {url: 'http://mock-url', path: 'mock-path/video.mp4'},
                 lowQualityThumbnail: 'mock-base64',
                 highQualityThumbnail: {
@@ -348,7 +377,7 @@ describe('RemixEngineService', () => {
         durationSeconds: 5,
         model: 'model-1',
         generateAudio: false,
-        resolution: 'LANDSCAPE' as any,
+        resolution: '720p',
       });
 
       expect(service.startVideoGenerationWorkflow).not.toHaveBeenCalled();
@@ -365,7 +394,7 @@ describe('RemixEngineService', () => {
         durationSeconds: 5,
         model: 'model-1',
         generateAudio: false,
-        resolution: 'LANDSCAPE' as any,
+        resolution: '720p',
       });
 
       expect(matSnackBarMock.open).toHaveBeenCalledWith(
@@ -399,7 +428,7 @@ describe('RemixEngineService', () => {
         durationSeconds: 5,
         model: 'model-1',
         generateAudio: false,
-        resolution: 'LANDSCAPE' as any,
+        resolution: '720p',
       });
 
       expect(matSnackBarMock.open).toHaveBeenCalledWith(
@@ -427,7 +456,7 @@ describe('RemixEngineService', () => {
         durationSeconds: 5,
         model: 'model-1',
         generateAudio: false,
-        resolution: 'LANDSCAPE' as any,
+        resolution: '720p',
       });
 
       expect(matSnackBarMock.open).toHaveBeenCalledWith(
@@ -459,7 +488,7 @@ describe('RemixEngineService', () => {
         mockWorkflowStatus as any,
       );
 
-      (storage.getDownloadURL as any).mockResolvedValue('http://mock-url');
+      vi.mocked(storage.getDownloadURL).mockResolvedValue('http://mock-url');
 
       clientMediaServiceMock.generateLowQualityThumbnail.mockRejectedValue(
         new Error('Thumbnail failed'),
@@ -479,7 +508,7 @@ describe('RemixEngineService', () => {
         durationSeconds: 5,
         model: 'model-1',
         generateAudio: false,
-        resolution: 'LANDSCAPE' as any,
+        resolution: '720p',
       });
 
       expect(configServiceMock.updateProjectConfig).toHaveBeenCalledWith(
@@ -534,8 +563,8 @@ describe('RemixEngineService', () => {
       const mockBlob = new Blob([JSON.stringify(mockStoryboardJson)], {
         type: 'application/json',
       });
-      (storage.getBlob as any).mockResolvedValue(mockBlob);
-      (storage.getDownloadURL as any).mockResolvedValue('http://mock-url');
+      vi.mocked(storage.getBlob).mockResolvedValue(mockBlob);
+      vi.mocked(storage.getDownloadURL).mockResolvedValue('http://mock-url');
 
       const result = await service.generateStoryboard(
         mockProducts as any,
@@ -683,7 +712,7 @@ describe('RemixEngineService', () => {
       const mockBlob = new Blob([JSON.stringify(mockStoryboardJson)], {
         type: 'application/json',
       });
-      (storage.getBlob as any).mockResolvedValue(mockBlob);
+      vi.mocked(storage.getBlob).mockResolvedValue(mockBlob);
 
       await service.generateStoryboard(
         mockProducts as any,
@@ -732,7 +761,7 @@ describe('RemixEngineService', () => {
         mockWorkflowStatus as any,
       );
 
-      (storage.getDownloadURL as any).mockResolvedValue(
+      vi.mocked(storage.getDownloadURL).mockResolvedValue(
         'http://mock-video-url',
       );
 
@@ -754,7 +783,7 @@ describe('RemixEngineService', () => {
             prompt: 'prompt 1',
             model: 'model-1',
             generateAudio: false,
-            resolution: 'LANDSCAPE' as any,
+            resolution: '720p',
           },
         ],
         selectedCandidateIndex: 0,
@@ -781,7 +810,7 @@ describe('RemixEngineService', () => {
       vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
         workflowStatusMock as any,
       );
-      (storage.getDownloadURL as any).mockResolvedValue(
+      vi.mocked(storage.getDownloadURL).mockResolvedValue(
         'http://mock-video-url',
       );
 
@@ -814,7 +843,7 @@ describe('RemixEngineService', () => {
             prompt: 'prompt 1',
             model: 'model-1',
             generateAudio: false,
-            resolution: 'LANDSCAPE' as any,
+            resolution: '720p',
           },
         ],
         selectedCandidateIndex: 0,
@@ -841,7 +870,7 @@ describe('RemixEngineService', () => {
       vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
         workflowStatusMock as any,
       );
-      (storage.getDownloadURL as any).mockResolvedValue(
+      vi.mocked(storage.getDownloadURL).mockResolvedValue(
         'http://mock-video-url',
       );
 
@@ -874,7 +903,7 @@ describe('RemixEngineService', () => {
             prompt: 'prompt 1',
             model: 'model-1',
             generateAudio: false,
-            resolution: 'LANDSCAPE' as any,
+            resolution: '720p',
           },
         ],
         selectedCandidateIndex: 0,
@@ -901,7 +930,7 @@ describe('RemixEngineService', () => {
       vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
         workflowStatusMock as any,
       );
-      (storage.getDownloadURL as any).mockResolvedValue(
+      vi.mocked(storage.getDownloadURL).mockResolvedValue(
         'http://mock-video-url',
       );
 
@@ -933,7 +962,7 @@ describe('RemixEngineService', () => {
             prompt: 'prompt 1',
             model: 'model-1',
             generateAudio: false,
-            resolution: 'LANDSCAPE' as any,
+            resolution: '720p',
           },
         ],
         selectedCandidateIndex: 0,
@@ -951,7 +980,7 @@ describe('RemixEngineService', () => {
             prompt: 'prompt 2',
             model: 'model-1',
             generateAudio: false,
-            resolution: 'LANDSCAPE' as any,
+            resolution: '720p',
           },
         ],
         selectedCandidateIndex: 0,
@@ -978,7 +1007,7 @@ describe('RemixEngineService', () => {
       vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
         workflowStatusMock as any,
       );
-      (storage.getDownloadURL as any).mockResolvedValue(
+      vi.mocked(storage.getDownloadURL).mockResolvedValue(
         'http://mock-video-url',
       );
 
@@ -1012,7 +1041,7 @@ describe('RemixEngineService', () => {
             prompt: 'prompt 1',
             model: 'model-1',
             generateAudio: false,
-            resolution: 'LANDSCAPE' as any,
+            resolution: '720p',
           },
         ],
         selectedCandidateIndex: 0,
@@ -1030,7 +1059,7 @@ describe('RemixEngineService', () => {
             prompt: 'prompt 2',
             model: 'model-1',
             generateAudio: false,
-            resolution: 'LANDSCAPE' as any,
+            resolution: '720p',
           },
         ],
         selectedCandidateIndex: 0,
@@ -1057,7 +1086,7 @@ describe('RemixEngineService', () => {
       vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
         workflowStatusMock as any,
       );
-      (storage.getDownloadURL as any).mockResolvedValue(
+      vi.mocked(storage.getDownloadURL).mockResolvedValue(
         'http://mock-video-url',
       );
 

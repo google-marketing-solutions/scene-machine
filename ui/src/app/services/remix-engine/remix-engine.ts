@@ -31,7 +31,16 @@ import {
   uploadString,
 } from '@angular/fire/storage';
 import {MatSnackBar} from '@angular/material/snack-bar';
-import {filter, firstValueFrom, Observable, repeat, retry, tap} from 'rxjs';
+import {
+  filter,
+  firstValueFrom,
+  Observable,
+  retry,
+  tap,
+  timer,
+  switchMap,
+  take,
+} from 'rxjs';
 import {ClientMediaService} from '../client-media/client-media';
 import {
   ASPECT_RATIO_DEVIATION_THRESHOLD,
@@ -100,7 +109,8 @@ export class RemixEngineService {
     projectId: string,
   ): Promise<WorkflowStatusResponse> {
     return await firstValueFrom(
-      this.getWorkflowStatus(workflowId).pipe(
+      timer(0, WORKFLOW_STATUS_POLL_INTERVAL_MS).pipe(
+        switchMap(() => this.getWorkflowStatus(workflowId)),
         retry({delay: WORKFLOW_STATUS_POLL_INTERVAL_MS}),
         tap(() => {
           if (this.configService.projectConfig.value().id !== projectId) {
@@ -108,7 +118,7 @@ export class RemixEngineService {
           }
         }),
         filter(response => response.sink?.output !== undefined),
-        repeat({delay: WORKFLOW_STATUS_POLL_INTERVAL_MS}),
+        take(1),
       ),
     );
   }
