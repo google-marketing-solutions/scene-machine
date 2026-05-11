@@ -13,15 +13,93 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# ---------------------------------------------------------------------------
+# Console output convention: lines beginning with "[▶]" mark the start of a
+# major deployment phase. If something fails, copy the "[▶]" prefix (or the
+# full prefix + echo message) from the terminal and Ctrl+F in this file to jump
+# straight to the matching section in the script.
+# ---------------------------------------------------------------------------
+
 # Generate ui/definitions/config.json for backend and frontend
 generate_config() {
   envsubst < ui/definitions/config.template.json > ui/definitions/config.json
 }
 
-set -eu
-echo "Deploying Scene Machine... (Total runtime estimate: ≈17 minutes)"
+# Wrapper for `gcloud projects add-iam-policy-binding` that (a) suppresses the
+# verbose updated-policy YAML on success, and (b) retries with exponential
+# backoff on concurrent-modification etag conflicts. Background GCP work (App
+# Engine setup, Firebase, service-agent provisioning) modifies the project
+# policy in parallel with our sequential read-modify-writes, occasionally
+# racing our etag. The gcloud error itself recommends "retry with exponential
+# backoff" — this helper does that automatically.
+add_iam_binding() {
+  # Pull the role out of the args so retry/success messages identify which
+  # binding hit the conflict (otherwise the log just says "an IAM binding").
+  local role=""
+  for arg in "$@"; do
+    case "$arg" in --role=*) role="${arg#--role=}" ;; esac
+  done
+  local label="${role:+ (for $role)}"
 
-# Check config
+  local attempt=1
+  local max_attempts=5
+  while true; do
+    if gcloud projects add-iam-policy-binding "$@" --quiet > /dev/null 2>&1; then
+      if [ $attempt -gt 1 ]; then
+        echo "  ✓ IAM binding${label} succeeded on attempt $attempt."
+      fi
+      return 0
+    fi
+    if [ $attempt -ge $max_attempts ]; then
+      # Final attempt: don't suppress so the real error reaches the user.
+      gcloud projects add-iam-policy-binding "$@" --quiet
+      return $?
+    fi
+    local backoff=$((2 ** attempt))
+    echo "  IAM binding${label} hit a transient conflict — retrying in ${backoff}s (attempt $attempt/$max_attempts)..."
+    sleep $backoff
+    attempt=$((attempt + 1))
+  done
+}
+
+set -eu
+echo "Deploying Scene Machine... (Total runtime estimate: ≈15 minutes)"
+
+# --- Pre-flight: required tools and gcloud auth -----------------------------
+# Fail fast if a required command is missing or gcloud isn't authenticated,
+# rather than 30+ seconds into a gcloud/firebase call with a confusing error.
+echo
+echo "[▶] Checking required tools..."
+MISSING_TOOLS=0
+require_tool() {
+  local name="$1"
+  local hint="$2"
+  if ! command -v "$name" >/dev/null 2>&1; then
+    echo "ERROR: '$name' is not installed. $hint"
+    MISSING_TOOLS=$((MISSING_TOOLS + 1))
+  fi
+}
+require_tool gcloud   "Install: https://cloud.google.com/sdk/docs/install"
+require_tool firebase "Install: npm i -g firebase-tools"
+require_tool node     "Install Node.js ≥ v22: https://nodejs.org/en/download"
+require_tool npm      "Install Node.js (includes npm): https://nodejs.org/en/download"
+require_tool envsubst "Install gettext (macOS: 'brew install gettext'; Debian/Ubuntu: 'apt-get install gettext')"
+if [ $MISSING_TOOLS -gt 0 ]; then
+  echo "Please install the missing tools above, then re-run $0."
+  exit 1
+fi
+ACTIVE_ACCOUNT=$(gcloud auth list --filter=status:ACTIVE --format="value(account)" 2>/dev/null || true)
+if [ -z "$ACTIVE_ACCOUNT" ]; then
+  echo "ERROR: gcloud has no active authenticated account."
+  echo "Run: gcloud auth login && gcloud auth application-default login"
+  exit 1
+fi
+echo "✓ All required tools found (gcloud, firebase, node, npm, envsubst)."
+echo "✓ gcloud authenticated as: $ACTIVE_ACCOUNT"
+
+# --- Check config.txt -------------------------------------------------------
+echo
+echo "[▶] Checking config.txt..."
 REQUIRED_VARS=(
   "API_GATEWAY"
   "API_GATEWAY_REGION"
@@ -53,13 +131,55 @@ if [ $MISSING -gt 0 ]; then
   exit 1
 fi
 source ./config.txt
+echo "✓ config.txt is valid. Target project: $PROJECT"
+
+# --- Sanity check: gcloud project matches config.txt ------------------------
+# Catches the footgun of forgetting to update config.txt (or gcloud's active
+# project) before running. The script proceeds to overwrite gcloud's active
+# project below, so we explicitly confirm the intended target first.
+CURRENT_GCLOUD_PROJECT=$(gcloud config get-value project 2>/dev/null || true)
+if [ -n "$CURRENT_GCLOUD_PROJECT" ] && [ "$CURRENT_GCLOUD_PROJECT" != "$PROJECT" ]; then
+  echo "============================================================"
+  echo "WARNING: project mismatch detected."
+  echo "  gcloud is currently set to: $CURRENT_GCLOUD_PROJECT"
+  echo "  config.txt PROJECT is:      $PROJECT"
+  echo "  This script will deploy to '$PROJECT' (from config.txt)."
+  echo "============================================================"
+  if [ ! -t 0 ]; then
+    echo "ERROR: stdin is not a TTY — cannot confirm. Re-run interactively,"
+    echo "       or align gcloud and config.txt before re-running."
+    exit 1
+  fi
+  read -r -p "Proceed and deploy to '$PROJECT'? (y/N) " confirm
+  case "$confirm" in
+    [yY]|[yY][eE][sS]) echo "✓ Continuing with project $PROJECT." ;;
+    *) echo "Aborted. Update config.txt, or run 'gcloud config set project $PROJECT' to align." ; exit 1 ;;
+  esac
+fi
 
 # 1) Enable services
+# Note: compute.googleapis.com is enabled here so the default Compute Engine
+# service account (used for role bindings below) is guaranteed to exist. Most
+# projects already have it enabled transitively; this handles fresh projects.
+echo
+echo "[▶] Enabling required Google Cloud APIs..."
 gcloud config set project $PROJECT
 gcloud auth application-default set-quota-project $PROJECT
-gcloud services enable aiplatform.googleapis.com apigateway.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com cloudtasks.googleapis.com firestore.googleapis.com run.googleapis.com servicecontrol.googleapis.com iap.googleapis.com --project=$PROJECT
+gcloud services enable aiplatform.googleapis.com apigateway.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com cloudtasks.googleapis.com compute.googleapis.com firestore.googleapis.com run.googleapis.com servicecontrol.googleapis.com iap.googleapis.com --project=$PROJECT
+
+# Warm up Vertex AI service agent. On a fresh project, the agent
+# (service-<PROJECT_NUMBER>@gcp-sa-aiplatform.iam.gserviceaccount.com) is
+# created lazily on first API use, and its auto-granted Storage Object access
+# takes ~5-15 min to propagate. Without this, the user's first Veo generation
+# fails with "Service agents are being provisioned." Triggering identity
+# creation now starts the propagation window during the rest of the deploy.
+echo
+echo "[▶] Provisioning Vertex AI service agent..."
+gcloud beta services identity create --service=aiplatform.googleapis.com --project=$PROJECT
 
 # 2) Create databases
+echo
+echo "[▶] Setting up GCS bucket and Firestore databases..."
 if ! gcloud storage buckets describe "gs://$GCS_BUCKET" &> /dev/null; then
     gcloud storage buckets create "gs://$GCS_BUCKET" --project=$PROJECT --location="$REGION"
 else
@@ -81,6 +201,8 @@ else
     gcloud firestore databases describe --database="$FIRESTORE_DB_UI" --project=$PROJECT --format="value(locationId)"
 fi
 
+echo
+echo "[▶] Setting up Firebase project and Web App..."
 if gcloud services list --enabled --project=$PROJECT --filter="name:firebase.googleapis.com" | grep -q "firebase.googleapis.com"; then
   echo "Firebase is already enabled for the project."
 else
@@ -102,7 +224,8 @@ envsubst < ./firebase/firebase.template.json > ./firebase/firebase.json
 envsubst < ./firebase/.firebaserc.template > ./firebase/.firebaserc
 firebase target:apply --config firebase/firebase.json storage bucket_target $GCS_BUCKET --project $PROJECT
 
-echo "Deploying rules for Backend Firestore DB..."
+echo
+echo "[▶] Deploying rules for Backend Firestore DB..."
 firebase deploy --config firebase/firebase.json --only firestore --project $PROJECT
 
 rm firebase/firebase.json
@@ -110,6 +233,8 @@ rm firebase/.firebaserc
 
 export FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
 
+echo
+echo "[▶] Setting up App Engine app..."
 if ! gcloud app describe --project=$PROJECT &> /dev/null; then
   echo "App Engine app doesn't exist. Creating it (Estimated time: ≈3 minutes)..."
   gcloud app create --region $APP_ENGINE_REGION --project $PROJECT
@@ -119,6 +244,7 @@ fi
 
 if [ -n "${CUSTOM_DOMAIN:-}" ]; then
   export UI_HOST="${CUSTOM_DOMAIN}"
+  echo "✓ Using custom domain: ${UI_HOST}"
 else
   export UI_HOST=$(gcloud app describe --project=$PROJECT --format="value(defaultHostname)")
 fi
@@ -126,9 +252,25 @@ fi
 # Identify service account and assign required permissions BEFORE deployment
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT --format="value(projectNumber)")
 SERVICE_ACCOUNT="$PROJECT_NUMBER-compute@developer.gserviceaccount.com"
-if ! gcloud iam service-accounts describe "${SERVICE_ACCOUNT}" &> /dev/null; then
-  echo "Service account does not exist: ${SERVICE_ACCOUNT}"
-fi
+# The default Compute Engine SA is created when compute.googleapis.com is
+# enabled (above), but its propagation can take 30-60s on fresh projects.
+# Wait for it to exist before attempting role bindings below, rather than
+# failing inside the loop with a confusing "service account not found" error.
+echo
+echo "[▶] Waiting for default Compute Engine service account to exist..."
+SA_WAIT_ATTEMPTS=0
+SA_WAIT_MAX=60   # 60 × 5s = 5 min total
+until gcloud iam service-accounts describe "${SERVICE_ACCOUNT}" --project=$PROJECT &> /dev/null; do
+  SA_WAIT_ATTEMPTS=$((SA_WAIT_ATTEMPTS + 1))
+  if [ $SA_WAIT_ATTEMPTS -ge $SA_WAIT_MAX ]; then
+    echo "ERROR: default Compute Engine SA did not appear after 5 minutes."
+    echo "Try enabling Compute Engine API manually, then re-run $0:"
+    echo "  gcloud services enable compute.googleapis.com --project=$PROJECT"
+    exit 1
+  fi
+  sleep 5
+done
+echo "✓ Service account ${SERVICE_ACCOUNT} ready."
 
 ROLES=(
   "roles/datastore.user"
@@ -141,9 +283,25 @@ ROLES=(
   "roles/logging.logWriter"
   "roles/iam.serviceAccountUser"
 )
+echo
+echo "[▶] Granting ${#ROLES[@]} roles to $SERVICE_ACCOUNT..."
 for ROLE in "${ROLES[@]}"; do
-  gcloud projects add-iam-policy-binding $PROJECT --member="serviceAccount:${SERVICE_ACCOUNT}" --role="$ROLE" --condition=None
+  echo "  - $ROLE"
+  add_iam_binding $PROJECT --member="serviceAccount:${SERVICE_ACCOUNT}" --role="$ROLE" --condition=None
 done
+echo "✓ Roles granted."
+
+# Explicitly grant the Vertex AI service agent storage access. The agent is
+# auto-granted this on first use but propagation lags by ~5-15 min; binding it
+# now eliminates the first-Veo-generation "Service agents are being
+# provisioned" failure (see DEPLOY_NOTES.md issue #6).
+AIPLATFORM_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com"
+echo
+echo "[▶] Granting roles/storage.objectUser to Vertex AI service agent..."
+add_iam_binding $PROJECT \
+  --member="serviceAccount:${AIPLATFORM_SA}" \
+  --role="roles/storage.objectUser" \
+  --condition=None
 
 # 3) Deploy backend (Cloud Run)
 COMMIT_DATE=$(git log -1 --format=%cI)
@@ -158,11 +316,14 @@ fi
 # Write config.json since backend needs part of it
 generate_config
 
-echo "Deploying backend to Cloud Run (Estimated time: ~7 minutes)..."
+echo
+echo "[▶] Deploying backend to Cloud Run (Estimated time: ~5 minutes)..."
 gcloud run deploy "$BACKEND_SERVICE_NAME" --source . --image $REGION-docker.pkg.dev/$PROJECT/$ARTIFACT_REPO/$BACKEND_SERVICE_NAME:latest --region $REGION --project $PROJECT --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated
 export CLOUD_RUN_URL=$(gcloud run services describe "$BACKEND_SERVICE_NAME" --region=$REGION --project=$PROJECT --format='value(status.url)')
 
 # Ensure queues
+echo
+echo "[▶] Setting up Cloud Tasks queues..."
 QUEUES=("Other" "Gemini" "Veo")
 for QUEUE_SUFFIX in "${QUEUES[@]}"; do
   QUEUE_NAME="${TASKS_QUEUE_PREFIX}${QUEUE_SUFFIX}"
@@ -197,12 +358,15 @@ for QUEUE_SUFFIX in "${QUEUES[@]}"; do
     --project="$PROJECT"
 done
 
-# Apply IAM bindings (these are safe to run multiple times, though they will output "no change")
+# Apply IAM bindings for the Cloud Tasks service agent.
 CLOUD_TASKS_ACCOUNT="service-${PROJECT_NUMBER}@gcp-sa-cloudtasks.iam.gserviceaccount.com"
-gcloud projects add-iam-policy-binding "${PROJECT}" --member="serviceAccount:${CLOUD_TASKS_ACCOUNT}" --role="roles/cloudtasks.serviceAgent" --condition=None
-gcloud iam service-accounts add-iam-policy-binding "${SERVICE_ACCOUNT}" --member="serviceAccount:${CLOUD_TASKS_ACCOUNT}" --role="roles/iam.serviceAccountTokenCreator"
+echo
+echo "[▶] Granting Cloud Tasks service agent permissions..."
+add_iam_binding "${PROJECT}" --member="serviceAccount:${CLOUD_TASKS_ACCOUNT}" --role="roles/cloudtasks.serviceAgent" --condition=None
+gcloud iam service-accounts add-iam-policy-binding "${SERVICE_ACCOUNT}" --member="serviceAccount:${CLOUD_TASKS_ACCOUNT}" --role="roles/iam.serviceAccountTokenCreator" --quiet > /dev/null
 
-echo "Provisioning API Gateway and routing infrastructure (Estimated time: ≈6 minutes)..."
+echo
+echo "[▶] Provisioning API Gateway and routing infrastructure (Estimated time: ≈10 minutes)..."
 if ! gcloud api-gateway apis describe scenemachine-api --project=$PROJECT --format="value(managed_service)" &> /dev/null; then
   echo "API doesn't exist. Creating it..."
   gcloud api-gateway apis create scenemachine-api --project=$PROJECT
@@ -265,10 +429,50 @@ fi
 # 6) Upload example files
 gcloud storage cp workflow_examples/input/* gs://${GCS_BUCKET}/examples/
 
-read -p "Do you want to deploy the UI? (y/N) " answer
+echo
+echo "════════════════════════════════════════════════════════════════════════"
+echo "  ✓  BACKEND DEPLOYMENT COMPLETE"
+echo "════════════════════════════════════════════════════════════════════════"
+echo
+echo "  Next: ./deploy-ui.sh deploys the Angular UI to App Engine."
+echo
+echo "  Before that, 3 manual console steps are required. deploy-ui.sh polls"
+echo "  every 15s (or prompts you) and picks up automatically when you complete"
+echo "  them, so you can launch it now and finish the manual steps in parallel."
+echo
+echo "    1. Configure OAuth consent screen"
+echo "       https://console.cloud.google.com/auth/branding?project=${PROJECT}"
+echo "       First time on this project: click 'Get started' and walk through"
+echo "       the setup dialog. User Type is set under 'Audience' — pick"
+echo "       'Internal' if you have a Workspace org; otherwise 'External' and"
+echo "       add yourself as a test user."
+echo
+echo "    2. Enable Google as a Firebase sign-in provider"
+echo "       https://console.firebase.google.com/project/${PROJECT}/authentication/providers"
+echo "       If the providers list isn't visible yet, click 'Get started' on"
+echo "       the Authentication page first to reach it. Then: 'Add new"
+echo "       provider' → 'Google' → enable → save."
+echo
+echo "    3. Set up Firebase Storage — TWO sequential actions on this page:"
+echo "       https://console.firebase.google.com/project/${PROJECT}/storage"
+echo "       (a) Click 'Get started' and walk through the wizard. This creates"
+echo "           the project's default <project>.firebasestorage.app bucket"
+echo "           (separate from ${GCS_BUCKET}). Required by 'firebase deploy"
+echo "           --only storage' or it errors with 'Firebase Storage has not"
+echo "           been set up on project'."
+echo "       (b) On the same page, AFTER (a) finishes (the bucket dropdown"
+echo "           only appears once a bucket exists), click the dropdown →"
+echo "           '+ Add bucket' → 'Import existing Google Cloud Storage"
+echo "           buckets' → select ${GCS_BUCKET} → confirm. Registers your"
+echo "           project bucket so deploy-ui.sh can target it."
+echo
+echo "════════════════════════════════════════════════════════════════════════"
+echo
+read -p "Run ./deploy-ui.sh now? (y/N) " answer
 if [[ "$answer" =~ ^[Yy]$ ]]; then
   ./deploy-ui.sh
 else
-  echo "To deploy the UI later, follow the instructions in README.md or run ./deploy-ui.sh"
+  echo "To deploy the UI later, run ./deploy-ui.sh. Deployment guide:"
+  echo "  https://github.com/google-marketing-solutions/scene-machine#deployment"
 fi
 

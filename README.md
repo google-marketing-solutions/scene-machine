@@ -182,20 +182,25 @@ _Please note that most of the APIs are enabled automatically when you run the de
     - Go to the [Firebase console](https://console.firebase.google.com/), select your project then click **Authentication > Sign-in method**.
     - Click **Add new provider**, choose **Google** then enable and save it.
 
-6.  **Link Storage Bucket to Firebase**
-    - Go to the [Firebase console](https://console.firebase.google.com/).
-    - Select your project from the list.
-    - Hover over **Databases & Storage** on the left menu and select **Storage**.
-    - Click **Get started** (if prompted) and ensure the location selected is the same as you selected for the project.
-      - _Note: No-cost locations are only available in the USA._
-    - If asked, start in production mode to ensure the data in firebase is kept private.
-    - Click on the bucket name dropdown and select **+ Add bucket** (if not automatically prompted).
-    - Select **Import existing Google Cloud Storage buckets**.
-    - Select your project bucket and confirm.
+6.  **Link Storage Bucket to Firebase** — _two sequential actions_ are required on the same Firebase Storage page.
+    - Open the [Firebase console](https://console.firebase.google.com/) → select your project → **Databases & Storage** → **Storage**.
+
+    **(a) Initialize Firebase Storage** (one-time per project):
+    - Click **Get started** and walk through the wizard. This creates the project's *default* `<project>.firebasestorage.app` bucket, which the Firebase CLI requires; without it the storage deploy fails with `Firebase Storage has not been set up on project`.
+    - Production mode is fine.
+    - _Note: No-cost locations are only available in the USA._
+
+    **(b) Register your project bucket with Firebase Storage:**
+    - After (a) finishes the bucket dropdown appears at the top of the page (it doesn't exist until a bucket exists).
+    - Click the dropdown → **+ Add bucket** → **Import existing Google Cloud Storage buckets**.
+    - Select your project bucket (the one referenced by `GCS_BUCKET` in `config.txt`) → confirm.
 
 7.  **Deploy UI**
     - Run `./deploy-ui.sh` (if you skipped it during backend deployment).
     - If requested, perform any required manual steps indicated by the script (e.g. linking buckets or configuring OAuth).
+
+> [!TIP]
+> Steps 4–6 can be completed **in parallel** with `./deploy-ui.sh` running. The script polls every 15s (or prompts you for the OAuth consent screen) and continues automatically once each manual action is done. After `./deploy.sh` finishes you can launch `./deploy-ui.sh` immediately and complete steps 4–6 in browser tabs while it waits.
 
 8.  **Set up Identity-Aware Proxy**:
     - In the [App Engine settings](https://console.cloud.google.com/appengine/settings?serviceId=default), under "Identity-Aware Proxy" select "Configure Now".
@@ -211,7 +216,15 @@ To help debug problems with the deployment scripts, you can change their top lin
 
 [< Deployment](#deployment) • [Top](#readme-top) • [Using Scene Machine >](#using-scene-machine)
 
-Each person intending to use Scene Machine needs to be given the "Scene Machine User" role in the Google Cloud project in which the tool is deployed.
+Each person intending to use Scene Machine needs to be given the "Scene Machine User" role in the Google Cloud project in which the tool is deployed. `./deploy-ui.sh`'s final summary outputs a ready-to-paste `gcloud` command for this; you can also run it directly:
+
+```bash
+gcloud projects add-iam-policy-binding $PROJECT \
+  --member="user:USER_EMAIL@example.com" \
+  --role="projects/$PROJECT/roles/SceneMachineUser"
+```
+
+Or grant it via the [IAM console](https://console.cloud.google.com/iam-admin/iam) → **+ Grant Access** → enter user email → role: **Scene Machine User** (under "Custom") → Save.
 
 ## Using Scene Machine
 
