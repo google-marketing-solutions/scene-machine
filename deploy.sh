@@ -157,7 +157,7 @@ if [ -n "$CURRENT_GCLOUD_PROJECT" ] && [ "$CURRENT_GCLOUD_PROJECT" != "$PROJECT"
   esac
 fi
 
-# 1) Enable services
+# Enable services
 # Note: compute.googleapis.com is enabled here so the default Compute Engine
 # service account (used for role bindings below) is guaranteed to exist. Most
 # projects already have it enabled transitively; this handles fresh projects.
@@ -177,7 +177,7 @@ echo
 echo "[▶] Provisioning Vertex AI service agent..."
 gcloud beta services identity create --service=aiplatform.googleapis.com --project=$PROJECT
 
-# 2) Create databases
+# Create databases
 echo
 echo "[▶] Setting up GCS bucket and Firestore databases..."
 if ! gcloud storage buckets describe "gs://$GCS_BUCKET" &> /dev/null; then
@@ -303,7 +303,7 @@ add_iam_binding $PROJECT \
   --role="roles/storage.objectUser" \
   --condition=None
 
-# 3) Deploy backend (Cloud Run)
+# Deploy backend (Cloud Run)
 COMMIT_DATE=$(git log -1 --format=%cI)
 GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 echo "${GIT_BRANCH}/${COMMIT_DATE}" > deployed_version.txt
@@ -415,7 +415,7 @@ export API_GATEWAY_HOST=$(gcloud api-gateway gateways describe scenemachine-api-
 # Write config.json again, now with all values needed for UI
 generate_config
 
-# 5) Set permissions and create user role
+# Set permissions and create user role
 envsubst < ./gcs-cors-config.template.json > ./gcs-cors-config.json
 gcloud storage buckets update gs://$GCS_BUCKET --cors-file=./gcs-cors-config.json --project=$PROJECT
 
@@ -426,7 +426,7 @@ else
   echo "SceneMachineUser role already exists. Skipping."
 fi
 
-# 6) Upload example files
+# Upload example files
 gcloud storage cp workflow_examples/input/* gs://${GCS_BUCKET}/examples/
 
 echo
