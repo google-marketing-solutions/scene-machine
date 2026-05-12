@@ -45,3 +45,10 @@ API_GATEWAY=scenemachine-api-gateway # your API Gateway ID
 
 export TASKS_QUEUE_PREFIX=SceneMachine- # prefix for the Cloud Tasks queue name; can contain only letters, numbers, or hyphens (-)
 export BACKEND_SERVICE_NAME=remix-engine-backend
+
+# Optional: Custom domain for the application UI.
+# If you use a custom domain for the Scene Machine UI, uncomment the following
+# variable and update the value with your custom domain.
+# Do not add http:// or https:// prefix.
+# export CUSTOM_DOMAIN=scene-machine.my-company.com
+

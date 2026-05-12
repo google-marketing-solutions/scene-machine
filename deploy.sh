@@ -117,7 +117,11 @@ else
   echo "App Engine app already exists. Skipping."
 fi
 
-export UI_HOST=$(gcloud app describe --project=$PROJECT --format="value(defaultHostname)")
+if [ -n "${CUSTOM_DOMAIN:-}" ]; then
+  export UI_HOST="${CUSTOM_DOMAIN}"
+else
+  export UI_HOST=$(gcloud app describe --project=$PROJECT --format="value(defaultHostname)")
+fi
 
 # Identify service account and assign required permissions BEFORE deployment
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT --format="value(projectNumber)")

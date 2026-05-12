@@ -145,6 +145,7 @@ _Please note that most of the APIs are enabled automatically when you run the de
     | `API_GATEWAY`          | API Gateway ID for the application endpoint.               | Defaults to `scenemachine-api-gateway`.              |
     | `TASKS_QUEUE_PREFIX`   | Prefix for Cloud Task queue names.                         | Max lengths apply. Support letters, hyphen, numbers. |
     | `BACKEND_SERVICE_NAME` | Service name for the application backend on GCP.           | Defaults to `remix-engine-backend`.                  |
+    | `CUSTOM_DOMAIN`        | Custom domain for the application user interface.          | Optional. e.g., `scene-machine.my-company.com`   |
     - **Important Notes for Configuration:**
       - **Naming:** Use alphanumerical names (with hyphens) for entities like databases.
       - **Storage:** If using an existing bucket, it must use a non-hierarchical namespace.
