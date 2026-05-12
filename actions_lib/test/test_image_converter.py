@@ -59,6 +59,24 @@ class TestImageConverter(unittest.TestCase):
       self.assertEqual(img.format, 'PNG')
       img.load()  # Ensure it can be loaded without errors
 
+  def test_convert_palette_to_jpeg(self):
+    """Tests successful conversion from palette 'P' image to JPEG."""
+    img = PIL.Image.new('P', (10, 10), color=1)
+    byte_arr = io.BytesIO()
+    img.save(byte_arr, format='PNG')
+    palette_png_bytes = byte_arr.getvalue()
+
+    converted_jpeg_bytes = image_converter.convert(palette_png_bytes, 'JPEG')
+
+    self.assertIsInstance(converted_jpeg_bytes, bytes)
+    self.assertGreater(len(converted_jpeg_bytes), 0)
+
+    with io.BytesIO(converted_jpeg_bytes) as f:
+      converted_img = PIL.Image.open(f)
+      self.assertEqual(converted_img.format, 'JPEG')
+      self.assertEqual(converted_img.mode, 'RGB')
+      converted_img.load()
+
   def test_convert_unsupported_output_format_raises_value_error(self):
     """Tests that converting to an unsupported output format raises ValueError."""
     png_bytes = self._create_dummy_image_bytes(image_format='PNG')

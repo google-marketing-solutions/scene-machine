@@ -35,6 +35,9 @@ def convert(file_bytes: bytes, output_extension: str) -> bytes:
   if image.format.lower() == output_extension.lower():
     return file_bytes
 
+  if output_extension.upper() in ('JPEG', 'JPG') and image.mode not in ('RGB', 'L'):
+    image = image.convert('RGB')
+
   with io.BytesIO() as converted_bytes:
     try:
       image.save(converted_bytes, output_extension)

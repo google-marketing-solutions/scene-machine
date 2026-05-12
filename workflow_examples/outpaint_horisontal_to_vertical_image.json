@@ -1,0 +1,53 @@
+{
+  "workflowDefinition": {
+    "root": {
+      "action": "pass",
+      "input": {
+        "image_to_outpaint": null
+      },
+      "types": {
+        "image_to_outpaint": "image"
+      }
+    },
+    "n_outpaint": {
+      "action": "outpaint_image",
+      "input": {
+        "image": {
+          "node": "root",
+          "output": "image_to_outpaint"
+        }
+      },
+      "parameters": {
+        "target_ratio": "9:16",
+        "outpainter_model": "gemini-3-pro-image-preview",
+        "outpainter_model_location": "global"
+      }
+    },
+    "sink": {
+      "action": "pass",
+      "input": {
+        "outpainted": {
+          "node": "n_outpaint",
+          "output": "outpainted_image"
+        }
+      }
+    }
+  },
+  "nodeId": "root",
+  "workflowId": "outpaint_test_1",
+  "forceExecution": true,
+  "workflowParams": {
+    "gcpProject": "${PROJECT}",
+    "gcpLocation": "${REGION}",
+    "gcsBucket": "${GCS_BUCKET}",
+    "tasksQueuePrefix": "${TASKS_QUEUE_PREFIX}"
+  },
+  "inputFiles": {
+    "image_to_outpaint": [
+      {
+        "file": "examples/Scene1.png",
+        "image_instruction": "outpaint"
+      }
+    ]
+  }
+}

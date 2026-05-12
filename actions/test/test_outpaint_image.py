@@ -118,6 +118,42 @@ class TestOutpaintImage(unittest.TestCase):
       self.assertEqual(img.width, img.height)
 
   @mock.patch('actions_lib.outpainter.outpaint_image')
+  def test_execute_incorrect_ratio_resizes_palette_image(
+      self, mock_outpainter_func
+  ):
+    """Tests that palette mode 'P' images are handled when saved as JPEG."""
+    # Setup
+    target_ratio = '1:1'
+
+    # Input palette image ('P' mode) with WRONG ratio
+    input_img = PIL.Image.new('P', (160, 90), color=1)
+    input_curr = io.BytesIO()
+    input_img.save(input_curr, format='PNG')
+    self.mock_gcs.load_bytes.return_value = input_curr.getvalue()
+    self.mock_image[0]['image_instruction'] = 'crop'
+    self.mock_gcs.store.return_value = 'path/to/stored_image.png'
+
+    # Execute
+    outpaint_image.execute(
+        self.mock_gcs,
+        self.mock_workflow_params,
+        self.mock_image,
+        target_ratio,
+        'gemini-3.1-flash-image-preview',
+        'test-location',
+    )
+
+    # Verify store was called
+    self.mock_gcs.store.assert_called_once()
+    stored_bytes = self.mock_gcs.store.call_args[0][0]
+
+    # Verify the stored image is a valid JPEG image
+    with io.BytesIO(stored_bytes) as input_stream:
+      img = PIL.Image.open(input_stream)
+      self.assertEqual(img.format, 'JPEG')
+      self.assertEqual(img.width, img.height)
+
+  @mock.patch('actions_lib.outpainter.outpaint_image')
   def test_execute_skips_outpainting_if_ratio_correct(
       self, mock_outpainter_func
   ):
