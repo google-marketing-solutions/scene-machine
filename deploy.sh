@@ -153,29 +153,47 @@ fi
 source ./config.txt
 echo "✓ config.txt is valid. Target project: $PROJECT"
 
-# --- Sanity check: gcloud project matches config.txt ------------------------
-# Catches the footgun of forgetting to update config.txt (or gcloud's active
-# project) before running. The script proceeds to overwrite gcloud's active
-# project below, so we explicitly confirm the intended target first.
+# --- Confirm deployment target ----------------------------------------------
+# Final pre-flight gate. Always shows gcloud's current state alongside
+# config.txt's intended target and prompts the user to confirm. Catches the
+# footgun of forgetting to update either side when switching between
+# deployments. The script proceeds to overwrite gcloud's active project
+# immediately after this, so this is the last point at which a wrong target
+# can be aborted without any GCP mutation having occurred.
 CURRENT_GCLOUD_PROJECT=$(gcloud config get-value project 2>/dev/null || true)
-if [ -n "$CURRENT_GCLOUD_PROJECT" ] && [ "$CURRENT_GCLOUD_PROJECT" != "$PROJECT" ]; then
-  echo "============================================================"
-  echo "WARNING: project mismatch detected."
-  echo "  gcloud is currently set to: $CURRENT_GCLOUD_PROJECT"
-  echo "  config.txt PROJECT is:      $PROJECT"
-  echo "  This script will deploy to '$PROJECT' (from config.txt)."
-  echo "============================================================"
-  if [ ! -t 0 ]; then
-    echo "ERROR: stdin is not a TTY — cannot confirm. Re-run interactively,"
-    echo "       or align gcloud and config.txt before re-running."
-    exit 1
-  fi
-  read -r -p "Proceed and deploy to '$PROJECT'? (y/N) " confirm
-  case "$confirm" in
-    [yY]|[yY][eE][sS]) echo "✓ Continuing with project $PROJECT." ;;
-    *) echo "Aborted. Update config.txt, or run 'gcloud config set project $PROJECT' to align." ; exit 1 ;;
-  esac
+[ -z "$CURRENT_GCLOUD_PROJECT" ] && CURRENT_GCLOUD_PROJECT="(none set)"
+echo
+echo "[>] Confirming deployment target..."
+echo "════════════════════════════════════════════════════════════════════════"
+echo "  DEPLOYMENT TARGET — please confirm"
+echo "════════════════════════════════════════════════════════════════════════"
+echo "  gcloud is currently configured for:"
+echo "    Account:    $ACTIVE_ACCOUNT"
+echo "    Project:    $CURRENT_GCLOUD_PROJECT"
+echo
+echo "  config.txt says deploy to:"
+echo "    Project:    $PROJECT"
+echo "    Region:     $REGION"
+if [ "$CURRENT_GCLOUD_PROJECT" != "$PROJECT" ]; then
+  echo
+  echo "  ⚠ Project mismatch — this script will switch gcloud's active project"
+  echo "    to '$PROJECT' before deploying."
 fi
+echo "════════════════════════════════════════════════════════════════════════"
+if [ ! -t 0 ]; then
+  echo "ERROR: stdin is not a TTY — cannot confirm. Re-run interactively."
+  exit 1
+fi
+read -r -p "Proceed and deploy to '$PROJECT'? (y/N) " confirm
+case "$confirm" in
+  [yY]|[yY][eE][sS]) echo "✓ Continuing with project $PROJECT." ;;
+  *)
+    echo "Aborted. To align gcloud with config.txt:"
+    echo "  gcloud config set project $PROJECT"
+    echo "Or update PROJECT in config.txt to match your intended target."
+    exit 1
+    ;;
+esac
 
 # Enable services
 # Note: compute.googleapis.com is enabled here so the default Compute Engine
