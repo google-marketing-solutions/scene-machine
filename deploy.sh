@@ -493,7 +493,7 @@ echo "           project bucket so deploy-ui.sh can target it."
 echo
 echo "════════════════════════════════════════════════════════════════════════"
 echo
-read -p "Run ./deploy-ui.sh now? (y/N) " answer
+read -r -p "Run ./deploy-ui.sh now? (y/N) " answer
 if [[ "$answer" =~ ^[Yy]$ ]]; then
   ./deploy-ui.sh
 else
