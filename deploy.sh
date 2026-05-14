@@ -41,21 +41,41 @@ add_iam_binding() {
   done
   local label="${role:+ (for $role)}"
 
+  local stderr_file
+  stderr_file=$(mktemp)
+  trap 'rm -f "$stderr_file"' RETURN
+
   local attempt=1
-  local max_attempts=5
+  local max_attempts=6
   while true; do
-    if gcloud projects add-iam-policy-binding "$@" --quiet > /dev/null 2>&1; then
+    if gcloud projects add-iam-policy-binding "$@" --quiet >/dev/null 2>"$stderr_file"; then
       if [ $attempt -gt 1 ]; then
         echo "  ✓ IAM binding${label} succeeded on attempt $attempt."
       fi
       return 0
     fi
-    if [ $attempt -ge $max_attempts ]; then
-      # Final attempt: don't suppress so the real error reaches the user.
-      gcloud projects add-iam-policy-binding "$@" --quiet
-      return $?
+
+    # Only retry on concurrent-modification / etag races. Permission, argument,
+    # and not-found errors won't fix themselves — surface them immediately.
+    if ! grep -qiE 'concurrent|aborted|etag|stale' "$stderr_file"; then
+      echo "  ERROR: IAM binding${label} failed with a non-retryable error:" >&2
+      cat "$stderr_file" >&2
+      return 1
     fi
-    local backoff=$((2 ** attempt))
+
+    if [ $attempt -ge $max_attempts ]; then
+      echo "  ERROR: IAM binding${label} still conflicting after $max_attempts attempts:" >&2
+      cat "$stderr_file" >&2
+      return 1
+    fi
+
+    # Exponential backoff with ±25% jitter to desynchronise retries when
+    # multiple bindings race the same background modifier.
+    local base=$((2 ** attempt))
+    local jitter=$((RANDOM % (base / 2 + 1) - base / 4))
+    local backoff=$((base + jitter))
+    [ $backoff -lt 1 ] && backoff=1
+
     echo "  IAM binding${label} hit a transient conflict — retrying in ${backoff}s (attempt $attempt/$max_attempts)..."
     sleep $backoff
     attempt=$((attempt + 1))
