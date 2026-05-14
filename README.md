@@ -97,27 +97,20 @@ _Please note that most of the APIs are enabled automatically when you run the de
 
 `roles/owner` on the target project is sufficient and is the simplest option.
 
-If your organization's policies require narrower scopes, the deploying user needs at minimum the following predefined roles. **Do not rely on `roles/editor` as a catch-all** — Google has narrowed the basic roles, and `editor` no longer includes Firestore native-mode DB creation, App Engine app creation, custom role creation, or project-level IAM bindings.
+If your organization's policies require narrower scopes, the tested minimum set is `roles/editor` plus five add-ons. `roles/editor` still covers most of the deploy work (API enable, GCS bucket, Cloud Run, Artifact Registry, API Gateway, Cloud Tasks, API keys, Firebase init, "act as" service accounts). Google narrowed the basic roles for a handful of specific operations, which is what the add-ons cover.
 
 | Role | Why it's needed |
 |---|---|
-| `roles/serviceusage.serviceUsageAdmin` | Enable APIs (`gcloud services enable`) and create service identities (Vertex AI service agent) |
-| `roles/storage.admin` | Create the GCS bucket, set CORS, upload example assets |
-| `roles/datastore.owner` | Create the two Firestore native-mode databases |
-| `roles/firebase.admin` | Initialise the Firebase project, create the Web App, deploy Firestore/Storage rules |
-| `roles/appengine.appCreator` | One-time `gcloud app create` (project-level App Engine app) |
-| `roles/appengine.appAdmin` | Deploy the UI to App Engine (used by `deploy-ui.sh`) |
-| `roles/run.admin` | Deploy the backend to Cloud Run |
-| `roles/artifactregistry.admin` | Create the Docker repository for the backend image |
-| `roles/apigateway.admin` | Create the API Gateway, its config, and its managed service |
-| `roles/cloudtasks.admin` | Create the three task queues (Veo, Gemini, Other) |
-| `roles/serviceusage.apiKeysAdmin` | Create the API key used by the gateway |
-| `roles/iam.serviceAccountAdmin` | Service-account-level IAM bindings (e.g. Cloud Tasks → Cloud Run actAs) |
-| `roles/iam.serviceAccountUser` | Allow the deploy to act as service accounts during Cloud Run deploy |
-| `roles/iam.roleAdmin` | Create the custom `SceneMachineUser` role used for end-user authorization |
-| `roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings (used throughout for the default Compute Engine SA and the Vertex AI service agent) |
+| `roles/editor` | Catch-all for the bulk of the deploy operations |
+| `roles/datastore.owner` | Firestore native-mode database creation (not in `editor`) |
+| `roles/appengine.appCreator` | One-time `gcloud app create` at the project level (separate from `appAdmin`; not in `editor`) |
+| `roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings — the `add_iam_binding` calls in `deploy.sh` |
+| `roles/iam.roleAdmin` | Create the custom `SceneMachineUser` role late in `deploy.sh` |
+| `roles/iam.serviceAccountAdmin` | Service-account-level IAM bindings (e.g. Cloud Tasks → Cloud Run "actAs") — a separate `setIamPolicy` from the project-level one |
 
-The two distinct `setIamPolicy` permissions matter: `projectIamAdmin` covers project-level bindings, `serviceAccountAdmin` covers service-account-level bindings. Both come up.
+For `deploy-ui.sh`, add `roles/appengine.appAdmin` so the UI can be deployed to the existing App Engine app (note: this is distinct from `appCreator`, which only allows the initial app creation).
+
+Two distinct `setIamPolicy` permissions matter: `projectIamAdmin` covers project-level bindings; `serviceAccountAdmin` covers service-account-level bindings. `deploy.sh` uses both.
 
 End users of the deployed app only need the custom `projects/$PROJECT/roles/SceneMachineUser` role — see [Adding Users](#adding-users).
 
