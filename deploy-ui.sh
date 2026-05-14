@@ -75,7 +75,7 @@ add_iam_binding() {
 }
 
 set -eu
-echo "Scene Machine UI deploy — running pre-flight checks first..."
+echo
 
 # Check config
 REQUIRED_VARS=(
@@ -111,7 +111,9 @@ fi
 source ./config.txt
 
 echo
-echo "[>] Starting Scene Machine UI deployment..."
+echo "════════════════════════════════════════════════════════════════════════"
+echo "  Starting Scene Machine UI deployment..."
+echo "════════════════════════════════════════════════════════════════════════"
 
 gcloud config set project $PROJECT
 gcloud auth application-default set-quota-project $PROJECT
@@ -355,7 +357,7 @@ IAP_ENABLED=$(gcloud app describe --project=$PROJECT --format="value(iap.enabled
 
 echo
 echo "════════════════════════════════════════════════════════════════════════"
-echo "  ✓  SCENE MACHINE UI DEPLOYED"
+echo "  ✓  Scene Machine UI deployment complete."
 echo "════════════════════════════════════════════════════════════════════════"
 echo
 echo "  ──────────────────────────────────────────────────────────────────"
@@ -383,10 +385,12 @@ if [[ ! "${IAP_ENABLED:-}" =~ [tT]rue ]]; then
   step=$((step + 1))
 fi
 echo "    ${step}. Grant the 'Scene Machine User' role to each user (highly"
-echo "       recommended — without it, signed-in users hit a 403). Fastest:"
+echo "       recommended — without it, signed-in users hit a 403)."
+echo "       Fastest via command-line:"
 echo "       gcloud projects add-iam-policy-binding ${PROJECT} \\"
 echo "         --member=\"user:YOUR_EMAIL@example.com\" \\"
 echo "         --role=\"projects/${PROJECT}/roles/SceneMachineUser\""
+echo
 echo "       Or via the IAM console:"
 echo "       https://console.cloud.google.com/iam-admin/iam?project=${PROJECT}"
 echo
