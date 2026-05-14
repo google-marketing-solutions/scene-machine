@@ -78,6 +78,7 @@ The following APIs are used by Scene Machine:
 - API Gateway API ( apigateway.googleapis.com ): Used to create and manage the API Gateway that routes traffic to the backend.
 - Artifact Registry API ( artifactregistry.googleapis.com ): Used to store the Docker container images for the backend service.
 - Cloud Build API ( cloudbuild.googleapis.com ): Used to build the container images for Cloud Run.
+- Compute Engine API ( compute.googleapis.com ): Enabled to guarantee the default Compute Engine service account exists (used for IAM role bindings during deploy).
 - Cloud Tasks API ( cloudtasks.googleapis.com ): Used for managing task queues for asynchronous processing (e.g., video generation).
 - Cloud Firestore API ( firestore.googleapis.com ): Used for the database storing application state and configurations.
 - Cloud Run API ( run.googleapis.com ): Used to host and run the backend service.

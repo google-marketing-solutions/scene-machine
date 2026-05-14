@@ -83,12 +83,13 @@ add_iam_binding() {
 }
 
 set -eu
-echo "Scene Machine backend deploy — running pre-flight checks first..."
-
+echo
+echo "================================================================================"
+echo "  Scene Machine backend deploy — running pre-flight checks first..."
+echo "================================================================================"
 # --- Pre-flight: required tools and gcloud auth -----------------------------
 # Fail fast if a required command is missing or gcloud isn't authenticated,
 # rather than 30+ seconds into a gcloud/firebase call with a confusing error.
-echo
 echo "[>] Checking required tools..."
 MISSING_TOOLS=0
 require_tool() {
@@ -195,8 +196,10 @@ case "$confirm" in
     ;;
 esac
 
-echo
+echo 
+echo "════════════════════════════════════════════════════════════════════════"
 echo "[>] Starting Scene Machine backend deployment (estimated runtime ≈15 minutes)..."
+echo "════════════════════════════════════════════════════════════════════════"
 
 # Enable services
 # Note: compute.googleapis.com is enabled here so the default Compute Engine
@@ -204,9 +207,18 @@ echo "[>] Starting Scene Machine backend deployment (estimated runtime ≈15 min
 # projects already have it enabled transitively; this handles fresh projects.
 echo
 echo "[>] Enabling required Google Cloud APIs..."
-gcloud config set project $PROJECT
-gcloud auth application-default set-quota-project $PROJECT
-gcloud services enable aiplatform.googleapis.com apigateway.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com cloudtasks.googleapis.com compute.googleapis.com firestore.googleapis.com run.googleapis.com servicecontrol.googleapis.com iap.googleapis.com --project=$PROJECT
+
+echo "  - Setting gcloud's active project to $PROJECT (local config only)..."
+gcloud config set project $PROJECT > /dev/null
+echo "  ✓ gcloud active project set to $PROJECT."
+
+echo "  - Pointing Application Default Credentials at $PROJECT for billing and quota..."
+gcloud auth application-default set-quota-project $PROJECT > /dev/null
+echo "  ✓ ADC quota project set to $PROJECT."
+
+echo "  - Enabling APIs (full list in README.md 'Google Cloud APIs Used'; may take 30-60s)..."
+gcloud services enable aiplatform.googleapis.com apigateway.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com cloudtasks.googleapis.com compute.googleapis.com firestore.googleapis.com run.googleapis.com servicecontrol.googleapis.com iap.googleapis.com --project=$PROJECT > /dev/null
+echo "  ✓ APIs enabled."
 
 # Warm up Vertex AI service agent. On a fresh project, the agent
 # (service-<PROJECT_NUMBER>@gcp-sa-aiplatform.iam.gserviceaccount.com) is
@@ -477,7 +489,7 @@ gcloud storage cp workflow_examples/input/* gs://${GCS_BUCKET}/examples/
 
 echo
 echo "════════════════════════════════════════════════════════════════════════"
-echo "  ✓  BACKEND DEPLOYMENT COMPLETE"
+echo "  ✓  Scene Machine backend deployment complete."
 echo "════════════════════════════════════════════════════════════════════════"
 echo
 echo "  Next: ./deploy-ui.sh deploys the Angular UI to App Engine."
