@@ -93,6 +93,34 @@ The following APIs are used by Scene Machine:
 
 _Please note that most of the APIs are enabled automatically when you run the deployment script. Cloud Storage and Cloud Logging are normally enabled by default. If your organization disables these APIs, you will need to enable them manually._
 
+### Permissions required for the deploying user
+
+`roles/owner` on the target project is sufficient and is the simplest option.
+
+If your organization's policies require narrower scopes, the deploying user needs at minimum the following predefined roles. **Do not rely on `roles/editor` as a catch-all** — Google has narrowed the basic roles, and `editor` no longer includes Firestore native-mode DB creation, App Engine app creation, custom role creation, or project-level IAM bindings.
+
+| Role | Why it's needed |
+|---|---|
+| `roles/serviceusage.serviceUsageAdmin` | Enable APIs (`gcloud services enable`) and create service identities (Vertex AI service agent) |
+| `roles/storage.admin` | Create the GCS bucket, set CORS, upload example assets |
+| `roles/datastore.owner` | Create the two Firestore native-mode databases |
+| `roles/firebase.admin` | Initialise the Firebase project, create the Web App, deploy Firestore/Storage rules |
+| `roles/appengine.appCreator` | One-time `gcloud app create` (project-level App Engine app) |
+| `roles/appengine.appAdmin` | Deploy the UI to App Engine (used by `deploy-ui.sh`) |
+| `roles/run.admin` | Deploy the backend to Cloud Run |
+| `roles/artifactregistry.admin` | Create the Docker repository for the backend image |
+| `roles/apigateway.admin` | Create the API Gateway, its config, and its managed service |
+| `roles/cloudtasks.admin` | Create the three task queues (Veo, Gemini, Other) |
+| `roles/serviceusage.apiKeysAdmin` | Create the API key used by the gateway |
+| `roles/iam.serviceAccountAdmin` | Service-account-level IAM bindings (e.g. Cloud Tasks → Cloud Run actAs) |
+| `roles/iam.serviceAccountUser` | Allow the deploy to act as service accounts during Cloud Run deploy |
+| `roles/iam.roleAdmin` | Create the custom `SceneMachineUser` role used for end-user authorization |
+| `roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings (used throughout for the default Compute Engine SA and the Vertex AI service agent) |
+
+The two distinct `setIamPolicy` permissions matter: `projectIamAdmin` covers project-level bindings, `serviceAccountAdmin` covers service-account-level bindings. Both come up.
+
+End users of the deployed app only need the custom `projects/$PROJECT/roles/SceneMachineUser` role — see [Adding Users](#adding-users).
+
 ## Deployment
 
 [< Technical Requirements](#technical-requirements) • [Top](#readme-top) • [Adding Users >](#adding-users)
