@@ -14,8 +14,8 @@
 # limitations under the License.
 
 # ---------------------------------------------------------------------------
-# Console output convention: lines beginning with "[▶]" mark the start of a
-# major deployment phase. If something fails, copy the "[▶]" prefix (or the
+# Console output convention: lines beginning with "[>]" mark the start of a
+# major deployment phase. If something fails, copy the "[>]" prefix (or the
 # full prefix + echo message) from the terminal and Ctrl+F in this file to jump
 # straight to the matching section in the script.
 # ---------------------------------------------------------------------------
@@ -89,7 +89,7 @@ echo "Deploying Scene Machine... (Total runtime estimate: ≈15 minutes)"
 # Fail fast if a required command is missing or gcloud isn't authenticated,
 # rather than 30+ seconds into a gcloud/firebase call with a confusing error.
 echo
-echo "[▶] Checking required tools..."
+echo "[>] Checking required tools..."
 MISSING_TOOLS=0
 require_tool() {
   local name="$1"
@@ -119,7 +119,7 @@ echo "✓ gcloud authenticated as: $ACTIVE_ACCOUNT"
 
 # --- Check config.txt -------------------------------------------------------
 echo
-echo "[▶] Checking config.txt..."
+echo "[>] Checking config.txt..."
 REQUIRED_VARS=(
   "API_GATEWAY"
   "API_GATEWAY_REGION"
@@ -182,7 +182,7 @@ fi
 # service account (used for role bindings below) is guaranteed to exist. Most
 # projects already have it enabled transitively; this handles fresh projects.
 echo
-echo "[▶] Enabling required Google Cloud APIs..."
+echo "[>] Enabling required Google Cloud APIs..."
 gcloud config set project $PROJECT
 gcloud auth application-default set-quota-project $PROJECT
 gcloud services enable aiplatform.googleapis.com apigateway.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com cloudtasks.googleapis.com compute.googleapis.com firestore.googleapis.com run.googleapis.com servicecontrol.googleapis.com iap.googleapis.com --project=$PROJECT
@@ -193,13 +193,18 @@ gcloud services enable aiplatform.googleapis.com apigateway.googleapis.com artif
 # takes ~5-15 min to propagate. Without this, the user's first Veo generation
 # fails with "Service agents are being provisioned." Triggering identity
 # creation now starts the propagation window during the rest of the deploy.
+#
+# `services identity create` is still on the `beta` surface today; try the GA
+# path first so we survive its eventual promotion (the beta command will be
+# removed at some point and would silently fail on a future toolchain).
 echo
-echo "[▶] Provisioning Vertex AI service agent..."
-gcloud beta services identity create --service=aiplatform.googleapis.com --project=$PROJECT
+echo "[>] Provisioning Vertex AI service agent..."
+gcloud services identity create --service=aiplatform.googleapis.com --project=$PROJECT 2>/dev/null \
+  || gcloud beta services identity create --service=aiplatform.googleapis.com --project=$PROJECT
 
 # Create databases
 echo
-echo "[▶] Setting up GCS bucket and Firestore databases..."
+echo "[>] Setting up GCS bucket and Firestore databases..."
 if ! gcloud storage buckets describe "gs://$GCS_BUCKET" &> /dev/null; then
     gcloud storage buckets create "gs://$GCS_BUCKET" --project=$PROJECT --location="$REGION"
 else
@@ -222,7 +227,7 @@ else
 fi
 
 echo
-echo "[▶] Setting up Firebase project and Web App..."
+echo "[>] Setting up Firebase project and Web App..."
 if gcloud services list --enabled --project=$PROJECT --filter="name:firebase.googleapis.com" | grep -q "firebase.googleapis.com"; then
   echo "Firebase is already enabled for the project."
 else
@@ -245,7 +250,7 @@ envsubst < ./firebase/.firebaserc.template > ./firebase/.firebaserc
 firebase target:apply --config firebase/firebase.json storage bucket_target $GCS_BUCKET --project $PROJECT
 
 echo
-echo "[▶] Deploying rules for Backend Firestore DB..."
+echo "[>] Deploying rules for Backend Firestore DB..."
 firebase deploy --config firebase/firebase.json --only firestore --project $PROJECT
 
 rm firebase/firebase.json
@@ -254,7 +259,7 @@ rm firebase/.firebaserc
 export FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
 
 echo
-echo "[▶] Setting up App Engine app..."
+echo "[>] Setting up App Engine app..."
 if ! gcloud app describe --project=$PROJECT &> /dev/null; then
   echo "App Engine app doesn't exist. Creating it (Estimated time: ≈3 minutes)..."
   gcloud app create --region $APP_ENGINE_REGION --project $PROJECT
@@ -277,13 +282,13 @@ SERVICE_ACCOUNT="$PROJECT_NUMBER-compute@developer.gserviceaccount.com"
 # Wait for it to exist before attempting role bindings below, rather than
 # failing inside the loop with a confusing "service account not found" error.
 echo
-echo "[▶] Waiting for default Compute Engine service account to exist..."
+echo "[>] Waiting for default Compute Engine service account to exist..."
 SA_WAIT_ATTEMPTS=0
-SA_WAIT_MAX=60   # 60 × 5s = 5 min total
+SA_WAIT_MAX=120   # 120 × 5s = 10 min total
 until gcloud iam service-accounts describe "${SERVICE_ACCOUNT}" --project=$PROJECT &> /dev/null; do
   SA_WAIT_ATTEMPTS=$((SA_WAIT_ATTEMPTS + 1))
   if [ $SA_WAIT_ATTEMPTS -ge $SA_WAIT_MAX ]; then
-    echo "ERROR: default Compute Engine SA did not appear after 5 minutes."
+    echo "ERROR: default Compute Engine SA did not appear after 10 minutes."
     echo "Try enabling Compute Engine API manually, then re-run $0:"
     echo "  gcloud services enable compute.googleapis.com --project=$PROJECT"
     exit 1
@@ -304,7 +309,7 @@ ROLES=(
   "roles/iam.serviceAccountUser"
 )
 echo
-echo "[▶] Granting ${#ROLES[@]} roles to $SERVICE_ACCOUNT..."
+echo "[>] Granting ${#ROLES[@]} roles to $SERVICE_ACCOUNT..."
 for ROLE in "${ROLES[@]}"; do
   echo "  - $ROLE"
   add_iam_binding $PROJECT --member="serviceAccount:${SERVICE_ACCOUNT}" --role="$ROLE" --condition=None
@@ -317,7 +322,7 @@ echo "✓ Roles granted."
 # provisioned" failure (see DEPLOY_NOTES.md issue #6).
 AIPLATFORM_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com"
 echo
-echo "[▶] Granting roles/storage.objectUser to Vertex AI service agent..."
+echo "[>] Granting roles/storage.objectUser to Vertex AI service agent..."
 add_iam_binding $PROJECT \
   --member="serviceAccount:${AIPLATFORM_SA}" \
   --role="roles/storage.objectUser" \
@@ -337,13 +342,13 @@ fi
 generate_config
 
 echo
-echo "[▶] Deploying backend to Cloud Run (Estimated time: ~5 minutes)..."
+echo "[>] Deploying backend to Cloud Run (Estimated time: ~5 minutes)..."
 gcloud run deploy "$BACKEND_SERVICE_NAME" --source . --image $REGION-docker.pkg.dev/$PROJECT/$ARTIFACT_REPO/$BACKEND_SERVICE_NAME:latest --region $REGION --project $PROJECT --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated
 export CLOUD_RUN_URL=$(gcloud run services describe "$BACKEND_SERVICE_NAME" --region=$REGION --project=$PROJECT --format='value(status.url)')
 
 # Ensure queues
 echo
-echo "[▶] Setting up Cloud Tasks queues..."
+echo "[>] Setting up Cloud Tasks queues..."
 QUEUES=("Other" "Gemini" "Veo")
 for QUEUE_SUFFIX in "${QUEUES[@]}"; do
   QUEUE_NAME="${TASKS_QUEUE_PREFIX}${QUEUE_SUFFIX}"
@@ -381,12 +386,12 @@ done
 # Apply IAM bindings for the Cloud Tasks service agent.
 CLOUD_TASKS_ACCOUNT="service-${PROJECT_NUMBER}@gcp-sa-cloudtasks.iam.gserviceaccount.com"
 echo
-echo "[▶] Granting Cloud Tasks service agent permissions..."
+echo "[>] Granting Cloud Tasks service agent permissions..."
 add_iam_binding "${PROJECT}" --member="serviceAccount:${CLOUD_TASKS_ACCOUNT}" --role="roles/cloudtasks.serviceAgent" --condition=None
 gcloud iam service-accounts add-iam-policy-binding "${SERVICE_ACCOUNT}" --member="serviceAccount:${CLOUD_TASKS_ACCOUNT}" --role="roles/iam.serviceAccountTokenCreator" --quiet > /dev/null
 
 echo
-echo "[▶] Provisioning API Gateway and routing infrastructure (Estimated time: ≈10 minutes)..."
+echo "[>] Provisioning API Gateway and routing infrastructure (Estimated time: ≈10 minutes)..."
 if ! gcloud api-gateway apis describe scenemachine-api --project=$PROJECT --format="value(managed_service)" &> /dev/null; then
   echo "API doesn't exist. Creating it..."
   gcloud api-gateway apis create scenemachine-api --project=$PROJECT

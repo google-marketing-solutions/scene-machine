@@ -14,8 +14,8 @@
 # limitations under the License.
 
 # ---------------------------------------------------------------------------
-# Console output convention: lines beginning with "[▶]" mark the start of a
-# major deployment phase. If something fails, copy the "[▶]" prefix (or the
+# Console output convention: lines beginning with "[>]" mark the start of a
+# major deployment phase. If something fails, copy the "[>]" prefix (or the
 # full prefix + echo message) from the terminal and Ctrl+F in this file to jump
 # straight to the matching section in the script.
 # ---------------------------------------------------------------------------
@@ -129,7 +129,7 @@ envsubst < ./ui/definitions/config.template.json > ./ui/definitions/config.json
 envsubst < ./ui/src/env.template.txt > ./ui/src/env.ts
 
 echo
-echo "[▶] Enabling Identity Toolkit API (needed for Auth config)..."
+echo "[>] Enabling Identity Toolkit API (needed for Auth config)..."
 gcloud services enable identitytoolkit.googleapis.com --project=$PROJECT
 
 # --- Bucket linked to Firebase Storage: poll until satisfied ----------------
@@ -146,9 +146,12 @@ gcloud services enable identitytoolkit.googleapis.com --project=$PROJECT
 #       deploy.sh created earlier) with Firebase Storage so it can be the
 #       deploy target. The polling check below specifically verifies (b).
 echo
-echo "[▶] Checking if bucket ${GCS_BUCKET} is linked to Firebase Storage..."
+echo "[>] Checking if bucket ${GCS_BUCKET} is linked to Firebase Storage..."
 BUCKET_WAIT_ATTEMPTS=0
 BUCKET_WAIT_MAX=120   # 120 × 15s = 30 min total
+# Source of truth: Firebase Storage REST API. The `firebase` CLI has no
+# per-bucket linkage query, so we hit the REST endpoint directly and treat
+# HTTP 200 as "linked", anything else as "not yet".
 while true; do
   HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
     -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
@@ -186,7 +189,7 @@ while true; do
 done
 
 echo
-echo "[▶] Deploying rules for UI Firestore DB and Storage..."
+echo "[>] Deploying rules for UI Firestore DB and Storage..."
 (
   cd firebase
   export CURRENT_FIRESTORE_DB=$FIRESTORE_DB_UI
@@ -205,7 +208,7 @@ rm firebase/firebase.json
 rm firebase/.firebaserc
 
 echo
-echo "[▶] Adding default Scene Machine configurations to Firestore..."
+echo "[>] Adding default Scene Machine configurations to Firestore..."
 curl -X PATCH \
 "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/global" \
   -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
@@ -225,14 +228,14 @@ for template in creative_templates/*.json; do
 done
 
 echo
-echo "[▶] Granting Storage Admin role to App Engine default service account..."
+echo "[>] Granting Storage Admin role to App Engine default service account..."
 add_iam_binding $PROJECT \
     --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" \
     --role="roles/storage.admin" \
     --condition=None
 
 echo
-echo "[▶] Granting Artifact Registry Writer role to App Engine default service account..."
+echo "[>] Granting Artifact Registry Writer role to App Engine default service account..."
 add_iam_binding $PROJECT \
     --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" \
     --role="roles/artifactregistry.writer" \
@@ -241,34 +244,52 @@ add_iam_binding $PROJECT \
 # --- OAuth consent screen: manual gate ---------------------------------------
 # `gcloud iap oauth-brands list` (the original verification) was permanently
 # shut down on 2026-03-19 and required project-in-org regardless, so we cannot
-# verify configuration via API on standalone projects. Gate on explicit user
-# confirmation instead: the script blocks until the user answers 'y'.
-echo "============================================================"
-echo "MANUAL STEP REQUIRED: OAuth consent screen must be configured."
-echo "  https://console.cloud.google.com/auth/branding?project=${PROJECT}"
+# directly verify the consent screen via API on standalone projects.
+#
+# Fast-skip on re-run: probe the Identity Toolkit Admin REST API for the
+# Google IdP config. If it returns 200, the IdP record exists — and that
+# record cannot be created without a configured OAuth consent screen, so
+# 200 implies consent is done. 404 leaves us uncertain; fall back to the
+# blocking Press-Enter prompt below.
 echo
-echo "First time on this project: click 'Get started' and walk through"
-echo "the setup dialog. User Type is set under 'Audience' — pick"
-echo "'Internal' if you have a Workspace org; otherwise 'External' and"
-echo "add yourself as a test user."
-echo
-echo "If you've configured it before and don't see 'Get started', the"
-echo "screen is already initialized — just confirm below to proceed."
-echo "============================================================"
-if [ ! -t 0 ]; then
-  echo "ERROR: stdin is not a TTY — cannot prompt for OAuth-consent confirmation."
-  echo "Configure the consent screen at the URL above, then re-run $0 interactively."
-  exit 1
+echo "[>] Checking if OAuth consent screen is already configured..."
+IDP_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  "https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT}/defaultSupportedIdpConfigs/google.com")
+if [ "$IDP_HTTP_STATUS" = "200" ]; then
+  echo "✓ OAuth consent screen already configured (Google IdP record exists)."
+else
+  echo "============================================================"
+  echo "MANUAL STEP REQUIRED: OAuth consent screen must be configured."
+  echo "  https://console.cloud.google.com/auth/branding?project=${PROJECT}"
+  echo
+  echo "First time on this project: click 'Get started' and walk through"
+  echo "the setup dialog. User Type is set under 'Audience' — pick"
+  echo "'Internal' if you have a Workspace org; otherwise 'External' and"
+  echo "add yourself as a test user."
+  echo
+  echo "If you've configured it before and don't see 'Get started', the"
+  echo "screen is already initialized — just confirm below to proceed."
+  echo "============================================================"
+  if [ ! -t 0 ]; then
+    echo "ERROR: stdin is not a TTY — cannot prompt for OAuth-consent confirmation."
+    echo "Configure the consent screen at the URL above, then re-run $0 interactively."
+    exit 1
+  fi
+  read -r -p "Press Enter once the OAuth consent screen is configured (Ctrl-C to abort)... "
 fi
-read -r -p "Press Enter once the OAuth consent screen is configured (Ctrl-C to abort)... "
 
 # --- Google sign-in provider enabled: poll until satisfied ------------------
 # Replaces the original exit-1-and-rerun pattern. Loops every 15s until the
 # provider is enabled.
 echo
-echo "[▶] Checking if Google sign-in provider is enabled..."
+echo "[>] Checking if Google sign-in provider is enabled..."
 SIGNIN_WAIT_ATTEMPTS=0
 SIGNIN_WAIT_MAX=120   # 120 × 15s = 30 min total
+# Source of truth: Identity Toolkit Admin REST API. The `firebase auth:` CLI
+# has no IdP enable-state query, so we read the IdP config directly and look
+# for `"enabled": true` in the JSON body.
 while true; do
   CONFIG=$(curl -s -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
     -H "x-goog-user-project: ${PROJECT}" \
@@ -300,7 +321,7 @@ done
 if [[ "${1:-}" != "local" ]]; then
   export NG_CLI_ANALYTICS=ci
   echo
-  echo "[▶] Deploying UI to App Engine (Estimated time: ≈5 minutes)..."
+  echo "[>] Deploying UI to App Engine (Estimated time: ≈5 minutes)..."
   (
     cd ui \
       && npm ci --legacy-peer-deps \
@@ -313,7 +334,7 @@ if [[ "${1:-}" != "local" ]]; then
 fi
 
 echo
-echo "[▶] Configuring Firebase authorized domains..."
+echo "[>] Configuring Firebase authorized domains..."
 curl -X PATCH "https://identitytoolkit.googleapis.com/v2/projects/${PROJECT}/config?updateMask=authorizedDomains" \
   -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
   -H "Content-Type: application/json" \
