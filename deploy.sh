@@ -83,7 +83,7 @@ add_iam_binding() {
 }
 
 set -eu
-echo "Deploying Scene Machine... (Total runtime estimate: ≈15 minutes)"
+echo "Scene Machine backend deploy — running pre-flight checks first..."
 
 # --- Pre-flight: required tools and gcloud auth -----------------------------
 # Fail fast if a required command is missing or gcloud isn't authenticated,
@@ -194,6 +194,9 @@ case "$confirm" in
     exit 1
     ;;
 esac
+
+echo
+echo "[>] Starting Scene Machine backend deployment (estimated runtime ≈15 minutes)..."
 
 # Enable services
 # Note: compute.googleapis.com is enabled here so the default Compute Engine

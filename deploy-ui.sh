@@ -75,7 +75,7 @@ add_iam_binding() {
 }
 
 set -eu
-echo "Deploying Scene Machine's user interface..."
+echo "Scene Machine UI deploy — running pre-flight checks first..."
 
 # Check config
 REQUIRED_VARS=(
@@ -109,6 +109,9 @@ if [ $MISSING -gt 0 ]; then
   exit 1
 fi
 source ./config.txt
+
+echo
+echo "[>] Starting Scene Machine UI deployment..."
 
 gcloud config set project $PROJECT
 gcloud auth application-default set-quota-project $PROJECT
