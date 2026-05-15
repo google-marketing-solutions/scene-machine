@@ -124,7 +124,7 @@ class TrackingType(enum.Enum):
   PROMPT = 'prompt'
 
 
-_USER_AGENT_PREFIX = 'gtech-ads-ce/scene-machine'
+_USER_AGENT_PREFIX = 'cloud-solutions/mas-scenemachine'
 
 
 @functools.lru_cache(maxsize=None)
