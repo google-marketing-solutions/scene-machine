@@ -82,7 +82,7 @@ add_iam_binding() {
   done
 }
 
-set -eu
+set -euo pipefail
 echo
 echo "================================================================================"
 echo "  Scene Machine backend deploy — running pre-flight checks first..."
@@ -96,7 +96,7 @@ require_tool() {
   local name="$1"
   local hint="$2"
   if ! command -v "$name" >/dev/null 2>&1; then
-    echo "ERROR: '$name' is not installed. $hint"
+    echo "ERROR: '$name' is not installed. $hint" >&2
     MISSING_TOOLS=$((MISSING_TOOLS + 1))
   fi
 }
@@ -111,8 +111,8 @@ if [ $MISSING_TOOLS -gt 0 ]; then
 fi
 ACTIVE_ACCOUNT=$(gcloud auth list --filter=status:ACTIVE --format="value(account)" 2>/dev/null || true)
 if [ -z "$ACTIVE_ACCOUNT" ]; then
-  echo "ERROR: gcloud has no active authenticated account."
-  echo "Run: gcloud auth login && gcloud auth application-default login"
+  echo "ERROR: gcloud has no active authenticated account." >&2
+  echo "Run: gcloud auth login && gcloud auth application-default login" >&2
   exit 1
 fi
 echo "✓ All required tools found (gcloud, firebase, node, npm, envsubst)."
@@ -143,12 +143,12 @@ REQUIRED_VARS=(
 MISSING=0
 for var in "${REQUIRED_VARS[@]}"; do
   if ! grep -qE "^(export )?${var}=[A-Za-z0-9._\$-]+" ./config.txt; then
-    echo "ERROR: $var is missing, empty, or has invalid characters in config.txt"
+    echo "ERROR: $var is missing, empty, or has invalid characters in config.txt" >&2
     MISSING=$((MISSING + 1))
   fi
 done
 if [ $MISSING -gt 0 ]; then
-  echo "Validation failed. Please fix config.txt and try again."
+  echo "Validation failed. Please fix config.txt and try again." >&2
   exit 1
 fi
 source ./config.txt
@@ -182,19 +182,18 @@ if [ "$CURRENT_GCLOUD_PROJECT" != "$PROJECT" ]; then
 fi
 echo "════════════════════════════════════════════════════════════════════════"
 if [ ! -t 0 ]; then
-  echo "ERROR: stdin is not a TTY — cannot confirm. Re-run interactively."
+  echo "ERROR: stdin is not a TTY — cannot confirm. Re-run interactively." >&2
   exit 1
 fi
 read -r -p "Proceed and deploy to '$PROJECT'? (y/N) " confirm
-case "$confirm" in
-  [yY]|[yY][eE][sS]) echo "✓ Continuing with project $PROJECT." ;;
-  *)
-    echo "Aborted. To align gcloud with config.txt:"
-    echo "  gcloud config set project $PROJECT"
-    echo "Or update PROJECT in config.txt to match your intended target."
-    exit 1
-    ;;
-esac
+confirm=$(echo "$confirm" | tr '[:upper:]' '[:lower:]')
+if [ "$confirm" != "y" ] && [ "$confirm" != "yes" ]; then
+  echo "Aborted. To align gcloud with config.txt:" >&2
+  echo "  gcloud config set project $PROJECT" >&2
+  echo "Or update PROJECT in config.txt to match your intended target." >&2
+  exit 1
+fi
+echo "✓ Continuing with project $PROJECT."
 
 echo 
 echo "════════════════════════════════════════════════════════════════════════"
@@ -285,7 +284,12 @@ firebase deploy --config firebase/firebase.json --only firestore --project $PROJ
 rm firebase/firebase.json
 rm firebase/.firebaserc
 
-export FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
+FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
+if [ -z "$FIREBASE_API_KEY" ]; then
+  echo "ERROR: Failed to extract Firebase API key from 'firebase apps:sdkconfig WEB'. Check that the Firebase Web app exists in project $PROJECT." >&2
+  exit 1
+fi
+export FIREBASE_API_KEY
 
 echo
 echo "[>] Setting up App Engine app..."
@@ -317,9 +321,9 @@ SA_WAIT_MAX=120   # 120 × 5s = 10 min total
 until gcloud iam service-accounts describe "${SERVICE_ACCOUNT}" --project=$PROJECT &> /dev/null; do
   SA_WAIT_ATTEMPTS=$((SA_WAIT_ATTEMPTS + 1))
   if [ $SA_WAIT_ATTEMPTS -ge $SA_WAIT_MAX ]; then
-    echo "ERROR: default Compute Engine SA did not appear after 10 minutes."
-    echo "Try enabling Compute Engine API manually, then re-run $0:"
-    echo "  gcloud services enable compute.googleapis.com --project=$PROJECT"
+    echo "ERROR: default Compute Engine SA did not appear after 10 minutes." >&2
+    echo "Try enabling Compute Engine API manually, then re-run $0:" >&2
+    echo "  gcloud services enable compute.googleapis.com --project=$PROJECT" >&2
     exit 1
   fi
   sleep 5
@@ -352,10 +356,7 @@ echo "✓ Roles granted."
 AIPLATFORM_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com"
 echo
 echo "[>] Granting roles/storage.objectUser to Vertex AI service agent..."
-add_iam_binding $PROJECT \
-  --member="serviceAccount:${AIPLATFORM_SA}" \
-  --role="roles/storage.objectUser" \
-  --condition=None
+add_iam_binding $PROJECT --member="serviceAccount:${AIPLATFORM_SA}" --role="roles/storage.objectUser" --condition=None
 
 # Deploy backend (Cloud Run)
 COMMIT_DATE=$(git log -1 --format=%cI)
@@ -461,7 +462,7 @@ fi
 if [ -n "$API_UID" ]; then
   export API_KEY=$(gcloud services api-keys get-key-string $API_UID --project=$PROJECT --format="value(keyString)")
 else
-  echo "ERROR: Failed to retrieve API Key UID."
+  echo "ERROR: Failed to retrieve API Key UID." >&2
   exit 1
 fi
 export API_GATEWAY_HOST=$(gcloud api-gateway gateways describe scenemachine-api-gateway --project=$PROJECT --location=$API_GATEWAY_REGION --format="value(defaultHostname)")
@@ -523,7 +524,7 @@ echo
 echo "════════════════════════════════════════════════════════════════════════"
 echo
 read -r -p "Run ./deploy-ui.sh now? (y/N) " answer
-if [[ "$answer" =~ ^[Yy]$ ]]; then
+if [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
   ./deploy-ui.sh
 else
   echo "To deploy the UI later, run ./deploy-ui.sh. Deployment guide:"

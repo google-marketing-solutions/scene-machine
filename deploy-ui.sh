@@ -74,7 +74,7 @@ add_iam_binding() {
   done
 }
 
-set -eu
+set -euo pipefail
 echo
 
 # Check config
@@ -100,12 +100,12 @@ REQUIRED_VARS=(
 MISSING=0
 for var in "${REQUIRED_VARS[@]}"; do
   if ! grep -qE "^(export )?${var}=[A-Za-z0-9._\$-]+" config.txt; then
-    echo "ERROR: $var is missing, empty, or has invalid characters in config.txt"
+    echo "ERROR: $var is missing, empty, or has invalid characters in config.txt" >&2
     MISSING=$((MISSING + 1))
   fi
 done
 if [ $MISSING -gt 0 ]; then
-  echo "Validation failed. Please fix config.txt and try again."
+  echo "Validation failed. Please fix config.txt and try again." >&2
   exit 1
 fi
 source ./config.txt
@@ -121,8 +121,18 @@ gcloud auth application-default set-quota-project $PROJECT
 API_UID=$(gcloud services api-keys list --filter="displayName='Scene Machine API Key'" --format="value(uid)" --project=$PROJECT)
 export API_KEY=$(gcloud services api-keys get-key-string $API_UID --project=$PROJECT --format="value(keyString)")
 export API_GATEWAY_HOST=$(gcloud api-gateway gateways describe scenemachine-api-gateway --project=$PROJECT --location=$API_GATEWAY_REGION --format="value(defaultHostname)")
-export FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
-export FIREBASE_AUTH_DOMAIN=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"authDomain":' | awk -F '"' '{print $4}')
+FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
+if [ -z "$FIREBASE_API_KEY" ]; then
+  echo "ERROR: Failed to extract Firebase API key from 'firebase apps:sdkconfig WEB'. Check that the Firebase Web app exists in project $PROJECT." >&2
+  exit 1
+fi
+export FIREBASE_API_KEY
+FIREBASE_AUTH_DOMAIN=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"authDomain":' | awk -F '"' '{print $4}')
+if [ -z "$FIREBASE_AUTH_DOMAIN" ]; then
+  echo "ERROR: Failed to extract Firebase auth domain from 'firebase apps:sdkconfig WEB'. Check that the Firebase Web app exists in project $PROJECT." >&2
+  exit 1
+fi
+export FIREBASE_AUTH_DOMAIN
 if [ -n "${CUSTOM_DOMAIN:-}" ]; then
   export UI_HOST="${CUSTOM_DOMAIN}"
   echo "✓ Using custom domain: ${UI_HOST}"
@@ -168,8 +178,8 @@ while true; do
   fi
   BUCKET_WAIT_ATTEMPTS=$((BUCKET_WAIT_ATTEMPTS + 1))
   if [ $BUCKET_WAIT_ATTEMPTS -ge $BUCKET_WAIT_MAX ]; then
-    echo "ERROR: bucket ${GCS_BUCKET} still not linked after 30 minutes — aborting."
-    echo "Complete the two manual steps above, then re-run $0."
+    echo "ERROR: bucket ${GCS_BUCKET} still not linked after 30 minutes — aborting." >&2
+    echo "Complete the two manual steps above, then re-run $0." >&2
     exit 1
   fi
   echo "============================================================"
@@ -234,17 +244,11 @@ done
 
 echo
 echo "[>] Granting Storage Admin role to App Engine default service account..."
-add_iam_binding $PROJECT \
-    --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" \
-    --role="roles/storage.admin" \
-    --condition=None
+add_iam_binding $PROJECT --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" --role="roles/storage.admin" --condition=None
 
 echo
 echo "[>] Granting Artifact Registry Writer role to App Engine default service account..."
-add_iam_binding $PROJECT \
-    --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" \
-    --role="roles/artifactregistry.writer" \
-    --condition=None
+add_iam_binding $PROJECT --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" --role="roles/artifactregistry.writer" --condition=None
 
 # --- OAuth consent screen: manual gate ---------------------------------------
 # `gcloud iap oauth-brands list` (the original verification) was permanently
@@ -278,8 +282,8 @@ else
   echo "screen is already initialized — just confirm below to proceed."
   echo "============================================================"
   if [ ! -t 0 ]; then
-    echo "ERROR: stdin is not a TTY — cannot prompt for OAuth-consent confirmation."
-    echo "Configure the consent screen at the URL above, then re-run $0 interactively."
+    echo "ERROR: stdin is not a TTY — cannot prompt for OAuth-consent confirmation." >&2
+    echo "Configure the consent screen at the URL above, then re-run $0 interactively." >&2
     exit 1
   fi
   read -r -p "Press Enter once the OAuth consent screen is configured (Ctrl-C to abort)... "
@@ -305,9 +309,9 @@ while true; do
   fi
   SIGNIN_WAIT_ATTEMPTS=$((SIGNIN_WAIT_ATTEMPTS + 1))
   if [ $SIGNIN_WAIT_ATTEMPTS -ge $SIGNIN_WAIT_MAX ]; then
-    echo "ERROR: Google sign-in provider still not enabled after 30 minutes — aborting."
-    echo "Enable it in the Firebase Console, then re-run $0:"
-    echo "  https://console.firebase.google.com/project/${PROJECT}/authentication/providers"
+    echo "ERROR: Google sign-in provider still not enabled after 30 minutes — aborting." >&2
+    echo "Enable it in the Firebase Console, then re-run $0:" >&2
+    echo "  https://console.firebase.google.com/project/${PROJECT}/authentication/providers" >&2
     exit 1
   fi
   echo "============================================================"
