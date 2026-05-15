@@ -527,7 +527,8 @@ echo
 echo "════════════════════════════════════════════════════════════════════════"
 echo
 read -r -p "Run ./deploy-ui.sh now? (y/N) " answer
-if [[ "$answer" =~ ^[Yy]([Ee][Ss])?$ ]]; then
+answer=$(echo "$answer" | tr '[:upper:]' '[:lower:]')
+if [ "$answer" = "y" ] || [ "$answer" = "yes" ]; then
   ./deploy-ui.sh
 else
   echo "To deploy the UI later, run ./deploy-ui.sh. Deployment guide:"
