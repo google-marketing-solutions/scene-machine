@@ -14,17 +14,17 @@
 # limitations under the License.
 
 # ---------------------------------------------------------------------------
-# Console output convention: lines beginning with "[>]" mark the start of a
-# major deployment phase. If something fails, copy the "[>]" prefix (or the
-# full prefix + echo message) from the terminal and Ctrl+F in this file to jump
-# straight to the matching section in the script.
+# Console output convention
+# ---------------------------------------------------------------------------
+# Lines beginning with "[>]" mark the start of a major deployment phase.
+# If something fails, copy the "[>]" prefix (or the full prefix + echo message)
+# from the terminal and Ctrl+F in this file to jump straight to the matching
+# section in the script.
 # ---------------------------------------------------------------------------
 
-# Generate ui/definitions/config.json for backend and frontend
-generate_config() {
-  envsubst < ui/definitions/config.template.json > ui/definitions/config.json
-}
-
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
 # Wrapper for `gcloud projects add-iam-policy-binding` that (a) suppresses the
 # verbose updated-policy YAML on success, and (b) retries with exponential
 # backoff on concurrent-modification etag conflicts. Background GCP work (App
@@ -82,8 +82,15 @@ add_iam_binding() {
   done
 }
 
-# Pre-flight helper used with the MISSING_TOOLS counter so all missing
-# tools are reported in one pass rather than failing on the first miss.
+# Generate ui/definitions/config.json for backend and frontend
+generate_config() {
+  envsubst < ui/definitions/config.template.json > ui/definitions/config.json
+}
+
+# Pre-flight helper + counter, kept together so the function and its
+# state aren't split across the script. All missing tools are reported
+# in one pass rather than failing on the first miss.
+MISSING_TOOLS=0
 require_tool() {
   local name="$1"
   local hint="$2"
@@ -93,6 +100,9 @@ require_tool() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Main script
+# ---------------------------------------------------------------------------
 set -euo pipefail
 echo
 echo "================================================================================"
@@ -102,7 +112,6 @@ echo "==========================================================================
 # Fail fast if a required command is missing or gcloud isn't authenticated,
 # rather than 30+ seconds into a gcloud/firebase call with a confusing error.
 echo "[>] Checking required tools..."
-MISSING_TOOLS=0
 require_tool gcloud   "Install: https://cloud.google.com/sdk/docs/install"
 require_tool firebase "Install: npm i -g firebase-tools"
 require_tool node     "Install Node.js ≥ v22: https://nodejs.org/en/download"
