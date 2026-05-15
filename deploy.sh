@@ -82,6 +82,17 @@ add_iam_binding() {
   done
 }
 
+# Pre-flight helper used with the MISSING_TOOLS counter so all missing
+# tools are reported in one pass rather than failing on the first miss.
+require_tool() {
+  local name="$1"
+  local hint="$2"
+  if ! command -v "$name" >/dev/null 2>&1; then
+    echo "ERROR: '$name' is not installed. $hint" >&2
+    MISSING_TOOLS=$((MISSING_TOOLS + 1))
+  fi
+}
+
 set -euo pipefail
 echo
 echo "================================================================================"
@@ -92,14 +103,6 @@ echo "==========================================================================
 # rather than 30+ seconds into a gcloud/firebase call with a confusing error.
 echo "[>] Checking required tools..."
 MISSING_TOOLS=0
-require_tool() {
-  local name="$1"
-  local hint="$2"
-  if ! command -v "$name" >/dev/null 2>&1; then
-    echo "ERROR: '$name' is not installed. $hint" >&2
-    MISSING_TOOLS=$((MISSING_TOOLS + 1))
-  fi
-}
 require_tool gcloud   "Install: https://cloud.google.com/sdk/docs/install"
 require_tool firebase "Install: npm i -g firebase-tools"
 require_tool node     "Install Node.js ≥ v22: https://nodejs.org/en/download"
