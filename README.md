@@ -262,16 +262,16 @@ End users of the deployed app only need the custom
 
 3.  **Execute Deployment**
 
-    -   Run the main deployment script:
+    - Run the main deployment script:
 
         ```bash
         ./deploy.sh
         ```
 
-    -   *Note: The script outputs estimates regarding run times.*
+    - *Note: The script outputs estimates regarding run times.*
 
-    -   *Note: You might be prompted to run the UI deployment script immediately
-        at the end.*
+    - *Note: You might be prompted to run the UI deployment script immediately
+       at the end.*
 
 > [!TIP] 
 > **Troubleshooting Firebase deployment failures:** If `./deploy.sh`
@@ -292,7 +292,7 @@ End users of the deployed app only need the custom
 > 5.  Once completed in the console, return to your terminal and re-run
 >     `./deploy.sh`.
 
-1.  **Set up OAuth consent screen:**
+4.  **Set up OAuth consent screen:**
 
     -   In your Google Cloud console, go to **API & Services > Credentials >
         OAuth consent screen**.
@@ -302,13 +302,13 @@ End users of the deployed app only need the custom
     -   You can choose **Internal** for the User Type if only users from your
         organization will use the app.
 
-2.  **Add Firebase Sign-In Provider**
+5.  **Add Firebase Sign-In Provider**
 
     -   Go to the [Firebase console](https://console.firebase.google.com/),
         select your project then click **Authentication > Sign-in method**.
     -   Click **Add new provider**, choose **Google** then enable and save it.
 
-3.  **Link Storage Bucket to Firebase** — *two sequential actions* are required
+6.  **Link Storage Bucket to Firebase** — *two sequential actions* are required
     on the same Firebase Storage page.
 
     -   Open the [Firebase console](https://console.firebase.google.com/) →
@@ -327,7 +327,7 @@ End users of the deployed app only need the custom
     **Import existing Google Cloud Storage buckets**. - Select your project
     bucket (the one referenced by `GCS_BUCKET` in `config.txt`) → confirm.
 
-4.  **Deploy UI**
+7.  **Deploy UI**
 
     -   Run `./deploy-ui.sh` (if you skipped it during backend deployment).
     -   If requested, perform any required manual steps indicated by the script
