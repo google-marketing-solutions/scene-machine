@@ -52,7 +52,8 @@ video prototyping platform for rapidly sharing and iterating on ideas.
 [< TL;DR](#tldr) • [Top](#readme-top) •
 [Technical Requirements >](#technical-requirements)
 
-> [!TIP] For a step-by-step guide with screen recordings, see
+> [!TIP] 
+> For a step-by-step guide with screen recordings, see
 > [`docs/walkthrough.md`](./docs/walkthrough.md).
 
 ![Scene Machine Promo](./docs/media/00_read_me_scene_machine_promo.gif)
@@ -272,7 +273,8 @@ End users of the deployed app only need the custom
     -   *Note: You might be prompted to run the UI deployment script immediately
         at the end.*
 
-> [!TIP] **Troubleshooting Firebase deployment failures:** If `./deploy.sh`
+> [!TIP] 
+> **Troubleshooting Firebase deployment failures:** If `./deploy.sh`
 > fails at the Firebase step with an error like `Error: Project not found`, it
 > usually means the Firebase CLI cannot access the project or terms have not
 > been accepted.
@@ -331,7 +333,8 @@ End users of the deployed app only need the custom
     -   If requested, perform any required manual steps indicated by the script
         (e.g. linking buckets or configuring OAuth).
 
-> [!TIP] Steps 4–6 can be completed **in parallel** with `./deploy-ui.sh`
+> [!TIP] 
+> Steps 4–6 can be completed **in parallel** with `./deploy-ui.sh`
 > running. The script polls every 15s (or prompts you for the OAuth consent
 > screen) and continues automatically once each manual action is done. After
 > `./deploy.sh` finishes you can launch `./deploy-ui.sh` immediately and
@@ -377,7 +380,8 @@ Save.
 
 [< Adding Users](#adding-users) • [Top](#readme-top) • [Caveats >](#caveats)
 
-> [!TIP] For a step-by-step guide with screen recordings, see
+> [!TIP] 
+> For a step-by-step guide with screen recordings, see
 > [`docs/walkthrough.md`](./docs/walkthrough.md).
 
 It covers how to set up a project name and resolution, upload product images,
