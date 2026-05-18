@@ -262,16 +262,16 @@ End users of the deployed app only need the custom
 
 3.  **Execute Deployment**
 
-    - Run the main deployment script:
+-   Run the main deployment script:
 
-        ```bash
-        ./deploy.sh
-        ```
+    ```bash
+       ./deploy.sh
+    ```
 
-    - *Note: The script outputs estimates regarding run times.*
+    -   *Note: The script outputs estimates regarding run times.*
 
-    - *Note: You might be prompted to run the UI deployment script immediately
-       at the end.*
+    -   *Note: You might be prompted to run the UI deployment script immediately
+        at the end.*
 
 > [!TIP] 
 > **Troubleshooting Firebase deployment failures:** If `./deploy.sh`
@@ -340,7 +340,7 @@ End users of the deployed app only need the custom
 > `./deploy.sh` finishes you can launch `./deploy-ui.sh` immediately and
 > complete steps 4–6 in browser tabs while it waits.
 
-1.  **Set up Identity-Aware Proxy**:
+8.  **Set up Identity-Aware Proxy**:
     -   In the
         [App Engine settings](https://console.cloud.google.com/appengine/settings?serviceId=default),
         under "Identity-Aware Proxy" select "Configure Now".
