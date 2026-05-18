@@ -161,23 +161,14 @@ If your organization's policies require narrower scopes, `roles/editor` covers
 most of the deploy work. The following additional roles are not included in
 `editor`, but are required to deploy Scene Machine:
 
-| Role                                    | Why it's needed                    |
-| --------------------------------------- | ---------------------------------- |
-| `roles/datastore.owner`                 | Firestore native-mode database     |
-:                                         : creation                           :
-| `roles/appengine.appCreator`            | One-time `gcloud app create` at    |
-:                                         : the project level                  :
-| `roles/appengine.appAdmin`              | Deploying the UI (`deploy-ui.sh`)  |
-:                                         : to the existing App Engine app     :
-| `roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings — the   |
-:                                         : `add_iam_binding` calls in         :
-:                                         : `deploy.sh`                        :
-| `roles/iam.roleAdmin`                   | Create the custom                  |
-:                                         : `SceneMachineUser` role late in    :
-:                                         : `deploy.sh`                        :
-| `roles/iam.serviceAccountAdmin`         | Service-account-level IAM bindings |
-:                                         : (e.g. Cloud Tasks → Cloud Run      :
-:                                         : "actAs")                           :
+Role                                    | Why it's needed
+--------------------------------------- | ---------------
+`roles/datastore.owner`                 | Firestore native-mode database creation
+`roles/appengine.appCreator`            | One-time `gcloud app create` at the project level
+`roles/appengine.appAdmin`              | Deploying the UI (`deploy-ui.sh`) to the existing App Engine app
+`roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings — the `add_iam_binding` calls in `deploy.sh`
+`roles/iam.roleAdmin`                   | Create the custom `SceneMachineUser` role late in `deploy.sh`
+`roles/iam.serviceAccountAdmin`         | Service-account-level IAM bindings (e.g. Cloud Tasks → Cloud Run "actAs")
 
 End users of the deployed app only need the custom
 `projects/$PROJECT/roles/SceneMachineUser` role — see
@@ -220,8 +211,12 @@ End users of the deployed app only need the custom
 
 2.  **Configure the Application**
 
-    -   Create `config.txt` from the template: `bash cp config.template.txt
-        config.txt`
+    -   Create `config.txt` from the template:
+
+        ```bash
+        cp config.template.txt config.txt
+        ```
+
     -   Edit `config.txt` in your favorite editor (e.g., `nano config.txt`).
 
     **Variables defined in `config.txt`:** You can check
@@ -229,79 +224,26 @@ End users of the deployed app only need the custom
     to ensure you are using the most up to date models available in your
     selected region.
 
-    | Variable Name          | Description    | Recommended Values / Notes     |
-    | :--------------------- | :------------- | :----------------------------- |
-    | `PROJECT`              | Your Google    | Required                       |
-    :                        : Cloud Platform :                                :
-    :                        : Project ID.    :                                :
-    | `REGION`               | Deployment     | e.g., `us-central1`            |
-    :                        : region for     :                                :
-    :                        : various GCP    :                                :
-    :                        : resources.     :                                :
-    | `GEMINI_MODEL`         | Text           | `gemini-2.5-pro`,              |
-    :                        : generation     : `gemini-3.1-pro-preview`       :
-    :                        : model for      :                                :
-    :                        : prompts and    :                                :
-    :                        : analysis.      :                                :
-    | `GEMINI_REGION`        | Region for     | Check locations availability.  |
-    :                        : model          : Recommended `global`.          :
-    :                        : invocation.    :                                :
-    | `VEO_MODEL`            | Video          | `veo-3.1-generate-001`         |
-    :                        : generation     :                                :
-    :                        : model.         :                                :
-    | `VEO_REGION`           | Region for Veo | Check availability.            |
-    :                        : model          : Recommended `global`.          :
-    :                        : invocation.    :                                :
-    | `OUTPAINTER_MODEL`     | Image          | `gemini-2.5-flash-image`       |
-    :                        : outpainting    :                                :
-    :                        : model for      :                                :
-    :                        : borders or     :                                :
-    :                        : fill.          :                                :
-    | `OUTPAINTER_REGION`    | Region for     | Check availability.            |
-    :                        : outpainter     : Recommended `global`.          :
-    :                        : model.         :                                :
-    | `API_GATEWAY_REGION`   | Region for API | Supported: `us-central1`,      |
-    :                        : Gateway        : `europe-west1`, etc.           :
-    :                        : deployment.    :                                :
-    | `APP_ENGINE_REGION`    | Region for App | Supported locations listed in  |
-    :                        : Engine         : config.                        :
-    :                        : application.   :                                :
-    | `GCS_BUCKET`           | Storage bucket | Must be globally unique.       |
-    :                        : name for       : Auto-generated by default.     :
-    :                        : storing        :                                :
-    :                        : project images :                                :
-    :                        : and assets.    :                                :
-    | `FIRESTORE_DB`         | Firestore      | Defaults to `scene-machine`.   |
-    :                        : database ID    :                                :
-    :                        : used by the    :                                :
-    :                        : backend        :                                :
-    :                        : modules.       :                                :
-    | `FIRESTORE_DB_UI`      | Firestore      | Defaults to                    |
-    :                        : database ID    : `scene-machine-ui`.            :
-    :                        : used by the    :                                :
-    :                        : user           :                                :
-    :                        : interface.     :                                :
-    | `ARTIFACT_REPO`        | Artifact       | Defaults to `scene-machine`.   |
-    :                        : Repository ID  :                                :
-    :                        : to store       :                                :
-    :                        : artifacts.     :                                :
-    | `API_GATEWAY`          | API Gateway ID | Defaults to                    |
-    :                        : for the        : `scenemachine-api-gateway`.    :
-    :                        : application    :                                :
-    :                        : endpoint.      :                                :
-    | `TASKS_QUEUE_PREFIX`   | Prefix for     | Max lengths apply. Support     |
-    :                        : Cloud Task     : letters, hyphen, numbers.      :
-    :                        : queue names.   :                                :
-    | `BACKEND_SERVICE_NAME` | Service name   | Defaults to                    |
-    :                        : for the        : `remix-engine-backend`.        :
-    :                        : application    :                                :
-    :                        : backend on     :                                :
-    :                        : GCP.           :                                :
-    | `CUSTOM_DOMAIN`        | Custom domain  | Optional. e.g.,                |
-    :                        : for the        : `scene-machine.my-company.com` :
-    :                        : application    :                                :
-    :                        : user           :                                :
-    :                        : interface.     :                                :
+    Variable Name          | Description                                                | Recommended Values / Notes
+    :--------------------- | :--------------------------------------------------------- | :-------------------------
+    `PROJECT`              | Your Google Cloud Platform Project ID.                     | Required
+    `REGION`               | Deployment region for various GCP resources.               | e.g., `us-central1`
+    `GEMINI_MODEL`         | Text generation model for prompts and analysis.            | `gemini-2.5-pro`, `gemini-3.1-pro-preview`
+    `GEMINI_REGION`        | Region for model invocation.                               | Check locations availability. Recommended `global`.
+    `VEO_MODEL`            | Video generation model.                                    | `veo-3.1-generate-001`
+    `VEO_REGION`           | Region for Veo model invocation.                           | Check availability. Recommended `global`.
+    `OUTPAINTER_MODEL`     | Image outpainting model for borders or fill.               | `gemini-2.5-flash-image`
+    `OUTPAINTER_REGION`    | Region for outpainter model.                               | Check availability. Recommended `global`.
+    `API_GATEWAY_REGION`   | Region for API Gateway deployment.                         | Supported: `us-central1`, `europe-west1`, etc.
+    `APP_ENGINE_REGION`    | Region for App Engine application.                         | Supported locations listed in config.
+    `GCS_BUCKET`           | Storage bucket name for storing project images and assets. | Must be globally unique. Auto-generated by default.
+    `FIRESTORE_DB`         | Firestore database ID used by the backend modules.         | Defaults to `scene-machine`.
+    `FIRESTORE_DB_UI`      | Firestore database ID used by the user interface.          | Defaults to `scene-machine-ui`.
+    `ARTIFACT_REPO`        | Artifact Repository ID to store artifacts.                 | Defaults to `scene-machine`.
+    `API_GATEWAY`          | API Gateway ID for the application endpoint.               | Defaults to `scenemachine-api-gateway`.
+    `TASKS_QUEUE_PREFIX`   | Prefix for Cloud Task queue names.                         | Max lengths apply. Support letters, hyphen, numbers.
+    `BACKEND_SERVICE_NAME` | Service name for the application backend on GCP.           | Defaults to `remix-engine-backend`.
+    `CUSTOM_DOMAIN`        | Custom domain for the application user interface.          | Optional. e.g., `scene-machine.my-company.com`
 
     -   **Important Notes for Configuration:**
         -   **Naming:** Use alphanumerical names (with hyphens) for entities
@@ -319,8 +261,14 @@ End users of the deployed app only need the custom
 
 3.  **Execute Deployment**
 
-    -   Run the main deployment script: `bash ./deploy.sh`
+    -   Run the main deployment script:
+
+        ```bash
+        ./deploy.sh
+        ```
+
     -   *Note: The script outputs estimates regarding run times.*
+
     -   *Note: You might be prompted to run the UI deployment script immediately
         at the end.*
 
