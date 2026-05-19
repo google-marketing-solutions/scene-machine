@@ -7,11 +7,14 @@
 annotated-types==0.7.0 \
     --hash=sha256:1f02e8b43a8fbbc3f3e0d4f0f4bfc8131bcb4eebe8849b8e5c773f3a1c582a53 \
     --hash=sha256:aff07c09a53a08bc8cfccb9c85b05f1aa9a2a6f23728d790723543408344ce89
-    # via pydantic
+    # via
+    #   -r requirements.txt
+    #   pydantic
 anyio==4.13.0 \
     --hash=sha256:08b310f9e24a9594186fd75b4f73f4a4152069e3853f1ed8bfbf58369f4ad708 \
     --hash=sha256:334b70e641fd2221c1505b3890c69882fe4a2df910cba14d97019b90b24439dc
     # via
+    #   -r requirements.txt
     #   google-genai
     #   httpx
 black==25.12.0 \
@@ -46,15 +49,20 @@ black==25.12.0 \
 blinker==1.9.0 \
     --hash=sha256:b4ce2265a7abece45e7cc896e98dbebe6cead56bcf805a3d23136d145f5445bf \
     --hash=sha256:ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc
-    # via flask
+    # via
+    #   -r requirements.txt
+    #   flask
 cachecontrol==0.14.4 \
     --hash=sha256:b7ac014ff72ee199b5f8af1de29d60239954f223e948196fa3d84adaffc71d2b \
     --hash=sha256:e6220afafa4c22a47dd0badb319f84475d79108100d04e26e8542ef7d3ab05a1
-    # via firebase-admin
+    # via
+    #   -r requirements.txt
+    #   firebase-admin
 certifi==2026.2.25 \
     --hash=sha256:027692e4402ad994f1c42e52a4997a9763c646b73e4096e4d5d6db8af1d6f0fa \
     --hash=sha256:e887ab5cee78ea814d3472169153c2d12cd43b14bd03329a39a9c6e2e80bfba7
     # via
+    #   -r requirements.txt
     #   httpcore
     #   httpx
     #   requests
@@ -143,7 +151,9 @@ cffi==2.0.0 \
     --hash=sha256:fc33c5141b55ed366cfaad382df24fe7dcbc686de5be719b207bb248e3053dc5 \
     --hash=sha256:fc7de24befaeae77ba923797c7c87834c73648a05a4bde34b3b7e5588973a453 \
     --hash=sha256:fe562eb1a64e67dd297ccc4f5addea2501664954f2692b69a76449ec7913ecbf
-    # via cryptography
+    # via
+    #   -r requirements.txt
+    #   cryptography
 charset-normalizer==3.4.7 \
     --hash=sha256:007d05ec7321d12a40227aae9e2bc6dca73f3cb21058999a1df9e193555a9dcc \
     --hash=sha256:03853ed82eeebbce3c2abfdbc98c96dc205f32a79627688ac9a27370ea61a49c \
@@ -274,11 +284,14 @@ charset-normalizer==3.4.7 \
     --hash=sha256:f59ad4c0e8f6bba240a9bb85504faa1ab438237199d4cce5f622761507b8f6a6 \
     --hash=sha256:fbccdc05410c9ee21bbf16a35f4c1d16123dcdeb8a1d38f33654fa21d0234f79 \
     --hash=sha256:fea24543955a6a729c45a73fe90e08c743f0b3334bbf3201e6c4bc1b0c7fa464
-    # via requests
+    # via
+    #   -r requirements.txt
+    #   requests
 click==8.3.2 \
     --hash=sha256:14162b8b3b3550a7d479eafa77dfd3c38d9dc8951f6f69c78913a8f9a7540fd5 \
     --hash=sha256:1924d2c27c5653561cd2cae4548d1406039cb79b858b747cfea24924bbc1616d
     # via
+    #   -r requirements.txt
     #   black
     #   flask
     #   pyink
@@ -333,30 +346,34 @@ cryptography==46.0.7 \
     --hash=sha256:fdd1736fed309b4300346f88f74cd120c27c56852c3838cab416e7a166f67298 \
     --hash=sha256:ffca7aa1d00cf7d6469b988c581598f2259e46215e0140af408966a24cf086ce
     # via
+    #   -r requirements.txt
     #   google-auth
     #   pyjwt
 distro==1.9.0 \
     --hash=sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed \
     --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
-    # via google-genai
+    # via
+    #   -r requirements.txt
+    #   google-genai
 firebase-admin==7.4.0 \
     --hash=sha256:08d7550efdba32fbd306141ce82150f9ffb91c1550e07aa4ed5757af4895d1ff \
     --hash=sha256:416967d1aacd30cfece2a5b0c606a52ba7614eb3093f054399be3868489cd7a8
-    # via -r requirements.in
+    # via -r requirements.txt
 flask==3.1.3 \
     --hash=sha256:0ef0e52b8a9cd932855379197dd8f94047b359ca0a78695144304cb45f87c9eb \
     --hash=sha256:f4bcbefc124291925f1a26446da31a5178f9483862233b23c0c96a20701f670c
     # via
-    #   -r requirements.in
+    #   -r requirements.txt
     #   flask-cors
 flask-cors==6.0.2 \
     --hash=sha256:6e118f3698249ae33e429760db98ce032a8bf9913638d085ca0f4c5534ad2423 \
     --hash=sha256:e57544d415dfd7da89a9564e1e3a9e515042df76e12130641ca6f3f2f03b699a
-    # via -r requirements.in
+    # via -r requirements.txt
 google-api-core[grpc]==2.30.3 \
     --hash=sha256:a85761ba72c444dad5d611c2220633480b2b6be2521eca69cca2dbb3ffd6bfe8 \
     --hash=sha256:e601a37f148585319b26db36e219df68c5d07b6382cff2d580e83404e44d641b
     # via
+    #   -r requirements.txt
     #   firebase-admin
     #   google-cloud-appengine-logging
     #   google-cloud-core
@@ -368,7 +385,7 @@ google-auth[requests]==2.49.2 \
     --hash=sha256:c1ae38500e73065dcae57355adb6278cf8b5c8e391994ae9cbadbcb9631ab409 \
     --hash=sha256:c2720924dfc82dedb962c9f52cabb2ab16714fd0a6a707e40561d217574ed6d5
     # via
-    #   -r requirements.in
+    #   -r requirements.txt
     #   google-api-core
     #   google-auth-httplib2
     #   google-auth-oauthlib
@@ -382,23 +399,28 @@ google-auth[requests]==2.49.2 \
 google-auth-httplib2==0.3.1 \
     --hash=sha256:0af542e815784cb64159b4469aa5d71dd41069ba93effa006e1916b1dcd88e55 \
     --hash=sha256:682356a90ef4ba3d06548c37e9112eea6fc00395a11b0303a644c1a86abc275c
-    # via -r requirements.in
+    # via -r requirements.txt
 google-auth-oauthlib==1.3.1 \
     --hash=sha256:14c22c7b3dd3d06dbe44264144409039465effdd1eef94f7ce3710e486cc4bfa \
     --hash=sha256:1a139ef23f1318756805b0e95f655c238bffd29655329a2978218248da4ee7f8
-    # via -r requirements.in
+    # via -r requirements.txt
 google-cloud-appengine-logging==1.9.0 \
     --hash=sha256:bbf3a7e4dc171678f7f481259d1f68c3ae7d337530f1f2361f8a0b214dbcfe36 \
     --hash=sha256:ff397f0bbc1485f979ab45767c38e0f676c9598c97c384f7412216e6ea22f805
-    # via google-cloud-logging
+    # via
+    #   -r requirements.txt
+    #   google-cloud-logging
 google-cloud-audit-log==0.5.0 \
     --hash=sha256:3b32d5e77db634c46fbd6c5e01f5bda836f420dfbb21d730501c75e9fab4e4a4 \
     --hash=sha256:3f4632f25bf67446fa9085c52868f3cb42fb1afbab9489ba8978e30991afc79f
-    # via google-cloud-logging
+    # via
+    #   -r requirements.txt
+    #   google-cloud-logging
 google-cloud-core==2.5.1 \
     --hash=sha256:3dc94bdec9d05a31d9f355045ed0f369fbc0d8c665076c734f065d729800f811 \
     --hash=sha256:ea62cdf502c20e3e14be8a32c05ed02113d7bef454e40ff3fab6fe1ec9f1f4e7
     # via
+    #   -r requirements.txt
     #   google-cloud-firestore
     #   google-cloud-logging
     #   google-cloud-storage
@@ -406,22 +428,22 @@ google-cloud-firestore==2.27.0 \
     --hash=sha256:5633cb164ef56ca6c73a807822191a56a98f6f10e76978c4f2eb197ae03383d2 \
     --hash=sha256:cc2ea78bc2d4dcc928016d56802deacfda3c9bbda0a7d691ee73b41a2f1a80d7
     # via
-    #   -r requirements.in
+    #   -r requirements.txt
     #   firebase-admin
 google-cloud-logging==3.15.0 \
     --hash=sha256:72168a1e98bbfc27c75f0b8f630a7f5d786065f3f1f7e9e53d2d787a03693a4a \
     --hash=sha256:7dcc67434c4e7181510c133d5ac8fd4ce60c23fa4158661f67e54bf440c32450
-    # via -r requirements.in
+    # via -r requirements.txt
 google-cloud-storage==3.10.1 \
     --hash=sha256:97db9aa4460727982040edd2bd13ff3d5e2260b5331ad22895802da1fc2a5286 \
     --hash=sha256:a72f656759b7b99bda700f901adcb3425a828d4a29f911bc26b3ea79c5b1217f
     # via
-    #   -r requirements.in
+    #   -r requirements.txt
     #   firebase-admin
 google-cloud-tasks==2.22.0 \
     --hash=sha256:10700bcf2d72bbc08dbfaddfd28b3de1a6c5dcb6bd05fa2e7bd258bdfeaa160a \
     --hash=sha256:bc97d847f1dfbf1b602b67b929b7baf570fea35dcedaadabb5adfdf816a67841
-    # via -r requirements.in
+    # via -r requirements.txt
 google-crc32c==1.8.0 \
     --hash=sha256:014a7e68d623e9a4222d663931febc3033c5c7c9730785727de2a81f87d5bab8 \
     --hash=sha256:01f126a5cfddc378290de52095e2c7052be2ba7656a9f0caf4bcd1bfb1833f8a \
@@ -457,20 +479,24 @@ google-crc32c==1.8.0 \
     --hash=sha256:f4b51844ef67d6cf2e9425983274da75f18b1597bb2c998e1c0a0e8d46f8f651 \
     --hash=sha256:f639065ea2042d5c034bf258a9f085eaa7af0cd250667c0635a3118e8f92c69c
     # via
+    #   -r requirements.txt
     #   google-cloud-storage
     #   google-resumable-media
 google-genai==1.73.1 \
     --hash=sha256:af2d2287d25e42a187de19811ef33beb2e347c7e2bdb4dc8c467d78254e43a2c \
     --hash=sha256:b637e3a3b9e2eccc46f27136d470165803de84eca52abfed2e7352081a4d5a15
-    # via -r requirements.in
+    # via -r requirements.txt
 google-resumable-media==2.8.2 \
     --hash=sha256:82b6d8ccd11765268cdd2a2123f417ec806b8eef3000a9a38dfe3033da5fb220 \
     --hash=sha256:f3354a182ebd193ae3f42e3ef95e6c9b10f128320de23ac7637236713b1acd70
-    # via google-cloud-storage
+    # via
+    #   -r requirements.txt
+    #   google-cloud-storage
 googleapis-common-protos[grpc]==1.74.0 \
     --hash=sha256:57971e4eeeba6aad1163c1f0fc88543f965bb49129b8bb55b2b7b26ecab084f1 \
     --hash=sha256:702216f78610bb510e3f12ac3cafd281b7ac45cc5d86e90ad87e4d301a3426b5
     # via
+    #   -r requirements.txt
     #   google-api-core
     #   google-cloud-audit-log
     #   grpc-google-iam-v1
@@ -479,6 +505,7 @@ grpc-google-iam-v1==0.14.4 \
     --hash=sha256:392b3796947ed6334e61171d9ab06bf7eb357f554e5fc7556ad7aab6d0e17038 \
     --hash=sha256:412facc320fcbd94034b4df3d557662051d4d8adfa86e0ddb4dca70a3f739964
     # via
+    #   -r requirements.txt
     #   google-cloud-logging
     #   google-cloud-tasks
 grpcio==1.80.0 \
@@ -544,6 +571,7 @@ grpcio==1.80.0 \
     --hash=sha256:f49eddcac43c3bf350c0385366a58f36bed8cc2c0ec35ef7b74b49e56552c0c2 \
     --hash=sha256:f7691a6788ad9196872f95716df5bc643ebba13c97140b7a5ee5c8e75d1dea81
     # via
+    #   -r requirements.txt
     #   google-api-core
     #   google-cloud-appengine-logging
     #   google-cloud-firestore
@@ -555,48 +583,66 @@ grpcio==1.80.0 \
 grpcio-status==1.80.0 \
     --hash=sha256:4b56990363af50dbf2c2ebb80f1967185c07d87aa25aa2bea45ddb75fc181dbe \
     --hash=sha256:df73802a4c89a3ea88aa2aff971e886fccce162bc2e6511408b3d67a144381cd
-    # via google-api-core
+    # via
+    #   -r requirements.txt
+    #   google-api-core
 h11==0.16.0 \
     --hash=sha256:4e35b956cf45792e4caa5885e69fba00bdbc6ffafbfa020300e549b208ee5ff1 \
     --hash=sha256:63cf8bbe7522de3bf65932fda1d9c2772064ffb3dae62d55932da54b31cb6c86
-    # via httpcore
+    # via
+    #   -r requirements.txt
+    #   httpcore
 h2==4.3.0 \
     --hash=sha256:6c59efe4323fa18b47a632221a1888bd7fde6249819beda254aeca909f221bf1 \
     --hash=sha256:c438f029a25f7945c69e0ccf0fb951dc3f73a5f6412981daee861431b70e2bdd
-    # via httpx
+    # via
+    #   -r requirements.txt
+    #   httpx
 hpack==4.1.0 \
     --hash=sha256:157ac792668d995c657d93111f46b4535ed114f0c9c8d672271bbec7eae1b496 \
     --hash=sha256:ec5eca154f7056aa06f196a557655c5b009b382873ac8d1e66e79e87535f1dca
-    # via h2
+    # via
+    #   -r requirements.txt
+    #   h2
 httpcore==1.0.9 \
     --hash=sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55 \
     --hash=sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8
-    # via httpx
+    # via
+    #   -r requirements.txt
+    #   httpx
 httplib2==0.31.2 \
     --hash=sha256:385e0869d7397484f4eab426197a4c020b606edd43372492337c0b4010ae5d24 \
     --hash=sha256:dbf0c2fa3862acf3c55c078ea9c0bc4481d7dc5117cae71be9514912cf9f8349
-    # via google-auth-httplib2
+    # via
+    #   -r requirements.txt
+    #   google-auth-httplib2
 httpx[http2]==0.28.1 \
     --hash=sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc \
     --hash=sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad
     # via
+    #   -r requirements.txt
     #   firebase-admin
     #   google-genai
 hyperframe==6.1.0 \
     --hash=sha256:b03380493a519fce58ea5af42e4a42317bf9bd425596f7a0835ffce80f1a42e5 \
     --hash=sha256:f630908a00854a7adeabd6382b43923a4c4cd4b821fcb527e6ab9e15382a3b08
-    # via h2
-idna==3.12 \
-    --hash=sha256:60ffaa1858fac94c9c124728c24fcde8160f3fb4a7f79aa8cdd33a9d1af60a67 \
-    --hash=sha256:724e9952cc9e2bd7550ea784adb098d837ab5267ef67a1ab9cf7846bdbdd8254
     # via
+    #   -r requirements.txt
+    #   h2
+idna==3.15 \
+    --hash=sha256:048adeaf8c2d788c40fee287673ccaa74c24ffd8dcf09ffa555a2fbb59f10ac8 \
+    --hash=sha256:ca962446ea538f7092a95e057da437618e886f4d349216d2b1e294abfdb65fdc
+    # via
+    #   -r requirements.txt
     #   anyio
     #   httpx
     #   requests
 importlib-metadata==8.7.1 \
     --hash=sha256:49fef1ae6440c182052f407c8d34a68f72efc36db9ca90dc0113398f2fdde8bb \
     --hash=sha256:5a1f80bf1daa489495071efbb095d75a634cf28a8bc299581244063b53176151
-    # via opentelemetry-api
+    # via
+    #   -r requirements.txt
+    #   opentelemetry-api
 iniconfig==2.3.0 \
     --hash=sha256:c76315c77db068650d49c5b56314774a7804df16fee4402c1f19d6d15d8c4730 \
     --hash=sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12
@@ -604,11 +650,15 @@ iniconfig==2.3.0 \
 itsdangerous==2.2.0 \
     --hash=sha256:c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef \
     --hash=sha256:e0050c0b7da1eea53ffaf149c0cfbb5c6e2e2b69c4bef22c81fa6eb73e5f6173
-    # via flask
+    # via
+    #   -r requirements.txt
+    #   flask
 jinja2==3.1.6 \
     --hash=sha256:0137fb05990d35f1275a587e9aee6d56da821fc83491a0fb838183be43f66d6d \
     --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
-    # via flask
+    # via
+    #   -r requirements.txt
+    #   flask
 markupsafe==3.0.3 \
     --hash=sha256:0303439a41979d9e74d18ff5e2dd8c43ed6c6001fd40e5bf2e43f7bd9bbc523f \
     --hash=sha256:068f375c472b3e7acbe2d5318dea141359e6900156b5b2ba06a30b169086b91a \
@@ -700,6 +750,7 @@ markupsafe==3.0.3 \
     --hash=sha256:f9e130248f4462aaa8e2552d547f36ddadbeaa573879158d721bbd33dfe4743a \
     --hash=sha256:fed51ac40f757d41b7c48425901843666a6677e3e8eb0abcff09e4ba6e664f50
     # via
+    #   -r requirements.txt
     #   flask
     #   jinja2
     #   werkzeug
@@ -766,7 +817,9 @@ msgpack==1.1.2 \
     --hash=sha256:f2cb069d8b981abc72b41aea1c580ce92d57c673ec61af4c500153a626cb9e20 \
     --hash=sha256:fac4be746328f90caa3cd4bc67e6fe36ca2bf61d5c6eb6d895b6527e3f05071e \
     --hash=sha256:fffee09044073e69f2bad787071aeec727183e7580443dfeb8556cbf1978d162
-    # via cachecontrol
+    # via
+    #   -r requirements.txt
+    #   cachecontrol
 mypy-extensions==1.1.0 \
     --hash=sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505 \
     --hash=sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558
@@ -776,11 +829,15 @@ mypy-extensions==1.1.0 \
 oauthlib==3.3.1 \
     --hash=sha256:0f0f8aa759826a193cf66c12ea1af1637f87b9b4622d46e866952bb022e538c9 \
     --hash=sha256:88119c938d2b8fb88561af5f6ee0eec8cc8d552b7bb1f712743136eb7523b7a1
-    # via requests-oauthlib
+    # via
+    #   -r requirements.txt
+    #   requests-oauthlib
 opentelemetry-api==1.41.0 \
     --hash=sha256:0e77c806e6a89c9e4f8d372034622f3e1418a11bdbe1c80a50b3d3397ad0fa4f \
     --hash=sha256:9421d911326ec12dee8bc933f7839090cad7a3f13fcfb0f9e82f8174dc003c09
-    # via google-cloud-logging
+    # via
+    #   -r requirements.txt
+    #   google-cloud-logging
 packaging==26.1 \
     --hash=sha256:5d9c0669c6285e491e0ced2eee587eaf67b670d94a19e94e3984a481aba6802f \
     --hash=sha256:f042152b681c4bfac5cae2742a55e103d27ab2ec0f3d88037136b6bfe7c9c5de
@@ -890,7 +947,7 @@ pillow==12.2.0 \
     --hash=sha256:f490f9368b6fc026f021db16d7ec2fbf7d89e2edb42e8ec09d2c60505f5729c7 \
     --hash=sha256:fb043ee2f06b41473269765c2feae53fc2e2fbf96e5e22ca94fb5ad677856f06 \
     --hash=sha256:fc3d34d4a8fbec3e88a79b92e5465e0f9b842b628675850d860b8bd300b159f5
-    # via -r requirements.in
+    # via -r requirements.txt
 platformdirs==4.9.6 \
     --hash=sha256:3bfa75b0ad0db84096ae777218481852c0ebc6c727b3168c1b9e0118e458cf0a \
     --hash=sha256:e61adb1d5e5cb3441b4b7710bea7e4c12250ca49439228cc1021c00dcfac0917
@@ -905,6 +962,7 @@ proto-plus==1.27.2 \
     --hash=sha256:6432f75893d3b9e70b9c412f1d2f03f65b11fb164b793d14ae2ca01821d22718 \
     --hash=sha256:b2adde53adadf75737c44d3dcb0104fde65250dfc83ad59168b4aa3e574b6a24
     # via
+    #   -r requirements.txt
     #   google-api-core
     #   google-cloud-appengine-logging
     #   google-cloud-firestore
@@ -922,6 +980,7 @@ protobuf==6.33.6 \
     --hash=sha256:e9db7e292e0ab79dd108d7f1a94fe31601ce1ee3f7b79e0692043423020b0593 \
     --hash=sha256:f443a394af5ed23672bc6c486be138628fbe5c651ccbc536873d7da23d1868cf
     # via
+    #   -r requirements.txt
     #   google-api-core
     #   google-cloud-appengine-logging
     #   google-cloud-audit-log
@@ -935,19 +994,27 @@ protobuf==6.33.6 \
 pyasn1==0.6.3 \
     --hash=sha256:697a8ecd6d98891189184ca1fa05d1bb00e2f84b5977c481452050549c8a72cf \
     --hash=sha256:a80184d120f0864a52a073acc6fc642847d0be408e7c7252f31390c0f4eadcde
-    # via pyasn1-modules
+    # via
+    #   -r requirements.txt
+    #   pyasn1-modules
 pyasn1-modules==0.4.2 \
     --hash=sha256:29253a9207ce32b64c3ac6600edc75368f98473906e8fd1043bd6b5b1de2c14a \
     --hash=sha256:677091de870a80aae844b1ca6134f54652fa2c8c5a52aa396440ac3106e941e6
-    # via google-auth
+    # via
+    #   -r requirements.txt
+    #   google-auth
 pycparser==3.0 \
     --hash=sha256:600f49d217304a5902ac3c37e1281c9fe94e4d0489de643a9504c5cdfdfc6b29 \
     --hash=sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992
-    # via cffi
+    # via
+    #   -r requirements.txt
+    #   cffi
 pydantic==2.13.3 \
     --hash=sha256:6db14ac8dfc9a1e57f87ea2c0de670c251240f43cb0c30a5130e9720dc612927 \
     --hash=sha256:af09e9d1d09f4e7fe37145c1f577e1d61ceb9a41924bf0094a36506285d0a84d
-    # via google-genai
+    # via
+    #   -r requirements.txt
+    #   google-genai
 pydantic-core==2.46.3 \
     --hash=sha256:0087084960f209a9a4af50ecd1fb063d9ad3658c07bb81a7a53f452dacbfb2ba \
     --hash=sha256:031bb17f4885a43773c8c763089499f242aee2ea85cf17154168775dccdecf35 \
@@ -1069,7 +1136,9 @@ pydantic-core==2.46.3 \
     --hash=sha256:fd35aa21299def8db7ef4fe5c4ff862941a9a158ca7b63d61e66fe67d30416b4 \
     --hash=sha256:ff5e7783bcc5476e1db448bf268f11cb257b1c276d3e89f00b5727be86dd0127 \
     --hash=sha256:ffe0883b56cfc05798bf994164d2b2ff03efe2d22022a2bb080f3b626176dd56
-    # via pydantic
+    # via
+    #   -r requirements.txt
+    #   pydantic
 pygments==2.20.0 \
     --hash=sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f \
     --hash=sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176
@@ -1081,11 +1150,15 @@ pyink==25.12.0 \
 pyjwt[crypto]==2.12.1 \
     --hash=sha256:28ca37c070cad8ba8cd9790cd940535d40274d22f80ab87f3ac6a713e6e8454c \
     --hash=sha256:c74a7a2adf861c04d002db713dd85f84beb242228e671280bf709d765b03672b
-    # via firebase-admin
+    # via
+    #   -r requirements.txt
+    #   firebase-admin
 pyparsing==3.3.2 \
     --hash=sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d \
     --hash=sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc
-    # via httplib2
+    # via
+    #   -r requirements.txt
+    #   httplib2
 pytest==9.0.3 \
     --hash=sha256:2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9 \
     --hash=sha256:b86ada508af81d19edeb213c681b1d48246c1a91d304c6c81a427674c17eb91c
@@ -1140,7 +1213,7 @@ requests==2.33.1 \
     --hash=sha256:18817f8c57c6263968bc123d237e3b8b08ac046f5456bd1e307ee8f4250d3517 \
     --hash=sha256:4e6d1ef462f3626a1f0a0a9c42dd93c63bad33f9f1c1937509b8c5c8718ab56a
     # via
-    #   -r requirements.in
+    #   -r requirements.txt
     #   cachecontrol
     #   google-api-core
     #   google-auth
@@ -1150,19 +1223,26 @@ requests==2.33.1 \
 requests-oauthlib==2.0.0 \
     --hash=sha256:7dd8a5c40426b779b0868c404bdef9768deccf22749cde15852df527e6269b36 \
     --hash=sha256:b3dffaebd884d8cd778494369603a9e7b58d29111bf6b41bdc2dcd87203af4e9
-    # via google-auth-oauthlib
+    # via
+    #   -r requirements.txt
+    #   google-auth-oauthlib
 sniffio==1.3.1 \
     --hash=sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2 \
     --hash=sha256:f4324edc670a0f49750a81b895f35c3adb843cca46f0530f79fc1babb23789dc
-    # via google-genai
+    # via
+    #   -r requirements.txt
+    #   google-genai
 tenacity==9.1.4 \
     --hash=sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55 \
     --hash=sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a
-    # via google-genai
+    # via
+    #   -r requirements.txt
+    #   google-genai
 typing-extensions==4.15.0 \
     --hash=sha256:0cea48d173cc12fa28ecabc3b837ea3cf6f38c6d1136f85cbaaf598984861466 \
     --hash=sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548
     # via
+    #   -r requirements.txt
     #   google-genai
     #   grpcio
     #   opentelemetry-api
@@ -1172,11 +1252,15 @@ typing-extensions==4.15.0 \
 typing-inspection==0.4.2 \
     --hash=sha256:4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7 \
     --hash=sha256:ba561c48a67c5958007083d386c3295464928b01faa735ab8547c5692e87f464
-    # via pydantic
+    # via
+    #   -r requirements.txt
+    #   pydantic
 urllib3==2.6.3 \
     --hash=sha256:1b62b6884944a57dbe321509ab94fd4d3b307075e0c2eae991ac71ee15ad38ed \
     --hash=sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4
-    # via requests
+    # via
+    #   -r requirements.txt
+    #   requests
 websockets==16.0 \
     --hash=sha256:0298d07ee155e2e9fda5be8a9042200dd2e3bb0b8a38482156576f863a9d457c \
     --hash=sha256:04cdd5d2d1dacbad0a7bf36ccbcd3ccd5a30ee188f2560b7a62a30d14107b31a \
@@ -1239,14 +1323,19 @@ websockets==16.0 \
     --hash=sha256:eaded469f5e5b7294e2bdca0ab06becb6756ea86894a47806456089298813c89 \
     --hash=sha256:f4a32d1bd841d4bcbffdcb3d2ce50c09c3909fbead375ab28d0181af89fd04da \
     --hash=sha256:fd3cb4adb94a2a6e2b7c0d8d05cb94e6f1c81a0cf9dc2694fb65c7e8d94c42e4
-    # via google-genai
+    # via
+    #   -r requirements.txt
+    #   google-genai
 werkzeug==3.1.8 \
     --hash=sha256:63a77fb8892bf28ebc3178683445222aa500e48ebad5ec77b0ad80f8726b1f50 \
     --hash=sha256:9bad61a4268dac112f1c5cd4630a56ede601b6ed420300677a869083d70a4c44
     # via
+    #   -r requirements.txt
     #   flask
     #   flask-cors
 zipp==3.23.1 \
     --hash=sha256:0b3596c50a5c700c9cb40ba8d86d9f2cc4807e9bedb06bcdf7fac85633e444dc \
     --hash=sha256:32120e378d32cd9714ad503c1d024619063ec28aad2248dc6672ad13edfa5110
-    # via importlib-metadata
+    # via
+    #   -r requirements.txt
+    #   importlib-metadata
