@@ -158,9 +158,8 @@ manually.*
 
 `roles/owner` on the target project is sufficient and is the simplest option.
 
-If your organization's policies require narrower scopes, `roles/editor` covers
-most of the deploy work. The following additional roles are not included in
-`editor`, but are required to deploy Scene Machine:
+If your organization's policies require narrower scopes, the following roles are
+the minimum required to deploy Scene Machine:
 
 Role | Why it's needed
 --- | ---
