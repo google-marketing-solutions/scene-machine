@@ -52,7 +52,7 @@ video prototyping platform for rapidly sharing and iterating on ideas.
 [< TL;DR](#tldr) • [Top](#readme-top) •
 [Technical Requirements >](#technical-requirements)
 
-> [!TIP] 
+> [!TIP]
 > For a step-by-step guide with screen recordings, see
 > [`docs/walkthrough.md`](./docs/walkthrough.md).
 
@@ -162,14 +162,24 @@ If your organization's policies require narrower scopes, `roles/editor` covers
 most of the deploy work. The following additional roles are not included in
 `editor`, but are required to deploy Scene Machine:
 
-Role                                    | Why it's needed
---------------------------------------- | ---------------
-`roles/datastore.owner`                 | Firestore native-mode database creation
-`roles/appengine.appCreator`            | One-time `gcloud app create` at the project level
-`roles/appengine.appAdmin`              | Deploying the UI (`deploy-ui.sh`) to the existing App Engine app
+Role | Why it's needed
+--- | ---
+`roles/writer` | Basic editor permissions
 `roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings — the `add_iam_binding` calls in `deploy.sh`
-`roles/iam.roleAdmin`                   | Create the custom `SceneMachineUser` role late in `deploy.sh`
-`roles/iam.serviceAccountAdmin`         | Service-account-level IAM bindings (e.g. Cloud Tasks → Cloud Run "actAs")
+`roles/storage.admin` | Manage Cloud Storage buckets and objects
+`roles/datastore.admin` | Firestore native-mode database creation and management
+`roles/appengine.appAdmin` | Deploying the UI (`deploy-ui.sh`) to the existing App Engine app
+`roles/appengine.appCreator` | One-time `gcloud app create` at the project level
+`roles/run.admin` | Manage Cloud Run services for the application
+`roles/artifactregistry.admin` | Manage Artifact Registry for container images
+`roles/cloudtasks.admin` | Manage Cloud Tasks queues used by the app
+`roles/apigateway.admin` | Manage API Gateway for the application
+`roles/firebase.admin` | Manage Firebase resources
+`roles/serviceusage.serviceUsageAdmin` | Enable required APIs during deployment
+`roles/iap.admin` | Manage Identity-Aware Proxy for access control
+`roles/iam.serviceAccountUser` | Allow deploying user to act as service accounts
+`roles/serviceusage.apiKeysAdmin` | Manage API keys for services
+`projects/$PROJECT/roles/scenemachineuser` | Provides access to the deployed app
 
 End users of the deployed app only need the custom
 `projects/$PROJECT/roles/SceneMachineUser` role — see
@@ -273,7 +283,7 @@ End users of the deployed app only need the custom
     -   *Note: You might be prompted to run the UI deployment script immediately
         at the end.*
 
-> [!TIP] 
+> [!TIP]
 > **Troubleshooting Firebase deployment failures:** If `./deploy.sh`
 > fails at the Firebase step with an error like `Error: Project not found`, it
 > usually means the Firebase CLI cannot access the project or terms have not
@@ -333,7 +343,7 @@ End users of the deployed app only need the custom
     -   If requested, perform any required manual steps indicated by the script
         (e.g. linking buckets or configuring OAuth).
 
-> [!TIP] 
+> [!TIP]
 > Steps 4–6 can be completed **in parallel** with `./deploy-ui.sh`
 > running. The script polls every 15s (or prompts you for the OAuth consent
 > screen) and continues automatically once each manual action is done. After
@@ -380,7 +390,7 @@ Save.
 
 [< Adding Users](#adding-users) • [Top](#readme-top) • [Caveats >](#caveats)
 
-> [!TIP] 
+> [!TIP]
 > For a step-by-step guide with screen recordings, see
 > [`docs/walkthrough.md`](./docs/walkthrough.md).
 
