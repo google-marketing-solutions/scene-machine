@@ -121,18 +121,37 @@ gcloud auth application-default set-quota-project $PROJECT
 API_UID=$(gcloud services api-keys list --filter="displayName='Scene Machine API Key'" --format="value(uid)" --project=$PROJECT)
 export API_KEY=$(gcloud services api-keys get-key-string $API_UID --project=$PROJECT --format="value(keyString)")
 export API_GATEWAY_HOST=$(gcloud api-gateway gateways describe scenemachine-api-gateway --project=$PROJECT --location=$API_GATEWAY_REGION --format="value(defaultHostname)")
-FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
+# Get the Firebase Web App API Key ID via REST or fall back to the default Browser Key
+echo "Fetching Firebase API Key string via secure gcloud and REST API..."
+API_KEY_ID=$(curl -s -X GET -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  "https://firebase.googleapis.com/v1beta1/projects/${PROJECT}/webApps" \
+  | grep -A 5 "\"displayName\": \"${PROJECT}\"" \
+  | grep '"apiKeyId":' \
+  | awk -F '"' '{print $4}' || true)
+
+if [ -z "$API_KEY_ID" ]; then
+  echo "Specific app key not resolved; falling back to default Browser Key..."
+  API_KEY_ID=$(gcloud services api-keys list --filter="displayName='Browser key (auto created by Firebase)'" --format="value(uid)" --project="${PROJECT}" | head -n 1 || true)
+fi
+
+if [ -z "$API_KEY_ID" ]; then
+  echo "No Firebase API Keys found! Let's fetch the first active key..."
+  API_KEY_ID=$(gcloud services api-keys list --format="value(uid)" --project="${PROJECT}" | head -n 1 || true)
+fi
+
+FIREBASE_API_KEY=$(gcloud services api-keys get-key-string "${API_KEY_ID}" --project="${PROJECT}" --format="value(keyString)")
+
 if [ -z "$FIREBASE_API_KEY" ]; then
-  echo "ERROR: Failed to extract Firebase API key from 'firebase apps:sdkconfig WEB'. Check that the Firebase Web app exists in project $PROJECT." >&2
+  echo "ERROR: Failed to resolve Firebase API key." >&2
   exit 1
 fi
+echo "✓ Firebase API Key successfully resolved: ${FIREBASE_API_KEY:0:5}..."
 export FIREBASE_API_KEY
-FIREBASE_AUTH_DOMAIN=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"authDomain":' | awk -F '"' '{print $4}')
-if [ -z "$FIREBASE_AUTH_DOMAIN" ]; then
-  echo "ERROR: Failed to extract Firebase auth domain from 'firebase apps:sdkconfig WEB'. Check that the Firebase Web app exists in project $PROJECT." >&2
-  exit 1
-fi
-export FIREBASE_AUTH_DOMAIN
+
+# Auth domain is programmatically calculated
+export FIREBASE_AUTH_DOMAIN="${PROJECT}.firebaseapp.com"
+echo "✓ Firebase Auth Domain: ${FIREBASE_AUTH_DOMAIN}"
 if [ -n "${CUSTOM_DOMAIN:-}" ]; then
   export UI_HOST="${CUSTOM_DOMAIN}"
   echo "✓ Using custom domain: ${UI_HOST}"
@@ -343,13 +362,35 @@ if [[ "${1:-}" != "local" ]]; then
 fi
 
 echo
-echo "[>] Configuring Firebase authorized domains..."
-curl -X PATCH "https://identitytoolkit.googleapis.com/v2/projects/${PROJECT}/config?updateMask=authorizedDomains" \
-  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+echo "[>] Configuring Firebase authorized domains (Merge-safe mode)..."
+NEW_DOMAINS=("localhost" "$(gcloud app describe --format='value(defaultHostname)')")
+TOKEN=$(gcloud auth application-default print-access-token)
+
+MERGED_JSON=$(python3 -c '
+import sys, json, urllib.request
+project = sys.argv[1]
+token = sys.argv[2]
+new_domains = sys.argv[3:]
+req_get = urllib.request.Request(
+    f"https://identitytoolkit.googleapis.com/v2/projects/{project}/config",
+    headers={"Authorization": f"Bearer {token}", "x-goog-user-project": project}
+)
+try:
+    with urllib.request.urlopen(req_get) as r:
+        config = json.loads(r.read().decode())
+        existing_domains = config.get("authorizedDomains", [])
+except Exception as e:
+    existing_domains = []
+merged = sorted(list(set(existing_domains + new_domains)))
+print(json.dumps({"authorizedDomains": merged}))
+' "${PROJECT}" "${TOKEN}" "${NEW_DOMAINS[@]}")
+
+curl -s -X PATCH "https://identitytoolkit.googleapis.com/v2/projects/${PROJECT}/config?updateMask=authorizedDomains" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   -H "x-goog-user-project: ${PROJECT}" \
   -o /dev/null \
-  -d "{\"authorizedDomains\": [\"localhost\", \"$(gcloud app describe --format='value(defaultHostname)')\"]}"
+  -d "${MERGED_JSON}"
 
 # --- Final summary: success banner + remaining manual steps ----------------
 if [[ "${1:-}" == "local" ]]; then
