@@ -163,23 +163,24 @@ the minimum required to deploy Scene Machine:
 
 Role | Why it's needed
 --- | ---
-`roles/writer` | Basic editor permissions
-`roles/apigateway.admin` | Manage API Gateway for the application
-`roles/appengine.appAdmin` | Deploying the UI (`deploy-ui.sh`) to the existing App Engine app
-`roles/appengine.appCreator` | One-time `gcloud app create` at the project level
-`roles/artifactregistry.admin` | Manage Artifact Registry for container images
-`roles/cloudtasks.admin` | Manage Cloud Tasks queues used by the app
-`roles/datastore.admin` | Firestore native-mode database creation and management
-`roles/firebase.admin` | Manage Firebase resources
-`roles/iam.roleAdmin` | Create the custom `SceneMachineUser` role.
-`roles/iam.serviceAccountAdmin` | Admin service account IAM bindings (e.g. Cloud Tasks → Cloud Run "actAs")
-`roles/iam.serviceAccountUser` | Allow deploying user to act as service accounts
-`roles/iap.admin` | Manage Identity-Aware Proxy for access control
-`roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings — the `add_iam_binding` calls in `deploy.sh`
-`roles/run.admin` | Manage Cloud Run services for the application
-`roles/serviceusage.apiKeysAdmin` | Manage API keys for services
-`roles/serviceusage.serviceUsageAdmin` | Enable required APIs during deployment
-`roles/storage.admin` | Manage Cloud Storage buckets and objects
+| `roles/apigateway.admin` | API Gateway |
+| `roles/appengine.appAdmin` | `gcloud app deploy` |
+| `roles/appengine.appCreator` | `gcloud app create` |
+| `roles/artifactregistry.admin` | Artifact Registry repo + images |
+| `roles/cloudbuild.builds.editor`  | Cloud Build, triggered by `gcloud run deploy --source` (deploy.sh) |
+| `roles/cloudtasks.admin` | Cloud Tasks queues |
+| `roles/datastore.admin` | Firestore **database** creation |
+| `roles/datastore.user`  | Firestore **data** writes (config docs in `deploy-ui.sh`) |
+| `roles/firebase.admin` | Firebase project/app/rules/storage link |
+| `roles/iam.roleAdmin` | Create the custom `SceneMachineUser` role |
+| `roles/iam.serviceAccountAdmin` | Service-account IAM bindings |
+| `roles/iam.serviceAccountUser` | `actAs` during Run/App Engine deploy |
+| `roles/iap.admin` | Configure/enable IAP |
+| `roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings |
+| `roles/run.admin` | Cloud Run services |
+| `roles/serviceusage.apiKeysAdmin` | Create the API key |
+| `roles/serviceusage.serviceUsageAdmin` | Enable APIs |
+| `roles/storage.admin` | GCS buckets + objects |
 
 All users of the deployed app (including the deployer) require the custom
 `projects/$PROJECT/roles/SceneMachineUser` role — see
