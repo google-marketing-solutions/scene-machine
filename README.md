@@ -172,6 +172,7 @@ Role | Why it's needed
 `roles/datastore.admin` | Firestore native-mode database creation and management
 `roles/firebase.admin` | Manage Firebase resources
 `roles/iam.roleAdmin` | Create the custom `SceneMachineUser` role.
+`roles/iam.serviceAccountAdmin` | Admin service account IAM bindings (e.g. Cloud Tasks → Cloud Run "actAs")
 `roles/iam.serviceAccountUser` | Allow deploying user to act as service accounts
 `roles/iap.admin` | Manage Identity-Aware Proxy for access control
 `roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings — the `add_iam_binding` calls in `deploy.sh`
