@@ -164,23 +164,23 @@ the minimum required to deploy Scene Machine:
 Role | Why it's needed
 --- | ---
 `roles/writer` | Basic editor permissions
-`roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings — the `add_iam_binding` calls in `deploy.sh`
-`roles/storage.admin` | Manage Cloud Storage buckets and objects
-`roles/datastore.admin` | Firestore native-mode database creation and management
+`roles/apigateway.admin` | Manage API Gateway for the application
 `roles/appengine.appAdmin` | Deploying the UI (`deploy-ui.sh`) to the existing App Engine app
 `roles/appengine.appCreator` | One-time `gcloud app create` at the project level
-`roles/run.admin` | Manage Cloud Run services for the application
 `roles/artifactregistry.admin` | Manage Artifact Registry for container images
 `roles/cloudtasks.admin` | Manage Cloud Tasks queues used by the app
-`roles/apigateway.admin` | Manage API Gateway for the application
+`roles/datastore.admin` | Firestore native-mode database creation and management
 `roles/firebase.admin` | Manage Firebase resources
-`roles/serviceusage.serviceUsageAdmin` | Enable required APIs during deployment
-`roles/iap.admin` | Manage Identity-Aware Proxy for access control
+`roles/iam.roleAdmin` | Create the custom `SceneMachineUser` role.
 `roles/iam.serviceAccountUser` | Allow deploying user to act as service accounts
+`roles/iap.admin` | Manage Identity-Aware Proxy for access control
+`roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings — the `add_iam_binding` calls in `deploy.sh`
+`roles/run.admin` | Manage Cloud Run services for the application
 `roles/serviceusage.apiKeysAdmin` | Manage API keys for services
-`projects/$PROJECT/roles/scenemachineuser` | Provides access to the deployed app
+`roles/serviceusage.serviceUsageAdmin` | Enable required APIs during deployment
+`roles/storage.admin` | Manage Cloud Storage buckets and objects
 
-End users of the deployed app only need the custom
+All users of the deployed app (including the deployer) require the custom
 `projects/$PROJECT/roles/SceneMachineUser` role — see
 [Adding Users](#adding-users).
 
