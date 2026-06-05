@@ -104,6 +104,48 @@ require_tool() {
 # Main script
 # ---------------------------------------------------------------------------
 set -euo pipefail
+
+# Parse arguments
+AUTO_CONFIRM=false
+DEPLOY_BACKEND=false
+DEPLOY_UI=false
+TARGETED=false
+DEPLOY_MODE=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -y|--yes|--non-interactive)
+      AUTO_CONFIRM=true
+      shift
+      ;;
+    --backend-only|--be-only)
+      DEPLOY_BACKEND=true
+      TARGETED=true
+      shift
+      ;;
+    --ui-only)
+      DEPLOY_UI=true
+      TARGETED=true
+      shift
+      ;;
+    local|--local)
+      DEPLOY_MODE="local"
+      shift
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      echo "Usage: $0 [options]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# If no targeting flags were specified, deploy both backend and UI by default
+if [ "$TARGETED" = "false" ]; then
+  DEPLOY_BACKEND=true
+  DEPLOY_UI=true
+fi
+
 echo
 echo "================================================================================"
 echo "  Scene Machine backend deploy — running pre-flight checks first..."
@@ -193,12 +235,17 @@ if [ "$CURRENT_GCLOUD_PROJECT" != "$PROJECT" ]; then
   echo "    to '$PROJECT' before deploying."
 fi
 echo "════════════════════════════════════════════════════════════════════════"
-if [ ! -t 0 ]; then
-  echo "ERROR: stdin is not a TTY — cannot confirm. Re-run interactively." >&2
-  exit 1
+if [ "$AUTO_CONFIRM" = "true" ]; then
+  echo "Auto-confirming deployment to target project: $PROJECT"
+  confirm="y"
+else
+  if [ ! -t 0 ]; then
+    echo "ERROR: stdin is not a TTY. Run interactively or pass --yes / -y." >&2
+    exit 1
+  fi
+  read -r -p "Proceed and deploy to '$PROJECT'? (y/N) " confirm
+  confirm=$(echo "$confirm" | tr '[:upper:]' '[:lower:]')
 fi
-read -r -p "Proceed and deploy to '$PROJECT'? (y/N) " confirm
-confirm=$(echo "$confirm" | tr '[:upper:]' '[:lower:]')
 if [ "$confirm" != "y" ] && [ "$confirm" != "yes" ]; then
   echo "Aborted. To align gcloud with config.txt:" >&2
   echo "  gcloud config set project $PROJECT" >&2
@@ -218,6 +265,11 @@ echo
 echo "[>] Setting ADC quota project to $PROJECT"
 gcloud auth application-default set-quota-project $PROJECT > /dev/null
 
+if [ "$DEPLOY_BACKEND" = "true" ]; then
+  echo 
+  echo "════════════════════════════════════════════════════════════════════════"
+  echo "  Starting Scene Machine backend deployment (estimated runtime ≈15 minutes)..."
+  echo "════════════════════════════════════════════════════════════════════════"
 
 # Enable services
 # Note: compute.googleapis.com is enabled here so the default Compute Engine
@@ -500,6 +552,9 @@ echo
 echo "════════════════════════════════════════════════════════════════════════"
 echo "  ✓  Scene Machine backend deployment complete."
 echo "════════════════════════════════════════════════════════════════════════"
+fi
+
+if [ "$DEPLOY_UI" = "true" ]; then
 echo
 echo "  Next: ./deploy-ui.sh deploys the Angular UI to App Engine."
 echo
@@ -542,5 +597,6 @@ if [ "$answer" = "y" ] || [ "$answer" = "yes" ]; then
 else
   echo "To deploy the UI later, run ./deploy-ui.sh. Deployment guide:"
   echo "  https://github.com/google-marketing-solutions/scene-machine#deployment"
+fi
 fi
 
