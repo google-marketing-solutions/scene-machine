@@ -156,9 +156,13 @@ echo "==========================================================================
 echo "[>] Checking required tools..."
 require_tool gcloud   "Install: https://cloud.google.com/sdk/docs/install"
 require_tool firebase "Install: npm i -g firebase-tools"
-require_tool node     "Install Node.js ≥ v22: https://nodejs.org/en/download"
-require_tool npm      "Install Node.js (includes npm): https://nodejs.org/en/download"
 require_tool envsubst "Install gettext (macOS: 'brew install gettext'; Debian/Ubuntu: 'apt-get install gettext')"
+
+if [ "$DEPLOY_UI" = "true" ]; then
+  require_tool node     "Install Node.js ≥ v22: https://nodejs.org/en/download"
+  require_tool npm      "Install Node.js (includes npm): https://nodejs.org/en/download"
+fi
+
 if [ $MISSING_TOOLS -gt 0 ]; then
   echo "Please install the missing tools above, then re-run $0."
   exit 1
@@ -169,7 +173,7 @@ if [ -z "$ACTIVE_ACCOUNT" ]; then
   echo "Run: gcloud auth login && gcloud auth application-default login" >&2
   exit 1
 fi
-echo "✓ All required tools found (gcloud, firebase, node, npm, envsubst)."
+echo "✓ All required tools found."
 echo "✓ gcloud authenticated as: $ACTIVE_ACCOUNT"
 
 # --- Check config.txt -------------------------------------------------------
