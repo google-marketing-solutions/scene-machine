@@ -266,6 +266,7 @@ echo "════════════════════════�
 echo "[>] Setting active project to $PROJECT"
 gcloud config set project $PROJECT > /dev/null
 echo
+echo "[>] Setting ADC quota project to $PROJECT"
 gcloud auth application-default set-quota-project $PROJECT > /dev/null || echo "  WARNING: Failed to set ADC quota project. This is usually non-fatal. Continuing..."
 
 # Initialize enabled services cache
@@ -603,50 +604,254 @@ echo "════════════════════════�
 echo "  ✓  Scene Machine backend deployment complete."
 echo "════════════════════════════════════════════════════════════════════════"
 fi
+echo
 
 if [ "$DEPLOY_UI" = "true" ]; then
-echo
-echo "  Next: ./deploy-ui.sh deploys the Angular UI to App Engine."
-echo
-echo "  Before that, 3 manual console steps are required. deploy-ui.sh polls"
-echo "  every 15s (or prompts you) and picks up automatically when you complete"
-echo "  them, so you can launch it now and finish the manual steps in parallel."
-echo
-echo "    1. Configure OAuth consent screen"
-echo "       https://console.cloud.google.com/auth/branding?project=${PROJECT}"
-echo "       First time on this project: click 'Get started' and walk through"
-echo "       the setup dialog. User Type is set under 'Audience' — pick"
-echo "       'Internal' if you have a Workspace org; otherwise 'External' and"
-echo "       add yourself as a test user."
-echo
-echo "    2. Enable Google as a Firebase sign-in provider"
-echo "       https://console.firebase.google.com/project/${PROJECT}/authentication/providers"
-echo "       If the providers list isn't visible yet, click 'Get started' on"
-echo "       the Authentication page first to reach it. Then: 'Add new"
-echo "       provider' → 'Google' → enable → save."
-echo
-echo "    3. Set up Firebase Storage — TWO sequential actions on this page:"
-echo "       https://console.firebase.google.com/project/${PROJECT}/storage"
-echo "       (a) Click 'Get started' and walk through the wizard. This creates"
-echo "           the project's default <project>.firebasestorage.app bucket"
-echo "           (separate from ${GCS_BUCKET}). Required by 'firebase deploy"
-echo "           --only storage' or it errors with 'Firebase Storage has not"
-echo "           been set up on project'."
-echo "       (b) On the same page, AFTER (a) finishes (the bucket dropdown"
-echo "           only appears once a bucket exists), click the dropdown →"
-echo "           '+ Add bucket' → 'Import existing Google Cloud Storage"
-echo "           buckets' → select ${GCS_BUCKET} → confirm. Registers your"
-echo "           project bucket so deploy-ui.sh can target it."
-echo
-echo "════════════════════════════════════════════════════════════════════════"
-echo
-read -r -p "Run ./deploy-ui.sh now? (y/N) " answer
-answer=$(echo "$answer" | tr '[:upper:]' '[:lower:]')
-if [ "$answer" = "y" ] || [ "$answer" = "yes" ]; then
-  ./deploy-ui.sh
-else
-  echo "To deploy the UI later, run ./deploy-ui.sh. Deployment guide:"
-  echo "  https://github.com/google-marketing-solutions/scene-machine#deployment"
-fi
+  echo
+  echo "════════════════════════════════════════════════════════════════════════"
+  echo "  Starting Scene Machine UI deployment..."
+  echo "════════════════════════════════════════════════════════════════════════"
+
+  # If backend was not deployed in this run, fetch parameters from GCP
+  if [ "$DEPLOY_BACKEND" = "false" ]; then
+    echo "[>] Resolving backend configuration parameters from GCP..."
+    API_UID=$(gcloud services api-keys list --filter="displayName='Scene Machine API Key'" --format="value(uid)" --project=$PROJECT)
+    if [ -z "$API_UID" ]; then
+      echo "ERROR: Could not find Scene Machine API Key in project $PROJECT. Is the backend deployed?" >&2
+      exit 1
+    fi
+    export API_KEY=$(gcloud services api-keys get-key-string $API_UID --project=$PROJECT --format="value(keyString)")
+    
+    if ! export API_GATEWAY_HOST=$(gcloud api-gateway gateways describe scenemachine-api-gateway --project=$PROJECT --location=$API_GATEWAY_REGION --format="value(defaultHostname)" 2>/dev/null); then
+      echo "ERROR: Could not retrieve API Gateway host. Is the backend API Gateway deployed?" >&2
+      exit 1
+    fi
+  fi
+  
+  # Resolve Firebase configs
+  FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
+  if [ -z "$FIREBASE_API_KEY" ]; then
+    echo "ERROR: Failed to extract Firebase API key from 'firebase apps:sdkconfig WEB'. Check that the Firebase Web app exists." >&2
+    exit 1
+  fi
+  export FIREBASE_API_KEY
+  
+  FIREBASE_AUTH_DOMAIN=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"authDomain":' | awk -F '"' '{print $4}')
+  if [ -z "$FIREBASE_AUTH_DOMAIN" ]; then
+     echo "ERROR: Failed to extract Firebase auth domain. Check that the Firebase Web app exists." >&2
+     exit 1
+  fi
+  export FIREBASE_AUTH_DOMAIN
+
+  if [ -n "${CUSTOM_DOMAIN:-}" ]; then
+    export UI_HOST="${CUSTOM_DOMAIN}"
+    echo "✓ Using custom domain: ${UI_HOST}"
+  else
+    export UI_HOST=$(gcloud app describe --project=$PROJECT --format="value(defaultHostname)")
+  fi
+
+  generate_config
+  envsubst < ./ui/src/env.template.txt > ./ui/src/env.ts
+
+  if is_service_enabled "identitytoolkit.googleapis.com"; then
+    echo "Identity Toolkit API is already enabled."
+  else
+    echo "Enabling Identity Toolkit API (needed for Auth config)..."
+    gcloud services enable identitytoolkit.googleapis.com --project=$PROJECT
+    ENABLED_APIS=$(gcloud services list --enabled --project="$PROJECT" --format="value(config.name)" 2>/dev/null || true)
+  fi
+
+  # --- Bucket linked to Firebase Storage: poll until satisfied ----------------
+  echo
+  echo "[>] Checking if bucket ${GCS_BUCKET} is linked to Firebase Storage..."
+  BUCKET_WAIT_ATTEMPTS=0
+  BUCKET_WAIT_MAX=120   # 120 × 15s = 30 min total
+  while true; do
+    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+      -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+      -H "x-goog-user-project: ${PROJECT}" \
+      "https://firebasestorage.googleapis.com/v1beta/projects/${PROJECT}/buckets/${GCS_BUCKET}")
+    if [ "$HTTP_STATUS" = "200" ]; then
+      echo "✓ Bucket ${GCS_BUCKET} is linked to Firebase Storage."
+      break
+    fi
+    BUCKET_WAIT_ATTEMPTS=$((BUCKET_WAIT_ATTEMPTS + 1))
+    if [ $BUCKET_WAIT_ATTEMPTS -ge $BUCKET_WAIT_MAX ]; then
+      echo "ERROR: bucket ${GCS_BUCKET} still not linked after 30 minutes — aborting." >&2
+      exit 1
+    fi
+    echo "============================================================"
+    echo "WAITING: bucket ${GCS_BUCKET} is not yet linked to Firebase Storage."
+    echo "Two sequential steps in the Firebase Console are required:"
+    echo "  Open: https://console.firebase.google.com/project/${PROJECT}/storage"
+    echo
+    echo "  Step 1 — Initialize Firebase Storage (only needed once per project):"
+    echo "    Click 'Get started' and walk through the wizard."
+    echo "    This creates a default <project>.firebasestorage.app bucket."
+    echo "    Production mode is fine."
+    echo
+    echo "  Step 2 — Register ${GCS_BUCKET} with Firebase Storage:"
+    echo "    On the same page (after Step 1 — the bucket dropdown only"
+    echo "    appears once a bucket exists), click the dropdown →"
+    echo "    '+ Add bucket' → 'Import existing Google Cloud Storage"
+    echo "    buckets' → select ${GCS_BUCKET} → confirm."
+    echo
+    echo "Re-checking in 15 seconds (attempt ${BUCKET_WAIT_ATTEMPTS}/${BUCKET_WAIT_MAX}; Ctrl-C to abort)..."
+    echo "============================================================"
+    sleep 15
+  done
+
+  # Deploy rules for UI Firestore DB and Storage
+  export CURRENT_FIRESTORE_DB=$FIRESTORE_DB_UI
+  envsubst < ./firebase/firebase.template.json > ./firebase/firebase.json
+  envsubst < ./firebase/.firebaserc.template > ./firebase/.firebaserc
+  firebase target:apply --config firebase/firebase.json storage bucket_target $GCS_BUCKET --project $PROJECT
+
+  echo "Deploying rules for UI Firestore DB..."
+  firebase deploy --config firebase/firebase.json --only firestore --project $PROJECT
+
+  echo "Deploying Storage rules..."
+  firebase deploy --config firebase/firebase.json --only storage --project $PROJECT
+
+  rm firebase/firebase.json
+  rm firebase/.firebaserc
+
+  echo
+  echo "[>] Adding default Scene Machine configurations to Firestore..."
+  PROJECT=$PROJECT UI_HOST=$UI_HOST ./scripts/setup_firestore.sh
+
+  echo
+  echo "[>] Granting Storage Admin role to App Engine default service account..."
+  add_iam_binding $PROJECT --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" --role="roles/storage.admin" --condition=None
+
+  echo "[>] Granting Artifact Registry Writer role to App Engine default service account..."
+  add_iam_binding $PROJECT --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" --role="roles/artifactregistry.writer" --condition=None
+
+  # --- OAuth consent screen: manual gate ---------------------------------------
+  echo
+  echo "[>] Checking if OAuth consent screen is already configured..."
+  IDP_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+    -H "x-goog-user-project: ${PROJECT}" \
+    "https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT}/defaultSupportedIdpConfigs/google.com")
+  if [ "$IDP_HTTP_STATUS" = "200" ]; then
+    echo "✓ OAuth consent screen already configured (Google IdP record exists)."
+  else
+    echo "============================================================"
+    echo "MANUAL STEP REQUIRED: OAuth consent screen must be configured."
+    echo "  https://console.cloud.google.com/auth/branding?project=${PROJECT}"
+    echo
+    echo "First time on this project: click 'Get started' and walk through"
+    echo "the setup dialog. User Type is set under 'Audience' — pick"
+    echo "'Internal' if you have a Workspace org; otherwise 'External' and"
+    echo "add yourself as a test user."
+    echo
+    echo "If you've configured it before and don't see 'Get started', the"
+    echo "screen is already initialized — just confirm below to proceed."
+    echo "============================================================"
+    if [ "$AUTO_CONFIRM" = "true" ]; then
+      echo "WARNING: OAuth consent screen might not be configured. Non-interactive bypass: proceeding..."
+    else
+      if [ ! -t 0 ]; then
+        echo "ERROR: stdin is not a TTY — cannot prompt for OAuth-consent confirmation." >&2
+        echo "Configure the consent screen at the URL above, then re-run $0 interactively." >&2
+        exit 1
+      fi
+      read -r -p "Press Enter once the OAuth consent screen is configured (Ctrl-C to abort)... "
+    fi
+  fi
+
+  # --- Google sign-in provider enabled: poll until satisfied ------------------
+  echo
+  echo "[>] Checking if Google sign-in provider is enabled..."
+  SIGNIN_WAIT_ATTEMPTS=0
+  SIGNIN_WAIT_MAX=120   # 120 × 15s = 30 min total
+  while true; do
+    CONFIG=$(curl -s -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+      -H "x-goog-user-project: ${PROJECT}" \
+      "https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT}/defaultSupportedIdpConfigs/google.com")
+    if [[ "$CONFIG" == *'"enabled": true'* ]]; then
+      echo "✓ Google sign-in provider is enabled."
+      break
+    fi
+    SIGNIN_WAIT_ATTEMPTS=$((SIGNIN_WAIT_ATTEMPTS + 1))
+    if [ $SIGNIN_WAIT_ATTEMPTS -ge $SIGNIN_WAIT_MAX ]; then
+      echo "ERROR: Google sign-in provider still not enabled after 30 minutes — aborting." >&2
+      echo "Enable it in the Firebase Console, then re-run $0:" >&2
+      echo "  https://console.firebase.google.com/project/${PROJECT}/authentication/providers" >&2
+      exit 1
+    fi
+    echo "============================================================"
+    echo "WAITING: Google sign-in provider is not yet enabled."
+    echo "Please enable it in the Firebase Console (script will keep checking):"
+    echo "  https://console.firebase.google.com/project/${PROJECT}/authentication/providers"
+    echo "  If the providers list isn't visible yet, click 'Get started' on the"
+    echo "  Authentication page first to reach it."
+    echo "  Then: 'Add new provider' → choose 'Google' → enable → save."
+    echo "Re-checking in 15 seconds (attempt ${SIGNIN_WAIT_ATTEMPTS}/${SIGNIN_WAIT_MAX}; Ctrl-C to abort)..."
+    echo "============================================================"
+    sleep 15
+  done
+
+  # For a local development environment, cloud deployment is not needed
+  if [[ "${DEPLOY_MODE}" != "local" ]]; then
+    export NG_CLI_ANALYTICS=ci
+    echo
+    echo "[>] Deploying UI to App Engine (Estimated time: ≈5 minutes)..."
+    (
+      cd ui \
+        && npm ci --legacy-peer-deps \
+        && npx ng build --configuration production
+    ) \
+      && (
+        cd ui \
+          && gcloud app deploy --quiet --project "${PROJECT}"
+      )
+  fi
+
+  echo
+  echo "[>] Configuring Firebase authorized domains..."
+  curl -X PATCH "https://identitytoolkit.googleapis.com/v2/projects/${PROJECT}/config?updateMask=authorizedDomains" \
+    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+    -H "Content-Type: application/json" \
+    -H "x-goog-user-project: ${PROJECT}" \
+    -o /dev/null \
+    -d "{\"authorizedDomains\": [\"localhost\", \"$(gcloud app describe --format='value(defaultHostname)')\"]}"
+
+  # --- Final summary: success banner + remaining manual steps ----------------
+  if [[ "${DEPLOY_MODE}" == "local" ]]; then
+    APP_URL="http://localhost:4200/"
+  else
+    APP_URL="https://$(gcloud app describe --project=$PROJECT --format='value(defaultHostname)')"
+  fi
+  IAP_ENABLED=$(gcloud app describe --project=$PROJECT --format="value(iap.enabled)" 2>/dev/null || echo "")
+
+  echo
+  echo "════════════════════════════════════════════════════════════════════════"
+  echo "  ✓  Scene Machine UI deployment complete."
+  echo "════════════════════════════════════════════════════════════════════════"
+  echo
+  echo "  ──────────────────────────────────────────────────────────────────"
+  echo "   OPEN YOUR APP:"
+  echo
+  echo "       ►  ${APP_URL}"
+  echo
+  echo "  ──────────────────────────────────────────────────────────────────"
+  echo
+  echo "  Highly recommended manual steps before users can sign in."
+  echo "  Skipping either step will leave the app publicly inaccessible or"
+  echo "  unprotected — do not deploy to real users without completing both."
+  echo
+  echo "    1. Grant the 'Scene Machine User' role to each user (highly"
+  echo "       recommended — without it, signed-in users hit a 403)."
+  echo "       Fastest via command-line:"
+  echo "       gcloud projects add-iam-policy-binding ${PROJECT} \\"
+  echo "         --member=\"user:YOUR_EMAIL@example.com\" \\"
+  echo "         --role=\"projects/${PROJECT}/roles/SceneMachineUser\""
+  echo
+  echo "       Or via the IAM console:"
+  echo "       https://console.cloud.google.com/iam-admin/iam?project=${PROJECT}"
+  echo "════════════════════════════════════════════════════════════════════════"
+  echo
 fi
 
