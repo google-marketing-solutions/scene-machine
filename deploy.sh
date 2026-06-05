@@ -262,8 +262,20 @@ echo "════════════════════════�
 echo "[>] Setting active project to $PROJECT"
 gcloud config set project $PROJECT > /dev/null
 echo
-echo "[>] Setting ADC quota project to $PROJECT"
-gcloud auth application-default set-quota-project $PROJECT > /dev/null
+gcloud auth application-default set-quota-project $PROJECT > /dev/null || echo "  WARNING: Failed to set ADC quota project. This is usually non-fatal. Continuing..."
+
+# Initialize enabled services cache
+echo "[>] Fetching list of enabled Google Cloud APIs..."
+ENABLED_APIS=$(gcloud services list --enabled --project="$PROJECT" --format="value(config.name)" 2>/dev/null || true)
+
+is_service_enabled() {
+  local service="$1"
+  if [ -n "$ENABLED_APIS" ]; then
+    echo "$ENABLED_APIS" | grep -q "^${service}$"
+  else
+    return 1
+  fi
+}
 
 if [ "$DEPLOY_BACKEND" = "true" ]; then
   echo 
@@ -276,8 +288,34 @@ if [ "$DEPLOY_BACKEND" = "true" ]; then
 # service account (used for role bindings below) is guaranteed to exist. Most
 # projects already have it enabled transitively; this handles fresh projects.
 echo
-echo "[>] Enabling required Google Cloud APIs (full list in README.md 'Google Cloud APIs Used'; may take 30-60s)"
-gcloud services enable aiplatform.googleapis.com apigateway.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com cloudtasks.googleapis.com compute.googleapis.com firestore.googleapis.com run.googleapis.com servicecontrol.googleapis.com iap.googleapis.com --project=$PROJECT > /dev/null
+echo "[>] Checking required Google Cloud APIs..."
+REQUIRED_APIS=(
+  "aiplatform.googleapis.com"
+  "apigateway.googleapis.com"
+  "artifactregistry.googleapis.com"
+  "cloudbuild.googleapis.com"
+  "cloudtasks.googleapis.com"
+  "compute.googleapis.com"
+  "firestore.googleapis.com"
+  "run.googleapis.com"
+  "servicecontrol.googleapis.com"
+  "iap.googleapis.com"
+)
+APIS_TO_ENABLE=()
+for api in "${REQUIRED_APIS[@]}"; do
+  if ! is_service_enabled "$api"; then
+    APIS_TO_ENABLE+=("$api")
+  fi
+done
+
+if [ ${#APIS_TO_ENABLE[@]} -gt 0 ]; then
+  echo "Enabling missing APIs: ${APIS_TO_ENABLE[*]} (may take 30-60s)..."
+  gcloud services enable "${APIS_TO_ENABLE[@]}" --project="$PROJECT" > /dev/null
+  # Refresh cache
+  ENABLED_APIS=$(gcloud services list --enabled --project="$PROJECT" --format="value(config.name)" 2>/dev/null || true)
+else
+  echo "✓ All required Google Cloud APIs are already enabled."
+fi
 
 # Warm up Vertex AI service agent. On a fresh project, the agent
 # (service-<PROJECT_NUMBER>@gcp-sa-aiplatform.iam.gserviceaccount.com) is
@@ -320,12 +358,14 @@ fi
 
 echo
 echo "[>] Setting up Firebase project and Web App..."
-if gcloud services list --enabled --project=$PROJECT --filter="name:firebase.googleapis.com" | grep -q "firebase.googleapis.com"; then
+if is_service_enabled "firebase.googleapis.com"; then
   echo "Firebase is already enabled for the project."
 else
   echo "Enabling Firebase..."
   gcloud services enable firebase.googleapis.com --project=$PROJECT
   firebase projects:addfirebase $PROJECT
+  # Refresh cache
+  ENABLED_APIS=$(gcloud services list --enabled --project="$PROJECT" --format="value(config.name)" 2>/dev/null || true)
 fi
 
 if firebase apps:list --project $PROJECT | grep "$PROJECT" | grep -q "WEB"; then
@@ -510,7 +550,13 @@ else
   echo "API Gateway already exists. Skipping."
 fi
 
-gcloud services enable $API_MANAGED_SERVICE_HOST --project=$PROJECT
+if is_service_enabled "$API_MANAGED_SERVICE_HOST"; then
+  echo "API Managed Service Host $API_MANAGED_SERVICE_HOST is already enabled."
+else
+  echo "Enabling API Managed Service Host..."
+  gcloud services enable $API_MANAGED_SERVICE_HOST --project=$PROJECT
+  ENABLED_APIS=$(gcloud services list --enabled --project="$PROJECT" --format="value(config.name)" 2>/dev/null || true)
+fi
 
 #TODO: add --allowed-referrers
 API_UID=$(gcloud services api-keys list --filter="displayName='Scene Machine API Key'" --format="value(uid)" --project=$PROJECT)
