@@ -173,8 +173,14 @@ if [ -z "$ACTIVE_ACCOUNT" ]; then
   echo "Run: gcloud auth login && gcloud auth application-default login" >&2
   exit 1
 fi
+if ! firebase login:list &>/dev/null; then
+  echo "ERROR: firebase has no active authenticated session." >&2
+  echo "Run: firebase login" >&2
+  exit 1
+fi
 echo "✓ All required tools found."
 echo "✓ gcloud authenticated as: $ACTIVE_ACCOUNT"
+echo "✓ firebase authenticated."
 
 # --- Check config.txt -------------------------------------------------------
 echo
