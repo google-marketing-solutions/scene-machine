@@ -728,7 +728,23 @@ if [ "$DEPLOY_UI" = "true" ]; then
 
   echo
   echo "[>] Adding default Scene Machine configurations to Firestore..."
-  PROJECT=$PROJECT UI_HOST=$UI_HOST ./scripts/setup_firestore.sh
+  curl -X PATCH \
+  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/global" \
+    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+    -H "Content-Type: application/json" \
+    -o /dev/null \
+    -d @<(envsubst < ./firestore_config_ui.template.json)
+
+  for template in creative_templates/*.json; do
+    template_name=$(basename "$template" .json)
+
+    curl -X PATCH \
+    "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/creativeTemplates/${template_name}" \
+      -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+      -H "Content-Type: application/json" \
+      -o /dev/null \
+      -d @"$template"
+  done
 
   echo
   echo "[>] Granting Storage Admin role to App Engine default service account..."
