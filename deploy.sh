@@ -755,39 +755,37 @@ if [ "$DEPLOY_UI" = "true" ]; then
   echo "[>] Granting Artifact Registry Writer role to App Engine default service account..."
   add_iam_binding $PROJECT --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" --role="roles/artifactregistry.writer" --condition=None
 
-  # --- OAuth consent screen: manual gate ---------------------------------------
+  # --- OAuth consent screen: poll until satisfied ----------------------------
   echo
-  echo "[>] Checking if OAuth consent screen is already configured..."
-  IDP_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-    -H "x-goog-user-project: ${PROJECT}" \
-    "https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT}/defaultSupportedIdpConfigs/google.com")
-  if [ "$IDP_HTTP_STATUS" = "200" ]; then
-    echo "✓ OAuth consent screen already configured (Google IdP record exists)."
-  else
+  echo "[>] Checking if OAuth consent screen is configured..."
+  OAUTH_WAIT_ATTEMPTS=0
+  OAUTH_WAIT_MAX=120   # 120 × 15s = 30 min total
+  while true; do
+    IDP_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+      -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+      -H "x-goog-user-project: ${PROJECT}" \
+      "https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT}/defaultSupportedIdpConfigs/google.com")
+    if [ "$IDP_HTTP_STATUS" = "200" ]; then
+      echo "✓ OAuth consent screen is configured."
+      break
+    fi
+    OAUTH_WAIT_ATTEMPTS=$((OAUTH_WAIT_ATTEMPTS + 1))
+    if [ $OAUTH_WAIT_ATTEMPTS -ge $OAUTH_WAIT_MAX ]; then
+      echo "ERROR: OAuth consent screen still not configured after 30 minutes — aborting." >&2
+      exit 1
+    fi
     echo "============================================================"
-    echo "MANUAL STEP REQUIRED: OAuth consent screen must be configured."
+    echo "WAITING: OAuth consent screen is not yet configured."
+    echo "Please configure it in the Cloud Console (script will keep checking):"
     echo "  https://console.cloud.google.com/auth/branding?project=${PROJECT}"
     echo
-    echo "First time on this project: click 'Get started' and walk through"
-    echo "the setup dialog. User Type is set under 'Audience' — pick"
-    echo "'Internal' if you have a Workspace org; otherwise 'External' and"
-    echo "add yourself as a test user."
-    echo
-    echo "If you've configured it before and don't see 'Get started', the"
-    echo "screen is already initialized — just confirm below to proceed."
+    echo "  First time on this project: click 'Get started' and complete the setup."
+    echo "  For User Type: pick 'Internal' if Workspace org; otherwise 'External'"
+    echo "  and add yourself as a Test User."
+    echo "Re-checking in 15 seconds (attempt ${OAUTH_WAIT_ATTEMPTS}/${OAUTH_WAIT_MAX}; Ctrl-C to abort)..."
     echo "============================================================"
-    if [ "$AUTO_CONFIRM" = "true" ]; then
-      echo "WARNING: OAuth consent screen might not be configured. Non-interactive bypass: proceeding..."
-    else
-      if [ ! -t 0 ]; then
-        echo "ERROR: stdin is not a TTY — cannot prompt for OAuth-consent confirmation." >&2
-        echo "Configure the consent screen at the URL above, then re-run $0 interactively." >&2
-        exit 1
-      fi
-      read -r -p "Press Enter once the OAuth consent screen is configured (Ctrl-C to abort)... "
-    fi
-  fi
+    sleep 15
+  done
 
   # --- Google sign-in provider enabled: poll until satisfied ------------------
   echo
@@ -846,13 +844,41 @@ if [ "$DEPLOY_UI" = "true" ]; then
     -o /dev/null \
     -d "{\"authorizedDomains\": [\"localhost\", \"$(gcloud app describe --format='value(defaultHostname)')\"]}"
 
+  # --- Identity-Aware Proxy (IAP) enabled: poll until satisfied ----------------
+  echo
+  echo "[>] Checking if Identity-Aware Proxy (IAP) is enabled..."
+  IAP_WAIT_ATTEMPTS=0
+  IAP_WAIT_MAX=120   # 120 × 15s = 30 min total
+  while true; do
+    IAP_ENABLED=$(gcloud app describe --project=$PROJECT --format="value(iap.enabled)" 2>/dev/null || echo "false")
+    if [[ "$IAP_ENABLED" =~ [tT]rue ]]; then
+      echo "✓ Identity-Aware Proxy (IAP) is enabled."
+      break
+    fi
+    IAP_WAIT_ATTEMPTS=$((IAP_WAIT_ATTEMPTS + 1))
+    if [ $IAP_WAIT_ATTEMPTS -ge $IAP_WAIT_MAX ]; then
+      echo "ERROR: Identity-Aware Proxy (IAP) still not enabled after 30 minutes — aborting." >&2
+      exit 1
+    fi
+    echo "============================================================"
+    echo "WAITING: Identity-Aware Proxy (IAP) is not yet enabled."
+    echo "Please enable IAP in the Cloud Console (script will keep checking):"
+    echo "  https://console.cloud.google.com/security/iap?project=${PROJECT}&serviceId=default"
+    echo
+    echo "  1. Turn IAP ON for 'App Engine app'."
+    echo "  2. Click the three-dot menu (⋮) on the far right of the row → 'Settings'"
+    echo "     → 'Custom OAuth' → 'Auto-generate credentials'."
+    echo "Re-checking in 15 seconds (attempt ${IAP_WAIT_ATTEMPTS}/${IAP_WAIT_MAX}; Ctrl-C to abort)..."
+    echo "============================================================"
+    sleep 15
+  done
+
   # --- Final summary: success banner + remaining manual steps ----------------
   if [[ "${DEPLOY_MODE}" == "local" ]]; then
     APP_URL="http://localhost:4200/"
   else
     APP_URL="https://$(gcloud app describe --project=$PROJECT --format='value(defaultHostname)')"
   fi
-  IAP_ENABLED=$(gcloud app describe --project=$PROJECT --format="value(iap.enabled)" 2>/dev/null || echo "")
 
   echo
   echo "════════════════════════════════════════════════════════════════════════"
@@ -866,19 +892,17 @@ if [ "$DEPLOY_UI" = "true" ]; then
   echo
   echo "  ──────────────────────────────────────────────────────────────────"
   echo
-  echo "  Highly recommended manual steps before users can sign in."
-  echo "  Skipping either step will leave the app publicly inaccessible or"
-  echo "  unprotected — do not deploy to real users without completing both."
+  echo "  Remaining manual step before users can sign in:"
   echo
-  echo "    1. Grant the 'Scene Machine User' role to each user (highly"
-  echo "       recommended — without it, signed-in users hit a 403)."
-  echo "       Fastest via command-line:"
-  echo "       gcloud projects add-iam-policy-binding ${PROJECT} \\"
-  echo "         --member=\"user:YOUR_EMAIL@example.com\" \\"
-  echo "         --role=\"projects/${PROJECT}/roles/SceneMachineUser\""
+  echo "    Grant the 'Scene Machine User' role to each user (without it,"
+  echo "    signed-in users hit a 403 error)."
+  echo "    Fastest via command-line:"
+  echo "    gcloud projects add-iam-policy-binding ${PROJECT} \\"
+  echo "      --member=\"user:YOUR_EMAIL@example.com\" \\"
+  echo "      --role=\"projects/${PROJECT}/roles/SceneMachineUser\""
   echo
-  echo "       Or via the IAM console:"
-  echo "       https://console.cloud.google.com/iam-admin/iam?project=${PROJECT}"
+  echo "    Or via the IAM console:"
+  echo "    https://console.cloud.google.com/iam-admin/iam?project=${PROJECT}"
   echo "════════════════════════════════════════════════════════════════════════"
   echo
 fi
