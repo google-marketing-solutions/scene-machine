@@ -262,16 +262,16 @@ End users of the deployed app only need the custom
 
 3.  **Execute Deployment**
 
--   Run the main deployment script:
+    The Scene Machine deployment consists of the backend services (databases, Cloud Run, API Gateway, queues) and the frontend UI application (Angular app on App Engine). By default, both components are built and deployed together using a single unified script:
 
     ```bash
-       ./deploy.sh
+    ./deploy.sh
     ```
 
-    -   *Note: The script outputs estimates regarding run times.*
+    If you want to deploy only one of the components, you can pass the respective targeting flag:
 
-    -   *Note: You might be prompted to run the UI deployment script immediately
-        at the end.*
+    *   **Deploy Backend Only:** `./deploy.sh --backend-only` (or `--be-only`)
+    *   **Deploy UI Only:** `./deploy.sh --ui-only`
 
 > [!TIP] 
 > **Troubleshooting Firebase deployment failures:** If `./deploy.sh`
@@ -329,16 +329,39 @@ End users of the deployed app only need the custom
 
 7.  **Deploy UI**
 
-    -   Run `./deploy-ui.sh` (if you skipped it during backend deployment).
+    -   If you did not deploy both backend and UI together, run:
+        ```bash
+        ./deploy.sh --ui-only
+        ```
     -   If requested, perform any required manual steps indicated by the script
         (e.g. linking buckets or configuring OAuth).
 
 > [!TIP] 
-> Steps 4–6 can be completed **in parallel** with `./deploy-ui.sh`
+> Steps 4–6 can be completed **in parallel** with `./deploy.sh --ui-only`
 > running. The script polls every 15s (or prompts you for the OAuth consent
 > screen) and continues automatically once each manual action is done. After
-> `./deploy.sh` finishes you can launch `./deploy-ui.sh` immediately and
+> `./deploy.sh` finishes you can launch `./deploy.sh --ui-only` immediately and
 > complete steps 4–6 in browser tabs while it waits.
+
+#### Target Options and Non-Interactive (Agent) Deployment
+
+By default, `./deploy.sh` will deploy both the backend and UI. You can use targeting flags to deploy them individually:
+
+* **Deploy Backend Only**: `./deploy.sh --backend-only` (or `--be-only`)
+* **Deploy UI Only**: `./deploy.sh --ui-only`
+* **Local Development Build**: `./deploy.sh --ui-only --local` (or `./deploy.sh --ui-only local`) to build the Angular application files locally without triggering an App Engine deployment.
+
+To run the script in a non-interactive/headless environment (such as an AI agent like Jetski or Claude), use the `-y` / `--yes` / `--non-interactive` flag to auto-confirm target configuration prompts:
+
+```bash
+./deploy.sh --yes
+# Or for a targeted agent run:
+./deploy.sh --yes --backend-only
+```
+
+> [!IMPORTANT]
+> **Manual Actions Required in Headless Mode**: Even when run by an automated agent or in non-interactive mode, the user must still complete the manual setup actions on the Google Cloud and Firebase consoles (e.g. configuring the OAuth consent screen, enabling the Google sign-in provider, and linking the bucket to Firebase Storage). When these checks are hit, the script will output the setup URLs and enter a 15-second polling loop, allowing the agent/process to wait until you complete the configuration in your browser.
+
 
 8.  **Set up Identity-Aware Proxy**:
     -   In the
