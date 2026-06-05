@@ -369,14 +369,18 @@ fi
 
 echo
 echo "[>] Setting up Firebase project and Web App..."
-if is_service_enabled "firebase.googleapis.com"; then
-  echo "Firebase is already enabled for the project."
-else
-  echo "Enabling Firebase..."
+if ! is_service_enabled "firebase.googleapis.com"; then
+  echo "Enabling Firebase Management API..."
   gcloud services enable firebase.googleapis.com --project=$PROJECT
-  firebase projects:addfirebase $PROJECT
   # Refresh cache
   ENABLED_APIS=$(gcloud services list --enabled --project="$PROJECT" --format="value(config.name)" 2>/dev/null || true)
+fi
+
+if firebase projects:list 2>/dev/null | grep -q "$PROJECT"; then
+  echo "Firebase is already linked/enabled for project $PROJECT."
+else
+  echo "Linking Firebase to GCP project $PROJECT..."
+  firebase projects:addfirebase $PROJECT
 fi
 
 if firebase apps:list --project $PROJECT | grep "$PROJECT" | grep -q "WEB"; then
