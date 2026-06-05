@@ -24,7 +24,7 @@
         }
       },
       "parameters": {
-        "gemini_model": "gemini-3.1-flash-lite-preview",
+        "gemini_model": "gemini-3.5-flash",
         "gemini_model_location": "global"
       },
       "dimensionsConsumed": [

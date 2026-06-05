@@ -41,7 +41,7 @@ def generate(
     output_gcs: str = 'gs://',
     enhance_prompt: bool = True,
     allow_persons: bool = True,
-    model: str = 'veo-3.0-generate-preview',
+    model: str = 'veo-3.1-generate-001',
     generate_audio: bool = False,
 ) -> list[str] | None:
   """Generates videos using Veo."""

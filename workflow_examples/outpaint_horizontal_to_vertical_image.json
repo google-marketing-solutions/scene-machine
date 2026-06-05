@@ -19,8 +19,8 @@
       },
       "parameters": {
         "target_ratio": "9:16",
-        "outpainter_model": "gemini-3-pro-image-preview",
-        "outpainter_model_location": "global"
+        "image_model": "gemini-3-pro-image",
+        "image_model_location": "global"
       }
     },
     "sink": {

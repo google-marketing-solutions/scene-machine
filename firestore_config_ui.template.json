@@ -36,11 +36,11 @@
     "veoLocation": {
       "stringValue": "${VEO_REGION}"
     },
-    "outpainterModel": {
-      "stringValue": "${OUTPAINTER_MODEL}"
+    "imageModel": {
+      "stringValue": "${IMAGE_MODEL}"
     },
-    "outpainterLocation": {
-      "stringValue": "${OUTPAINTER_REGION}"
+    "imageLocation": {
+      "stringValue": "${IMAGE_REGION}"
     },
     "generateAudio": {
       "booleanValue": false

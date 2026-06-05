@@ -25,11 +25,13 @@ from common import Params
 from util.gcs_wrapper import GCS
 
 
-TEXT_MODEL = "gemini-2.5-flash"
-
-
 def execute(
-    gcs: GCS, workflow_params: Params, text: NodeInput, target_language: str
+    gcs: GCS,
+    workflow_params: Params,
+    text: NodeInput,
+    target_language: str,
+    gemini_model: str,
+    gemini_model_location: str,
 ) -> NodeOutput:
   """Executes the translation action using Google Gemini.
 
@@ -42,6 +44,8 @@ def execute(
     text: The input node containing the reference to the source file.
     target_language: The language to translate the text into (e.g., 'fr',
       'Spanish', 'Japanese').
+    gemini_model: The Gemini model to use for the translation.
+    gemini_model_location: The location of the model to use.
 
   Returns:
     A NodeOutput dictionary containing the translated file's GCS path
@@ -62,7 +66,8 @@ def execute(
   response = gemini.prompt(
       gcp_project=workflow_params[Key.GCP_PROJECT.value],
       text_prompt=prompt,
-      model=TEXT_MODEL,
+      model=gemini_model,
+      location=gemini_model_location,
   )
 
   if not response:

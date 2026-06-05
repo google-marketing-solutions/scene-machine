@@ -37,7 +37,7 @@ def outpaint_image(
     image_bytes: bytes,
     gcp_project: str,
     gcp_location: str,
-    outpainter_model: str,
+    image_model: str,
     target_ratio: str,
 ) -> Tuple[bytes, str]:
     """Outpaints the given image using Google Gemini Image.
@@ -47,7 +47,7 @@ def outpaint_image(
         image.
       gcp_project: the ID of Google Cloud project to use with Imagen.
       gcp_location: the Google Cloud location to use with the model.
-      outpainter_model: the model to use for outpainting.
+      image_model: the image model to use for outpainting.
       target_ratio: the aspect ratio of the outpainted image. This is a string in
         the form of "width:height" (e.g. "16:9")
 
@@ -83,7 +83,7 @@ def outpaint_image(
     )
 
     outpaint_response = client.models.generate_content(
-        model=outpainter_model, contents=contents, config=generate_config
+        model=image_model, contents=contents, config=generate_config
     )
 
     if not outpaint_response.candidates:

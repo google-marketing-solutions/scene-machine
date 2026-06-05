@@ -84,8 +84,8 @@ export interface StoryboardGenerationWorkflowParameters extends CommonWorkflowPa
   imageDecision: 'none' | 'crop' | 'outpaint';
   geminiLocation: string;
   aspectRatio: AspectRatio;
-  outpainterModel: string;
-  outpainterLocation: string;
+  imageModel: string;
+  imageLocation: string;
 }
 
 /**

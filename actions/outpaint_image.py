@@ -108,8 +108,8 @@ def execute(
     workflow_params: Params,
     image: NodeInput,
     target_ratio: str,
-    outpainter_model: str,
-    outpainter_model_location: str,
+    image_model: str,
+    image_model_location: str,
 ) -> NodeOutput:
   """Executes the action.
 
@@ -122,8 +122,8 @@ def execute(
     image: The relative path of the image to outpaint.
     target_ratio: The aspect ratio of the finished image in the format
       width:height (e.g. 9:16).
-    outpainter_model: The model to use for outpainting.
-    outpainter_model_location: The location of the model to use for
+    image_model: The image model to use for outpainting.
+    image_model_location: The location of the model to use for
       outpainting.
 
 
@@ -156,8 +156,8 @@ def execute(
     image_bytes, mime_type = outpainter.outpaint_image(
         image_bytes,
         workflow_params[Key.GCP_PROJECT.value],
-        outpainter_model_location,
-        outpainter_model,
+        image_model_location,
+        image_model,
         target_ratio,
     )
 
