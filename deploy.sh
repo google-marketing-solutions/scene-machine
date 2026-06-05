@@ -615,6 +615,37 @@ echo
 echo "════════════════════════════════════════════════════════════════════════"
 echo "  ✓  Scene Machine backend deployment complete."
 echo "════════════════════════════════════════════════════════════════════════"
+echo
+if [ "$DEPLOY_UI" = "true" ]; then
+  echo "  Next: UI deployment is starting. If this is a fresh project, the script"
+  echo "  will shortly block and poll on the manual console steps below."
+  echo "  You can complete them now in your browser while the script initializes:"
+else
+  echo "  Next: To deploy the UI later, run './deploy.sh --ui-only'."
+  echo "  Before doing that, the following manual console steps are required:"
+fi
+echo
+echo "    1. Configure OAuth consent screen"
+echo "       https://console.cloud.google.com/auth/branding?project=${PROJECT}"
+echo "       First time on this project: click 'Get started' and walk through"
+echo "       the setup dialog. Set User Type to 'Internal' for @google.com logins."
+echo
+echo "    2. Enable Google as a Firebase sign-in provider"
+echo "       https://console.firebase.google.com/project/${PROJECT}/authentication/providers"
+echo "       If the providers list isn't visible yet, click 'Get started' first."
+echo "       Then: 'Add new provider' → 'Google' → enable → save."
+echo
+echo "    3. Set up Firebase Storage (wizard + GCS bucket import):"
+echo "       https://console.firebase.google.com/project/${PROJECT}/storage"
+echo "       (a) Click 'Get started' and complete the wizard."
+echo "       (b) On the same page, click the bucket dropdown → '+ Add bucket'"
+echo "           → 'Import existing GCS buckets' → select ${GCS_BUCKET} → confirm."
+echo
+echo "    4. Enable Identity-Aware Proxy (IAP) for App Engine"
+echo "       https://console.cloud.google.com/security/iap?project=${PROJECT}&serviceId=default"
+echo "       Turn IAP ON for 'App Engine app', then click the ⋮ (three-dot menu)"
+echo "       → 'Settings' → 'Custom OAuth' → 'Auto-generate credentials'."
+echo "════════════════════════════════════════════════════════════════════════"
 fi
 echo
 
