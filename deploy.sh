@@ -308,9 +308,9 @@ REQUIRED_APIS=(
   "cloudtasks.googleapis.com"
   "compute.googleapis.com"
   "firestore.googleapis.com"
+  "iap.googleapis.com"
   "run.googleapis.com"
   "servicecontrol.googleapis.com"
-  "iap.googleapis.com"
 )
 APIS_TO_ENABLE=()
 for api in "${REQUIRED_APIS[@]}"; do
