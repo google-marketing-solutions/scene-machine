@@ -493,7 +493,9 @@ generate_config
 echo
 echo "[>] Deploying backend to Cloud Run (Estimated time: ~5 minutes)..."
 gcloud run deploy "$BACKEND_SERVICE_NAME" --source . --image $REGION-docker.pkg.dev/$PROJECT/$ARTIFACT_REPO/$BACKEND_SERVICE_NAME:latest --region $REGION --project $PROJECT --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated
-export CLOUD_RUN_URL=$(gcloud run services describe "$BACKEND_SERVICE_NAME" --region=$REGION --project=$PROJECT --format='value(status.url)')
+if [ -z "${CLOUD_RUN_URL:-}" ]; then
+  export CLOUD_RUN_URL=$(gcloud run services describe "$BACKEND_SERVICE_NAME" --region=$REGION --project=$PROJECT --format='value(status.url)')
+fi
 
 # Ensure queues
 echo
