@@ -892,16 +892,17 @@ if [ "$DEPLOY_UI" = "true" ]; then
   echo
   echo "  ──────────────────────────────────────────────────────────────────"
   echo
-  echo "  Remaining manual step before users can sign in:"
+  echo "  REQUIRED MANUAL STEP: Grant access to users"
+  echo "  (Since the app is secured by IAP, any user wishing to access it must"
+  echo "  be granted the custom 'Scene Machine User' role. Without this binding,"
+  echo "  authenticated users will hit a 403 Forbidden error.)"
   echo
-  echo "    Grant the 'Scene Machine User' role to each user (without it,"
-  echo "    signed-in users hit a 403 error)."
-  echo "    Fastest via command-line:"
+  echo "  Fastest via command-line:"
   echo "    gcloud projects add-iam-policy-binding ${PROJECT} \\"
   echo "      --member=\"user:YOUR_EMAIL@example.com\" \\"
   echo "      --role=\"projects/${PROJECT}/roles/SceneMachineUser\""
   echo
-  echo "    Or via the IAM console:"
+  echo "  Or via the Cloud IAM console:"
   echo "    https://console.cloud.google.com/iam-admin/iam?project=${PROJECT}"
   echo "════════════════════════════════════════════════════════════════════════"
   echo
