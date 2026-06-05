@@ -376,7 +376,7 @@ if ! is_service_enabled "firebase.googleapis.com"; then
   ENABLED_APIS=$(gcloud services list --enabled --project="$PROJECT" --format="value(config.name)" 2>/dev/null || true)
 fi
 
-if firebase projects:list 2>/dev/null | grep -q "$PROJECT"; then
+if firebase apps:list --project "$PROJECT" &>/dev/null; then
   echo "Firebase is already linked/enabled for project $PROJECT."
 else
   echo "Linking Firebase to GCP project $PROJECT..."
