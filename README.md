@@ -170,7 +170,6 @@ Role | Why it's needed
 | `roles/cloudbuild.builds.editor`  | Cloud Build, triggered by `gcloud run deploy --source` (deploy.sh) |
 | `roles/cloudtasks.admin` | Cloud Tasks queues |
 | `roles/datastore.admin` | Firestore **database** creation |
-| `roles/datastore.user`  | Firestore **data** writes (config docs in `deploy-ui.sh`) |
 | `roles/firebase.admin` | Firebase project/app/rules/storage link |
 | `roles/iam.roleAdmin` | Create the custom `SceneMachineUser` role |
 | `roles/iam.serviceAccountAdmin` | Service-account IAM bindings |
