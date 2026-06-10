@@ -114,11 +114,11 @@ DEPLOY_MODE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -y|--yes|--non-interactive)
+    --non-interactive)
       AUTO_CONFIRM=true
       shift
       ;;
-    --backend-only|--be-only)
+    --backend-only)
       DEPLOY_BACKEND=true
       TARGETED=true
       shift
@@ -250,7 +250,7 @@ if [ "$AUTO_CONFIRM" = "true" ]; then
   confirm="y"
 else
   if [ ! -t 0 ]; then
-    echo "ERROR: stdin is not a TTY. Run interactively or pass --yes / -y." >&2
+    echo "ERROR: stdin is not a TTY. Run interactively or pass --non-interactive." >&2
     exit 1
   fi
   read -r -p "Proceed and deploy to '$PROJECT'? (y/N) " confirm
@@ -264,7 +264,7 @@ if [ "$confirm" != "y" ] && [ "$confirm" != "yes" ]; then
 fi
 echo "✓ Continuing with project $PROJECT."
 
-echo 
+echo
 echo "════════════════════════════════════════════════════════════════════════"
 echo "  Starting Scene Machine backend deployment (estimated runtime ≈15 minutes)..."
 echo "════════════════════════════════════════════════════════════════════════"
@@ -289,7 +289,7 @@ is_service_enabled() {
 }
 
 if [ "$DEPLOY_BACKEND" = "true" ]; then
-  echo 
+  echo
   echo "════════════════════════════════════════════════════════════════════════"
   echo "  Starting Scene Machine backend deployment (estimated runtime ≈15 minutes)..."
   echo "════════════════════════════════════════════════════════════════════════"
@@ -628,7 +628,10 @@ echo
 echo "    1. Configure OAuth consent screen"
 echo "       https://console.cloud.google.com/auth/branding?project=${PROJECT}"
 echo "       First time on this project: click 'Get started' and walk through"
-echo "       the setup dialog. Set User Type to 'Internal' for @google.com logins."
+echo "       the setup dialog. Set User Type to 'Internal' if you only want "
+echo "       users within your own Google Workspace organization to access the app "
+echo "       (recommended for security purposes when possible), or 'External' if "
+echo "       you want anyone to be able to log in."
 echo
 echo "    2. Enable Google as a Firebase sign-in provider"
 echo "       https://console.firebase.google.com/project/${PROJECT}/authentication/providers"
@@ -664,13 +667,13 @@ if [ "$DEPLOY_UI" = "true" ]; then
       exit 1
     fi
     export API_KEY=$(gcloud services api-keys get-key-string $API_UID --project=$PROJECT --format="value(keyString)")
-    
+
     if ! export API_GATEWAY_HOST=$(gcloud api-gateway gateways describe scenemachine-api-gateway --project=$PROJECT --location=$API_GATEWAY_REGION --format="value(defaultHostname)" 2>/dev/null); then
       echo "ERROR: Could not retrieve API Gateway host. Is the backend API Gateway deployed?" >&2
       exit 1
     fi
   fi
-  
+
   # Resolve Firebase configs
   FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
   if [ -z "$FIREBASE_API_KEY" ]; then
@@ -678,7 +681,7 @@ if [ "$DEPLOY_UI" = "true" ]; then
     exit 1
   fi
   export FIREBASE_API_KEY
-  
+
   FIREBASE_AUTH_DOMAIN=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"authDomain":' | awk -F '"' '{print $4}')
   if [ -z "$FIREBASE_AUTH_DOMAIN" ]; then
      echo "ERROR: Failed to extract Firebase auth domain. Check that the Firebase Web app exists." >&2
@@ -811,8 +814,10 @@ if [ "$DEPLOY_UI" = "true" ]; then
     echo "  https://console.cloud.google.com/auth/branding?project=${PROJECT}"
     echo
     echo "  First time on this project: click 'Get started' and complete the setup."
-    echo "  For User Type: pick 'Internal' if Workspace org; otherwise 'External'"
-    echo "  and add yourself as a Test User."
+    echo "  For User Type: pick 'Internal' if you only want users within your "
+    echo "  own Google Workspace organization to access the app (recommended for "
+    echo "  security purposes when possible), or 'External' if you want anyone "
+    echo "  to be able to log in, and add yourself as a Test User."
     echo "Re-checking in 15 seconds (attempt ${OAUTH_WAIT_ATTEMPTS}/${OAUTH_WAIT_MAX}; Ctrl-C to abort)..."
     echo "============================================================"
     sleep 15

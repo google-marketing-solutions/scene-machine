@@ -52,7 +52,7 @@ video prototyping platform for rapidly sharing and iterating on ideas.
 [< TL;DR](#tldr) • [Top](#readme-top) •
 [Technical Requirements >](#technical-requirements)
 
-> [!TIP] 
+> [!TIP]
 > For a step-by-step guide with screen recordings, see
 > [`docs/walkthrough.md`](./docs/walkthrough.md).
 
@@ -140,8 +140,7 @@ The following APIs are used by Scene Machine:
     project management, and rules deployment.
 -   Identity Toolkit API ( identitytoolkit.googleapis.com ): Used for Firebase
     Authentication and managing user domains.
--   App Engine Admin API ( appengine.googleapis.com ): The UI is deployed to App
-    Engine (see deploy-ui.sh line 179).
+-   App Engine Admin API ( appengine.googleapis.com ): The UI is deployed to App Engine.
 -   API Keys API ( apikeys.googleapis.com ): Used to create and manage API keys
     for the API Gateway (see deploy.sh line 229).
 -   Cloud Storage API ( storage.googleapis.com ): Used for storing assets,
@@ -166,7 +165,7 @@ Role                                    | Why it's needed
 --------------------------------------- | ---------------
 `roles/datastore.owner`                 | Firestore native-mode database creation
 `roles/appengine.appCreator`            | One-time `gcloud app create` at the project level
-`roles/appengine.appAdmin`              | Deploying the UI (`deploy-ui.sh`) to the existing App Engine app
+`roles/appengine.appAdmin`              | Deploying the UI to the existing App Engine app
 `roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings — the `add_iam_binding` calls in `deploy.sh`
 `roles/iam.roleAdmin`                   | Create the custom `SceneMachineUser` role late in `deploy.sh`
 `roles/iam.serviceAccountAdmin`         | Service-account-level IAM bindings (e.g. Cloud Tasks → Cloud Run "actAs")
@@ -270,10 +269,10 @@ End users of the deployed app only need the custom
 
     If you want to deploy only one of the components, you can pass the respective targeting flag:
 
-    *   **Deploy Backend Only:** `./deploy.sh --backend-only` (or `--be-only`)
+    *   **Deploy Backend Only:** `./deploy.sh --backend-only`
     *   **Deploy UI Only:** `./deploy.sh --ui-only`
 
-> [!TIP] 
+> [!TIP]
 > **Troubleshooting Firebase deployment failures:** If `./deploy.sh`
 > fails at the Firebase step with an error like `Error: Project not found`, it
 > usually means the Firebase CLI cannot access the project or terms have not
@@ -336,7 +335,7 @@ End users of the deployed app only need the custom
     -   If requested, perform any required manual steps indicated by the script
         (e.g. linking buckets or configuring OAuth).
 
-> [!TIP] 
+> [!TIP]
 > Steps 4–6 can be completed **in parallel** with `./deploy.sh --ui-only`
 > running. The script polls every 15s (or prompts you for the OAuth consent
 > screen) and continues automatically once each manual action is done. After
@@ -347,16 +346,16 @@ End users of the deployed app only need the custom
 
 By default, `./deploy.sh` will deploy both the backend and UI. You can use targeting flags to deploy them individually:
 
-* **Deploy Backend Only**: `./deploy.sh --backend-only` (or `--be-only`)
+* **Deploy Backend Only**: `./deploy.sh --backend-only`
 * **Deploy UI Only**: `./deploy.sh --ui-only`
 * **Local Development Build**: `./deploy.sh --ui-only --local` (or `./deploy.sh --ui-only local`) to build the Angular application files locally without triggering an App Engine deployment.
 
-To run the script in a non-interactive/headless environment (such as an AI agent like Jetski or Claude), use the `-y` / `--yes` / `--non-interactive` flag to auto-confirm target configuration prompts:
+To run the script in a non-interactive/headless environment (such as an AI agent like Google Antigravity or Claude), use the `--non-interactive` flag to auto-confirm target configuration prompts:
 
 ```bash
-./deploy.sh --yes
-# Or for a targeted agent run:
-./deploy.sh --yes --backend-only
+./deploy.sh --non-interactive
+# Or for a targeted headless deployment:
+./deploy.sh --non-interactive --backend-only
 ```
 
 > [!IMPORTANT]
@@ -372,7 +371,7 @@ To run the script in a non-interactive/headless environment (such as an AI agent
         "Auto-generate credentials".
         -   *Note: You will not need to download the credentials.*
 
-Once successfully deployed, `./deploy-ui.sh` will output the URL where Scene
+Once successfully deployed, the script will output the URL where Scene
 Machine is available. Note this down to open it in your browser.
 
 To help debug problems with the deployment scripts, you can change their top
@@ -385,7 +384,7 @@ line `set -eu` to `set -eux`, which will output every single command executed.
 
 Each person intending to use Scene Machine needs to be given the "Scene Machine
 User" role in the Google Cloud project in which the tool is deployed.
-`./deploy-ui.sh`'s final summary outputs a ready-to-paste `gcloud` command for
+The deployment script's final summary outputs a ready-to-paste `gcloud` command for
 this; you can also run it directly:
 
 ```bash
@@ -403,7 +402,7 @@ Save.
 
 [< Adding Users](#adding-users) • [Top](#readme-top) • [Caveats >](#caveats)
 
-> [!TIP] 
+> [!TIP]
 > For a step-by-step guide with screen recordings, see
 > [`docs/walkthrough.md`](./docs/walkthrough.md).
 
