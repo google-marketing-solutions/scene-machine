@@ -359,7 +359,7 @@ To run the script in a non-interactive/headless environment (such as an AI agent
 ```
 
 > [!IMPORTANT]
-> **Manual Actions Required in Headless Mode**: Even when run by an automated agent or in non-interactive mode, the user must still complete the manual setup actions on the Google Cloud and Firebase consoles (e.g. configuring the OAuth consent screen, enabling the Google sign-in provider, and linking the bucket to Firebase Storage). When these checks are hit, the script will output the setup URLs and enter a 15-second polling loop, allowing the agent/process to wait until you complete the configuration in your browser.
+> **First-Time Deployments Cannot be Automated**: An automated/headless deployment cannot be performed on a completely fresh project. The user must complete several manual setup actions on the Google Cloud and Firebase consoles (e.g., configuring the OAuth consent screen, enabling the Google sign-in provider, linking the bucket to Firebase Storage, and enabling IAP). When these checks are hit in headless mode, the script will abort immediately and output the URLs where you need to complete the setup. Once the project is manually initialized, subsequent deployments can be fully automated.
 
 
 8.  **Set up Identity-Aware Proxy**:
