@@ -177,6 +177,7 @@ Role | Why it's needed
 | `roles/iap.admin` | Configure/enable IAP |
 | `roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings |
 | `roles/run.admin` | Cloud Run services |
+| `roles/servicemanagement.admin` | Create and deploy the API Gateway |
 | `roles/serviceusage.apiKeysAdmin` | Create the API key |
 | `roles/serviceusage.serviceUsageAdmin` | Enable APIs |
 | `roles/storage.admin` | GCS buckets + objects |
