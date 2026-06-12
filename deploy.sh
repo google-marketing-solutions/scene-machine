@@ -38,6 +38,7 @@ DEPLOY_MODE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    # Recommended for automated/agentic runs (runs without user interaction)
     --non-interactive)
       AUTO_CONFIRM=true
       shift
@@ -227,6 +228,7 @@ echo "[>] Checking required Google Cloud APIs..."
 REQUIRED_APIS=(
   "aiplatform.googleapis.com"
   "apigateway.googleapis.com"
+  "appengine.googleapis.com"
   "artifactregistry.googleapis.com"
   "cloudbuild.googleapis.com"
   "cloudtasks.googleapis.com"
@@ -562,6 +564,8 @@ echo "       the setup dialog. Set User Type to 'Internal' if you only want "
 echo "       users within your own Google Workspace organization to access the app "
 echo "       (recommended for security purposes when possible), or 'External' if "
 echo "       you want anyone to be able to log in."
+echo "       IMPORTANT: After configuring the consent screen, navigate to"
+echo "       'Credentials' and create a new 'OAuth client ID'."
 echo
 echo "    2. Enable Google as a Firebase sign-in provider"
 echo "       https://console.firebase.google.com/project/${PROJECT}/authentication/providers"
@@ -571,8 +575,10 @@ echo
 echo "    3. Set up Firebase Storage (wizard + GCS bucket import):"
 echo "       https://console.firebase.google.com/project/${PROJECT}/storage"
 echo "       (a) Click 'Get started' and complete the wizard."
-echo "       (b) On the same page, click the bucket dropdown → '+ Add bucket'"
-echo "           → 'Import existing GCS buckets' → select ${GCS_BUCKET} → confirm."
+echo "       (b) AFTER (a) finishes (the bucket dropdown only appears once the"
+echo "           wizard creates the bucket), on the same page, click the bucket"
+echo "           dropdown → '+ Add bucket' → 'Import existing GCS buckets' →"
+echo "           select ${GCS_BUCKET} → confirm."
 echo
 echo "    4. Enable Identity-Aware Proxy (IAP) for App Engine"
 echo "       https://console.cloud.google.com/security/iap?project=${PROJECT}&serviceId=default"
@@ -724,46 +730,10 @@ if [ "$DEPLOY_UI" = "true" ]; then
   echo "[>] Granting Artifact Registry Writer role to App Engine default service account..."
   add_iam_binding $PROJECT --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" --role="roles/artifactregistry.writer" --condition=None
 
-  # --- OAuth consent screen: poll until satisfied ----------------------------
-  echo
-  echo "[>] Checking if OAuth consent screen is configured..."
-  OAUTH_WAIT_ATTEMPTS=0
-  OAUTH_WAIT_MAX=120   # 120 × 15s = 30 min total
-  while true; do
-    IDP_HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-      -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-      -H "x-goog-user-project: ${PROJECT}" \
-      "https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT}/defaultSupportedIdpConfigs/google.com")
-    if [ "$IDP_HTTP_STATUS" = "200" ]; then
-      echo "✓ OAuth consent screen is configured."
-      break
-    fi
-    OAUTH_WAIT_ATTEMPTS=$((OAUTH_WAIT_ATTEMPTS + 1))
-    if [ $OAUTH_WAIT_ATTEMPTS -ge $OAUTH_WAIT_MAX ]; then
-      echo "ERROR: OAuth consent screen still not configured after 30 minutes — aborting." >&2
-      exit 1
-    fi
-    echo "============================================================"
-    echo "WAITING: OAuth consent screen is not yet configured."
-    echo "Please configure it in the Cloud Console (script will keep checking):"
-    echo "  https://console.cloud.google.com/auth/branding?project=${PROJECT}"
-    echo
-    echo "  First time on this project: click 'Get started' and complete the setup."
-    echo "  For User Type: pick 'Internal' if you only want users within your "
-    echo "  own Google Workspace organization to access the app (recommended for "
-    echo "  security purposes when possible), or 'External' if you want anyone "
-    echo "  to be able to log in, and add yourself as a Test User."
-    if [ "$AUTO_CONFIRM" = "true" ]; then
-      echo "ERROR: Headless deployment cannot wait for manual steps. Please complete the setup above and re-run." >&2
-      echo "============================================================" >&2
-      exit 1
-    fi
-    echo "Re-checking in 15 seconds (attempt ${OAUTH_WAIT_ATTEMPTS}/${OAUTH_WAIT_MAX}; Ctrl-C to abort)..."
-    echo "============================================================"
-    sleep 15
-  done
-
   # --- Google sign-in provider enabled: poll until satisfied ------------------
+  # The Identity Toolkit API used here actually verifies that the Google sign-in
+  # provider is enabled in Firebase. This implicitly requires the OAuth consent
+  # screen to be configured first. We poll for both steps in this single loop.
   echo
   echo "[>] Checking if Google sign-in provider is enabled..."
   SIGNIN_WAIT_ATTEMPTS=0
@@ -785,11 +755,15 @@ if [ "$DEPLOY_UI" = "true" ]; then
     fi
     echo "============================================================"
     echo "WAITING: Google sign-in provider is not yet enabled."
-    echo "Please enable it in the Firebase Console (script will keep checking):"
-    echo "  https://console.firebase.google.com/project/${PROJECT}/authentication/providers"
-    echo "  If the providers list isn't visible yet, click 'Get started' on the"
-    echo "  Authentication page first to reach it."
-    echo "  Then: 'Add new provider' → choose 'Google' → enable → save."
+    echo "Please ensure you have completed the following steps (script will keep checking):"
+    echo "  1. Configure OAuth consent screen & Client ID:"
+    echo "     https://console.cloud.google.com/auth/branding?project=${PROJECT}"
+    echo "     (First time: click 'Get started'. Set User Type to 'Internal' or 'External'."
+    echo "     Then navigate to 'Credentials' and create a new 'OAuth client ID')"
+    echo
+    echo "  2. Enable Google as a Firebase sign-in provider:"
+    echo "     https://console.firebase.google.com/project/${PROJECT}/authentication/providers"
+    echo "     (Click 'Get started' if list isn't visible -> 'Add new provider' -> 'Google' -> enable -> save)"
     if [ "$AUTO_CONFIRM" = "true" ]; then
       echo "ERROR: Headless deployment cannot wait for manual steps. Please complete the setup above and re-run." >&2
       echo "============================================================" >&2
