@@ -175,6 +175,7 @@ Role | Why it's needed
 | `roles/iam.serviceAccountAdmin` | Service-account IAM bindings |
 | `roles/iam.serviceAccountUser` | `actAs` during Run/App Engine deploy |
 | `roles/iap.admin` | Configure/enable IAP |
+| `roles/oauthconfig.editor | Configuring the OAuth consent screen |
 | `roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings |
 | `roles/run.admin` | Cloud Run services |
 | `roles/servicemanagement.admin` | Create and deploy the API Gateway |
