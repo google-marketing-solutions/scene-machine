@@ -167,6 +167,7 @@ Role | Why it's needed
 | `roles/appengine.appAdmin` | `gcloud app deploy` |
 | `roles/appengine.appCreator` | `gcloud app create` |
 | `roles/artifactregistry.admin` | Artifact Registry repo + images |
+| `roles/compute.viewer` | View the services and setttings in the project |
 | `roles/cloudbuild.builds.editor`  | Cloud Build, triggered by `gcloud run deploy --source` (deploy.sh) |
 | `roles/cloudtasks.admin` | Cloud Tasks queues |
 | `roles/datastore.admin` | Firestore **database** creation |
@@ -174,7 +175,8 @@ Role | Why it's needed
 | `roles/iam.roleAdmin` | Create the custom `SceneMachineUser` role |
 | `roles/iam.serviceAccountAdmin` | Service-account IAM bindings |
 | `roles/iam.serviceAccountUser` | `actAs` during Run/App Engine deploy |
-| `roles/iap.admin` | Configure/enable IAP |
+| `roles/iap.admin` | Configure IAP users |
+| `roles/iap.settingsAdmin | Setup & configure IAP |
 | `roles/oauthconfig.editor | Configuring the OAuth consent screen |
 | `roles/resourcemanager.projectIamAdmin` | Project-level IAM bindings |
 | `roles/run.admin` | Cloud Run services |
