@@ -174,7 +174,11 @@ def prompt(
         contents=contents,
         config=generate_content_config,
     )
-    if response.candidates and response.candidates[0].content.parts:
+    if (
+        response.candidates
+        and response.candidates[0].content
+        and response.candidates[0].content.parts
+    ):
         output = "".join(
             part.text
             for part in response.candidates[0].content.parts
@@ -182,6 +186,12 @@ def prompt(
         )
     else:
         output = ""
+
+    if not output:
+        raise ValueError(
+            "The model returned no text content. This can happen when the model"
+            " reaches the output token limit before emitting a response."
+        )
 
     if response_schema:
         return json.loads(output)

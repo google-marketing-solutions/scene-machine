@@ -396,7 +396,13 @@ def execute(
     for part in parts:
       if hasattr(part, "text"):
         segments.append(part.text)
-  json_result = json.loads("".join(segments))
+  storyboard_text = "".join(segments)
+  if not storyboard_text:
+    raise ValueError(
+        "The model returned no storyboard text. This can happen when the"
+        " model reaches the output token limit before emitting a response."
+    )
+  json_result = json.loads(storyboard_text)
 
   if not json_result.get("storyboard"):
     raise ValueError("No storyboard found in the response.")

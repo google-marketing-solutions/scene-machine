@@ -181,6 +181,43 @@ class TestGemini(unittest.TestCase):
         _, kwargs = mock_client.models.generate_content.call_args
         self.assertIsNone(kwargs["config"].thinking_config)
 
+    @mock.patch("google.genai.Client")
+    def test_prompt_content_none_raises_value_error(self, mock_client_class):
+        """Raises ValueError, not AttributeError, when content is None."""
+        mock_client = mock_client_class.return_value
+        mock_response = mock.Mock()
+        mock_candidate = mock.Mock()
+        mock_candidate.content = None
+        mock_response.candidates = [mock_candidate]
+        mock_client.models.generate_content.return_value = mock_response
+
+        with self.assertRaises(ValueError):
+            gemini.prompt(
+                gcp_project="test-proj", text_prompt="say something"
+            )
+
+    @mock.patch("google.genai.Client")
+    def test_prompt_no_text_schema_raises_value_error(self, mock_client_class):
+        """Raises ValueError, not JSONDecodeError, when output is empty."""
+        mock_client = mock_client_class.return_value
+        mock_response = mock.Mock()
+        mock_candidate = mock.Mock()
+        mock_part = mock.Mock(spec=[])
+        mock_candidate.content.parts = [mock_part]
+        mock_response.candidates = [mock_candidate]
+        mock_client.models.generate_content.return_value = mock_response
+
+        schema = {
+            "type": "OBJECT",
+            "properties": {"result": {"type": "STRING"}},
+        }
+        with self.assertRaises(ValueError):
+            gemini.prompt(
+                gcp_project="test-proj",
+                text_prompt="get json",
+                response_schema=schema,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
