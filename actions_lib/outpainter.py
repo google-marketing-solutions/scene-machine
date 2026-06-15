@@ -129,15 +129,20 @@ def _supports_thinking(client: genai.Client, model: str) -> bool:
     """Whether `model` advertises thinking support, per the model registry.
 
     Cached per model id. Fails closed (returns False) if the lookup errors, so
-    a model without thinking can never hard-error on the thinking config.
+    a model without thinking can never hard-error on the thinking config. A
+    successful result is cached even when it is falsy, but a lookup error is not
+    cached, so the next request retries instead of disabling thinking for the
+    life of the instance.
     """
-    if model not in _THINKING_SUPPORT:
-        try:
-            _THINKING_SUPPORT[model] = bool(client.models.get(model=model).thinking)
-        except Exception:  # pylint: disable=broad-except
-            logger.warning("Could not query thinking support for %s", model)
-            _THINKING_SUPPORT[model] = False
-    return _THINKING_SUPPORT[model]
+    if model in _THINKING_SUPPORT:
+        return _THINKING_SUPPORT[model]
+    try:
+        supported = bool(client.models.get(model=model).thinking)
+    except Exception:  # pylint: disable=broad-except  # transient: do not memoize
+        logger.warning("Could not query thinking support for %s", model)
+        return False
+    _THINKING_SUPPORT[model] = supported
+    return supported
 
 
 def outpaint_image(

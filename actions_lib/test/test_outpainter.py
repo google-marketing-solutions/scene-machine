@@ -140,6 +140,35 @@ class TestOutpainter(unittest.TestCase):
         _, kwargs = mock_client.models.generate_content.call_args
         self.assertIsNone(kwargs["config"].thinking_config)
 
+    def test_supports_thinking_failure_not_cached(self):
+        """A lookup error returns False but is not memoized, so the next call retries."""
+        client = mock.Mock()
+        client.models.get.side_effect = [
+            Exception("transient"),
+            mock.Mock(thinking=True),
+        ]
+
+        self.assertFalse(
+            outpainter._supports_thinking(client, self.mock_image_model)
+        )
+        self.assertTrue(
+            outpainter._supports_thinking(client, self.mock_image_model)
+        )
+        self.assertEqual(client.models.get.call_count, 2)
+
+    def test_supports_thinking_falsy_result_cached(self):
+        """A successful no-thinking result is cached, so there is no re-query."""
+        client = mock.Mock()
+        client.models.get.return_value.thinking = None
+
+        self.assertFalse(
+            outpainter._supports_thinking(client, self.mock_image_model)
+        )
+        self.assertFalse(
+            outpainter._supports_thinking(client, self.mock_image_model)
+        )
+        client.models.get.assert_called_once_with(model=self.mock_image_model)
+
     @mock.patch("actions_lib.outpainter.PIL.Image.open")
     @mock.patch("actions_lib.outpainter.genai.Client")
     def test_outpaint_image_no_candidates(self, mock_genai_client, mock_pil_open):
