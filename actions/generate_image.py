@@ -34,7 +34,8 @@ def execute(
     prompt: NodeInput,
     variant_quantity: int,
     image_model: str,
-    aspect_ratio: str = '16:9',
+    image_model_location: str,
+    aspect_ratio: str,
 ) -> NodeOutput:
   """Executes the action.
 
@@ -44,8 +45,9 @@ def execute(
     prompt: The prompt to use to generate the image.
     variant_quantity: The number of images to generate.
     image_model: The image generation model to use.
+    image_model_location: The location of the model to use for image
+      generation.
     aspect_ratio: The aspect ratio of the generated image (e.g. "16:9").
-      Defaults to "16:9" if not provided.
 
   Returns:
     A NodeOutput object containing the path to the generated image(s).
@@ -58,7 +60,7 @@ def execute(
   # generate_images now returns a list of (image_bytes, mime_type) tuples
   generated_data = image_creator.generate_images(
       gcp_project=workflow_params[Key.GCP_PROJECT.value],
-      gcp_location=workflow_params[Key.GCP_LOCATION.value],
+      gcp_location=image_model_location,
       image_prompt=image_prompt,
       amount=variant_quantity,
       aspect_ratio=aspect_ratio,

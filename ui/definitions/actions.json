@@ -131,6 +131,12 @@
     "parameters": {
       "target_ratio": {
         "type": "string"
+      },
+      "image_model": {
+        "type": "string"
+      },
+      "image_model_location": {
+        "type": "string"
       }
     },
     "output": {
@@ -274,6 +280,12 @@
         "type": "int"
       },
       "aspect_ratio": {
+        "type": "string"
+      },
+      "image_model": {
+        "type": "string"
+      },
+      "image_model_location": {
         "type": "string"
       }
     },
