@@ -132,11 +132,13 @@ def execute(
   """
   try:
     target_w, target_h = map(int, target_ratio.split(':'))
+    if target_w <= 0 or target_h <= 0:
+      raise ValueError('width and height must be positive')
     expected_ratio = target_w / target_h
   except ValueError as exc:
     raise ValueError(
         f'Invalid target_ratio: "{target_ratio}". '
-        'Format must be width:height with integers (e.g. "16:9").'
+        'Format must be width:height with positive integers (e.g. "16:9").'
     ) from exc
 
   image_path = image[0][Key.FILE.value]

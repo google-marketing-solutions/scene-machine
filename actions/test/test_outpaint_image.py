@@ -240,6 +240,22 @@ class TestOutpaintImage(unittest.TestCase):
           'test-location',
       )
 
+  def test_execute_degenerate_ratio_raises_error(self):
+    """Tests that zero, negative, and non-integer ratios are rejected."""
+    degenerate_ratios = ['16:0', '0:9', '0:0', '16:-9', '16:nine']
+
+    for target_ratio in degenerate_ratios:
+      with self.subTest(target_ratio=target_ratio):
+        with self.assertRaisesRegex(ValueError, 'Invalid target_ratio'):
+          outpaint_image.execute(
+              self.mock_gcs,
+              self.mock_workflow_params,
+              self.mock_image,
+              target_ratio,
+              'gemini-3.1-flash-image-preview',
+              'test-location',
+          )
+
   @mock.patch('actions_lib.outpainter.outpaint_image')
   def test_execute_resizing_for_various_formats(self, mock_outpainter_func):
     """Tests that resizing fallback works for landscape and portrait formats."""
