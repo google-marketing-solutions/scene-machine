@@ -44,7 +44,7 @@ class TestAnalyseFile(unittest.TestCase):
         file=file_input,
         generation_prompt=None,
         response_schema={},
-        gemini_model="gemini-3.5-flash",
+        gemini_model="mock-model",
     )
 
     self.assertEqual(
@@ -55,7 +55,7 @@ class TestAnalyseFile(unittest.TestCase):
         text_prompt="describe this file",
         file_uris=["gs://bucket/file.png"],
         response_schema={},
-        model="gemini-3.5-flash",
+        model="mock-model",
     )
 
   @mock.patch("actions_lib.gemini.prompt")
@@ -78,7 +78,7 @@ class TestAnalyseFile(unittest.TestCase):
         file=file_input,
         generation_prompt=gen_prompt_input,
         response_schema={},
-        gemini_model="gemini-3.5-flash",
+        gemini_model="mock-model",
     )
 
     mock_gemini_prompt.assert_called_once()

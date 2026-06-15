@@ -67,7 +67,7 @@ class TestWriteProductsScript(unittest.TestCase):
         product_description=product_description,
         image_description=image_description,
         story_variant_quantity=1,
-        gemini_model="gemini-3.5-flash",
+        gemini_model="mock-model",
         gemini_model_location="us-central1",
     )
 
@@ -127,7 +127,7 @@ class TestWriteProductsScript(unittest.TestCase):
         product_description=product_description,
         image_description=image_description,
         story_variant_quantity=1,
-        gemini_model="gemini-3.5-flash",
+        gemini_model="mock-model",
         gemini_model_location="us-central1",
     )
 
@@ -173,7 +173,7 @@ class TestWriteProductsScript(unittest.TestCase):
           product_description=product_description,
           image_description=image_description,
           story_variant_quantity=1,
-          gemini_model="gemini-3.5-flash",
+          gemini_model="mock-model",
           gemini_model_location="us-central1",
       )
 

@@ -32,14 +32,14 @@ class TestImageDescriber(unittest.TestCase):
         image_path='gs://bucket/image.png',
         guidance='a red car',
         gcp_project='test-proj',
-        gemini_model='gemini-3.5-flash',
+        gemini_model='mock-model',
     )
 
     self.assertEqual(result, '{"cinematography": {}}')
     mock_prompt.assert_called_once()
     args, kwargs = mock_prompt.call_args
     self.assertEqual(kwargs['gcp_project'], 'test-proj')
-    self.assertEqual(kwargs['model'], 'gemini-3.5-flash')
+    self.assertEqual(kwargs['model'], 'mock-model')
     self.assertEqual(kwargs['file_uris'], ['gs://bucket/image.png'])
     self.assertIn(
         'This identifies the focus object of the image: a red car',
@@ -55,7 +55,7 @@ class TestImageDescriber(unittest.TestCase):
         image_path='gs://bucket/image.png',
         guidance='',
         gcp_project='test-proj',
-        gemini_model='gemini-3.5-flash',
+        gemini_model='mock-model',
     )
 
     self.assertEqual(result, '{"cinematography": {}}')
