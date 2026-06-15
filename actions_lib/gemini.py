@@ -68,9 +68,7 @@ def _get_thinking_config(model: str):
     """Gets the thinking configuration for the specific model."""
     if model.startswith("gemini-2.5-pro"):
         return types.ThinkingConfig(thinking_budget=128)
-    elif model.startswith("gemini-2.5-flash") or model.startswith(
-        "gemini-2.5-flash-lite"
-    ):
+    elif model.startswith("gemini-2.5-flash"):  # includes gemini-2.5-flash-lite
         return types.ThinkingConfig(thinking_budget=0)
     elif model.startswith("gemini-3"):
         # Gemini 3 models manage their thinking budget internally; an explicit
