@@ -19,6 +19,9 @@ from typing import List, Tuple
 from google import genai
 from google.genai import types as gtypes
 
+from common import get_api_client_headers
+from common import TrackingType
+
 
 def generate_images(
     gcp_project: str,
@@ -50,7 +53,12 @@ def generate_images(
       or if the resulting images lack data.
   """
   client = genai.Client(
-      vertexai=True, project=gcp_project, location=gcp_location
+      vertexai=True,
+      project=gcp_project,
+      location=gcp_location,
+      http_options=gtypes.HttpOptions(
+          headers=get_api_client_headers(TrackingType.IMAGE),
+      ),
   )
 
   # Map boolean to the expected PersonGeneration string values
