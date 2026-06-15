@@ -31,7 +31,7 @@ export VEO_REGION=global # choose from: https://docs.cloud.google.com/vertex-ai/
 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models#gemini-models
 # Recommended models: gemini-3-pro-image (Nano Banana Pro), gemini-3.1-flash-image (Nano Banana 2)
 export IMAGE_MODEL=gemini-3-pro-image
-export IMAGE_REGION=global # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models
+export IMAGE_MODEL_REGION=global # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models
 
 API_GATEWAY_REGION=us-central1 # europe-west1 | europe-west2 | us-central1
 APP_ENGINE_REGION=us-central # europe-west | europe-west2/3/6 | us-central

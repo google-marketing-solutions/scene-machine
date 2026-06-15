@@ -40,7 +40,7 @@
       "stringValue": "${IMAGE_MODEL}"
     },
     "imageLocation": {
-      "stringValue": "${IMAGE_REGION}"
+      "stringValue": "${IMAGE_MODEL_REGION}"
     },
     "generateAudio": {
       "booleanValue": false
