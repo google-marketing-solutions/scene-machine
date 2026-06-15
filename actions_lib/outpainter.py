@@ -129,8 +129,7 @@ def _supports_thinking(client: genai.Client, model: str) -> bool:
     """Whether `model` advertises thinking support, per the model registry.
 
     Cached per model id. Fails closed (returns False) if the lookup errors, so
-    a model without thinking can never hard-error on the thinking config; a
-    skip is logged so it is observable rather than silent.
+    a model without thinking can never hard-error on the thinking config.
     """
     if model not in _THINKING_SUPPORT:
         try:
@@ -138,8 +137,6 @@ def _supports_thinking(client: genai.Client, model: str) -> bool:
         except Exception:  # pylint: disable=broad-except
             logger.warning("Could not query thinking support for %s", model)
             _THINKING_SUPPORT[model] = False
-        if not _THINKING_SUPPORT[model]:
-            logger.info("Thinking not enabled for model %s", model)
     return _THINKING_SUPPORT[model]
 
 
