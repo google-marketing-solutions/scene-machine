@@ -372,7 +372,20 @@ export class ConfigService {
 
   globalConfig = resource({
     loader: async () => {
-      return firstValueFrom(this.httpClient.get<GlobalConfig>('/api/config'));
+      try {
+        return await firstValueFrom(
+          this.httpClient.get<GlobalConfig>('/api/config'),
+        );
+      } catch (error) {
+        // A failed /api/config fetch (transient 5xx, network blip, IAP session
+        // expiry) must degrade gracefully. Returning undefined keeps the
+        // resource out of the error state, so value() stays callable and the
+        // optional-chaining guards in DEFAULT_PROJECT_CONFIG keep working.
+        // Letting it reach the error state would make value() throw, defeating
+        // those guards and hard-breaking the home and setup pages.
+        console.error('Failed to load global config.', error);
+        return undefined;
+      }
     },
   });
 
