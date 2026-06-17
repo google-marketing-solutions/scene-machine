@@ -129,20 +129,18 @@ def _supports_thinking(client: genai.Client, model: str) -> bool:
     """Whether `model` advertises thinking support, per the model registry.
 
     Cached per model id. Fails closed (returns False) if the lookup errors, so
-    a model without thinking can never hard-error on the thinking config. A
-    successful result is cached even when it is falsy, but a lookup error is not
-    cached, so the next request retries instead of disabling thinking for the
-    life of the instance.
+    a model without thinking can never hard-error on the thinking config; a
+    skip is logged so it is observable rather than silent.
     """
-    if model in _THINKING_SUPPORT:
-        return _THINKING_SUPPORT[model]
-    try:
-        supported = bool(client.models.get(model=model).thinking)
-    except Exception:  # pylint: disable=broad-except  # transient: do not memoize
-        logger.warning("Could not query thinking support for %s", model)
-        return False
-    _THINKING_SUPPORT[model] = supported
-    return supported
+    if model not in _THINKING_SUPPORT:
+        try:
+            _THINKING_SUPPORT[model] = bool(client.models.get(model=model).thinking)
+        except Exception:  # pylint: disable=broad-except
+            logger.warning("Could not query thinking support for %s", model)
+            _THINKING_SUPPORT[model] = False
+        if not _THINKING_SUPPORT[model]:
+            logger.info("Thinking not enabled for model %s", model)
+    return _THINKING_SUPPORT[model]
 
 
 def outpaint_image(
@@ -171,7 +169,13 @@ def outpaint_image(
         image = PIL.Image.open(input_bytes)
         image.load()
 
-    target_w, target_h = map(int, target_ratio.split(":"))
+    parts = target_ratio.split(":")
+    if len(parts) != 2 or not all(p.isdigit() and int(p) > 0 for p in parts):
+        raise ValueError(
+            "target_ratio must be two positive integers separated by ':'"
+            f' (e.g. "16:9"); got {target_ratio!r}.'
+        )
+    target_w, target_h = (int(p) for p in parts)
     canvas_size = _target_canvas_size(image.width, image.height, target_w, target_h)
     blank_canvas = PIL.Image.new("RGB", canvas_size, _CANVAS_FILL)
     prompt = _OUTPAINT_PROMPT.replace("{target_ratio}", target_ratio)
@@ -215,15 +219,22 @@ def outpaint_image(
             "The first candidate from the model did not contain any content or"
             " parts."
         )
-    part = candidate.content.parts[0]
-    # The part may be a text part with an error message, so we check for data.
-    if not hasattr(part, "inline_data") or not part.inline_data:
+    # A thinking/thought part can come first, so pick the first part that
+    # actually carries image data rather than assuming it is parts[0].
+    outpaint_blob = next(
+        (
+            part.inline_data
+            for part in candidate.content.parts
+            if getattr(part, "inline_data", None)
+        ),
+        None,
+    )
+    if not outpaint_blob:
         raise ValueError(
-            "The first part of the first candidate from the model did not contain"
-            f" any inline data: {part}"
+            "No part of the first candidate from the model contained any inline"
+            f" data: {candidate.content.parts}"
         )
 
-    outpaint_blob = part.inline_data
     if not outpaint_blob.data or not outpaint_blob.mime_type:
         raise ValueError("No data found in the outpainting result")
 

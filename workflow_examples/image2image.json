@@ -18,7 +18,9 @@
         }
       },
       "parameters": {
-        "target_ratio": "9:16"
+        "target_ratio": "9:16",
+        "image_model": "gemini-3-pro-image",
+        "image_model_location": "global"
       }
     },
     "sink": {

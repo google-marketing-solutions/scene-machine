@@ -180,7 +180,7 @@ def prompt(
         output = "".join(
             part.text
             for part in response.candidates[0].content.parts
-            if hasattr(part, "text")
+            if part.text
         )
     else:
         output = ""

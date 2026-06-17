@@ -13,7 +13,9 @@
       "action": "translate",
       "parameters": {
         "source_language": "en",
-        "target_language": ["de", "es", "la", "it", "nl", "pt", "hu", "se"]
+        "target_language": ["de", "es", "la", "it", "nl", "pt", "hu", "se"],
+        "gemini_model": "gemini-3.5-flash",
+        "gemini_model_location": "global"
       },
       "input": {
         "text": {
@@ -26,7 +28,9 @@
       "action": "translate",
       "parameters": {
         "source_language": "en",
-        "target_language": ["cs", "es", "la", "it", "nl", "pt", "hu", "se"]
+        "target_language": ["cs", "es", "la", "it", "nl", "pt", "hu", "se"],
+        "gemini_model": "gemini-3.5-flash",
+        "gemini_model_location": "global"
       },
       "input": {
         "text": {

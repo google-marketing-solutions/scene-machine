@@ -394,7 +394,7 @@ def execute(
   ):
     parts = list(response.candidates[0].content.parts)
     for part in parts:
-      if hasattr(part, "text"):
+      if part.text:
         segments.append(part.text)
   storyboard_text = "".join(segments)
   if not storyboard_text:

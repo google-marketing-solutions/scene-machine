@@ -57,6 +57,8 @@
       },
       "parameters": {
         "variant_quantity": 1,
+        "image_model": "gemini-3-pro-image",
+        "image_model_location": "global",
         "aspect_ratio": "16:9"
       },
       "dimensionsMapping": {

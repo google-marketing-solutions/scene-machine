@@ -20,7 +20,9 @@
         }
       },
       "parameters": {
-        "target_ratio": "16:9"
+        "target_ratio": "16:9",
+        "image_model": "gemini-3-pro-image",
+        "image_model_location": "global"
       }
     },
     "n_1": {
