@@ -42,6 +42,26 @@ This writes `ui/src/env.ts` and `ui/definitions/config.json` with `controlPlaneM
 
 Point it at your own dev project with the overrides `SM_DEV_PROJECT`, `SM_DEV_FIRESTORE_DB`, and `SM_DEV_GCS_BUCKET`.
 
+### Seed the local config document (first run only)
+
+The backend serves `/api/config` from the `config/global` Firestore document. A fresh dev database does not have it, so `/api/config` returns `404 Config not seeded`; the UI then falls back to empty defaults (you can browse, but cannot start a generation). Seed it once against your dev database, the same way `deploy.sh` does (model/region values come from `config.txt` — copy `config.template.txt` if you do not have one):
+
+```
+set -a; source ./config.txt; set +a   # GEMINI_MODEL, regions, etc.
+export PROJECT="${SM_DEV_PROJECT:-scene-machine-local-dev}"
+export FIRESTORE_DB_UI="${SM_DEV_FIRESTORE_DB:-scene-machine-ui}"
+export GCS_BUCKET="${SM_DEV_GCS_BUCKET:-${PROJECT}-scene-machine}"
+
+curl -s -X PATCH \
+  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/global" \
+  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  -H "Content-Type: application/json" \
+  -d @<(envsubst < ./firestore_config_frontdoor.template.json)
+```
+
+This requires a Firestore database to already exist in your dev project (the one `FIRESTORE_DB_UI` names) and ADC with write access to it.
+
 ### The local loop (two terminals)
 
 The local backend talks to a real dev GCP project through your Application Default Credentials, so run `gcloud auth application-default login` once first.
