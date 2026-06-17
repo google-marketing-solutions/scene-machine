@@ -605,14 +605,51 @@ done
 echo "  ✓ ${#QUEUES[@]} Cloud Tasks queues ready (${QUEUES[*]/#/${TASKS_QUEUE_PREFIX}})."
 
 # --- GCS bucket ---------------------------------------------------------------
+# Scene Machine signs GET URLs for ANY object in $GCS_BUCKET (see
+# sign_url_handler in orch.py), so the bucket must be dedicated to this app. The
+# deploy creates it and labels it app=scene-machine. On a later run: a labeled
+# bucket is reused; an UNLABELED bucket with the default ${PROJECT}-scene-machine
+# name (an upgrade of an existing deployment — that name is app- and project-
+# specific, so it is ours) is adopted in place by adding the label, no data
+# moved; any OTHER pre-existing or custom-named bucket is refused unless the
+# deployer sets ADOPT_EXISTING_BUCKET=1 — so a shared bucket cannot have its
+# contents exposed through signed URLs. (Needs roles/storage.admin, already
+# required.)
 phase "Setting up GCS bucket..."
+DEFAULT_BUCKET="${PROJECT}-scene-machine"
 if ! gcloud storage buckets describe "gs://$GCS_BUCKET" --project=$PROJECT &> /dev/null; then
-    echo "Creating GCS bucket gs://$GCS_BUCKET in ${REGION}..."
-    gcloud storage buckets create "gs://$GCS_BUCKET" --project=$PROJECT --location="$REGION"
-    echo "  ✓ Bucket gs://$GCS_BUCKET created."
+    echo "Creating dedicated GCS bucket gs://$GCS_BUCKET in ${REGION}..."
+    gcloud storage buckets create "gs://$GCS_BUCKET" --project=$PROJECT --location="$REGION" --labels=app=scene-machine
+    echo "  ✓ Bucket gs://$GCS_BUCKET created (labeled app=scene-machine)."
 else
-    echo "Bucket gs://$GCS_BUCKET already exists in the following location:"
-    gcloud storage buckets describe "gs://$GCS_BUCKET" --project=$PROJECT --format="value(location)"
+    EXISTING_APP_LABEL=$(gcloud storage buckets describe "gs://$GCS_BUCKET" --project=$PROJECT --format="value(labels.app)" 2>/dev/null || true)
+    if [ "$EXISTING_APP_LABEL" = "scene-machine" ]; then
+        BUCKET_LOCATION=$(gcloud storage buckets describe "gs://$GCS_BUCKET" --project=$PROJECT --format="value(location)")
+        echo "  ✓ Reusing Scene Machine bucket gs://$GCS_BUCKET (location: $BUCKET_LOCATION)."
+    elif [ "$GCS_BUCKET" = "$DEFAULT_BUCKET" ]; then
+        # The canonical, project-scoped Scene Machine bucket name. An unlabeled
+        # bucket with this exact name predates label-based ownership (i.e. an
+        # upgrade of an existing deployment); it is Scene Machine's own, so adopt
+        # it in place — add the label and reuse it, no flag and no data movement.
+        echo "Adopting the existing Scene Machine bucket gs://$GCS_BUCKET (adding the app=scene-machine label)..."
+        gcloud storage buckets update "gs://$GCS_BUCKET" --project=$PROJECT --update-labels=app=scene-machine
+        echo "  ✓ Adopted gs://$GCS_BUCKET (labeled app=scene-machine)."
+    else
+        echo "WARNING: gs://$GCS_BUCKET already exists, is not labeled app=scene-machine, and is" >&2
+        echo "not the default ${DEFAULT_BUCKET} name. Scene Machine issues signed download URLs" >&2
+        echo "for EVERY object in this bucket, so it must be dedicated to Scene Machine and not" >&2
+        echo "shared with other data." >&2
+        if [ "${ADOPT_EXISTING_BUCKET:-0}" = "1" ]; then
+            echo "ADOPT_EXISTING_BUCKET=1 set: adopting it and adding the app=scene-machine label." >&2
+            gcloud storage buckets update "gs://$GCS_BUCKET" --project=$PROJECT --update-labels=app=scene-machine
+            echo "  ✓ Adopted gs://$GCS_BUCKET (labeled app=scene-machine)."
+        else
+            echo "Refusing to use it. Either set GCS_BUCKET in config.txt to a new, unused name" >&2
+            echo "(the deploy will create it), or re-run with ADOPT_EXISTING_BUCKET=1 ONLY if you" >&2
+            echo "are certain this bucket is dedicated to Scene Machine." >&2
+            exit 1
+        fi
+    fi
 fi
 
 # --- Firestore databases (two) -------------------------------------------------
