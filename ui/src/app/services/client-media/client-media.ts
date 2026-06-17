@@ -206,7 +206,10 @@ export class ClientMediaService {
     return new Promise((resolve, reject) => {
       reader.onloadend = () => {
         if (!reader.result || typeof reader.result !== 'string') {
-          throw new Error('Failed to convert blob to base64');
+          // A throw inside this async callback would be swallowed and leave the
+          // awaiting caller hanging forever; reject the promise instead.
+          reject(new Error('Failed to convert blob to base64'));
+          return;
         }
         resolve(reader.result);
       };

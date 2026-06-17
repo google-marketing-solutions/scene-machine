@@ -135,3 +135,21 @@ export interface CombineVideoArrangement {
  * Interval for polling workflow status.
  */
 export const WORKFLOW_STATUS_POLL_INTERVAL_MS = 3000;
+
+/**
+ * Overall backstop for a single workflow status poll. If the workflow's terminal
+ * sink output has not arrived within this window the poll gives up with a
+ * PollTimeoutError instead of spinning forever — e.g. an IAP session that never
+ * recovers (every poll 401s), or a backend run that ends without ever writing
+ * its sink output. Deliberately generous: legitimate multi-candidate Veo runs
+ * finish well inside it. On timeout the persisted in-flight marker is KEPT, so
+ * reopening the project resumes the run and still collects a late result.
+ */
+export const WORKFLOW_STATUS_POLL_TIMEOUT_MS = 10 * 60 * 1000;
+
+/**
+ * Backoff delays between signUrl retry attempts in the candidate-collection
+ * path (mediated media mode): total attempts = delays.length + 1. Exported
+ * (like the poll interval above) so specs can shorten the delays.
+ */
+export const SIGN_URL_RETRY_DELAYS_MS = [1000, 2000];

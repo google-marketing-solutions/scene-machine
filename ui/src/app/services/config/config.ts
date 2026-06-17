@@ -14,32 +14,20 @@
  * limitations under the License.
  */
 
+import {HttpClient, HttpErrorResponse} from '@angular/common/http';
 import {
   computed,
   DOCUMENT,
   effect,
-  EnvironmentInjector,
   inject,
   Injectable,
   resource,
-  runInInjectionContext,
   signal,
 } from '@angular/core';
 import {toObservable} from '@angular/core/rxjs-interop';
-import {Auth} from '@angular/fire/auth';
-import {
-  collection,
-  deleteDoc,
-  doc,
-  Firestore,
-  getDoc,
-  getDocs,
-  query,
-  setDoc,
-  where,
-} from '@angular/fire/firestore';
+import {MatSnackBar} from '@angular/material/snack-bar';
 import {Router} from '@angular/router';
-import {debounceTime, distinctUntilChanged, skip} from 'rxjs';
+import {debounceTime, distinctUntilChanged, firstValueFrom, skip} from 'rxjs';
 
 /**
  * Default transition overlap duration in seconds.
@@ -79,10 +67,6 @@ export const VIDEO_GENERATION_MODELS = [
 ];
 
 interface GlobalConfig {
-  // Backend API
-  gatewayApiKey: string;
-  gatewayBaseUrl: string;
-
   // GCP
   gcpLocation: string;
   gcpProject: string;
@@ -180,6 +164,23 @@ export interface RenderRun {
 }
 
 /**
+ * Persisted marker for an in-flight render (combine-scenes) run (mediated data
+ * plane only). The project-level analogue of PendingGeneration: written to the
+ * project document immediately when the render workflow starts so that leaving
+ * and re-opening the project resumes polling and records the finished video,
+ * instead of abandoning it and leaving the Render button stuck. Cleared when
+ * the render run is recorded, or on a definitive workflow error.
+ */
+export interface PendingRender {
+  executionId: string;
+  /**
+   * ISO-8601 string — deliberately not a Date, for the same round-trip reason
+   * as PendingGeneration.startedAt.
+   */
+  startedAt: string;
+}
+
+/**
  * Configuration for a project.
  */
 export interface ProjectConfig {
@@ -198,6 +199,7 @@ export interface ProjectConfig {
   audioTracks: AudioTrack[];
   visualOverlays: VisualOverlay[];
   renderRuns?: RenderRun[];
+  pendingRender?: PendingRender;
 }
 
 interface Scene {
@@ -231,6 +233,33 @@ export interface Candidate {
 }
 
 /**
+ * Persisted marker for an in-flight candidate generation run (mediated data
+ * plane only). Written to the project document immediately when the workflow
+ * starts so that leaving and re-opening the project can resume polling and
+ * collect the results. Cleared atomically with the candidate attach, or on a
+ * definitive workflow error. Documents without this field load exactly as
+ * before (the backend stores the payload verbatim).
+ */
+export interface PendingGeneration {
+  executionId: string;
+  requestedCount: number;
+  /**
+   * ISO-8601 string — deliberately not a Date: the backend converts only
+   * lastEdited/renderRuns[].createdAt on load, so a Date here would
+   * round-trip differently between data-plane modes.
+   */
+  startedAt: string;
+  // Generation parameters captured at start; the completion path builds
+  // Candidates from these.
+  durationSeconds: number;
+  model: string;
+  generateAudio: boolean;
+  resolution: Resolution;
+  prompt: string;
+  referenceImage?: GcsFile;
+}
+
+/**
  * Represents a generated scene.
  */
 export interface GeneratedScene extends Scene {
@@ -238,6 +267,21 @@ export interface GeneratedScene extends Scene {
   referenceImage?: GcsFile;
   candidates?: Candidate[];
   selectedCandidateIndex?: number;
+  pendingGeneration?: PendingGeneration;
+  /**
+   * Message from the last definitive generation failure for this scene, shown
+   * in the preview area where the video would be (so the user can see WHICH
+   * scene failed and WHY, instead of a transient snackbar). Set on a definitive
+   * error; cleared when a new generation starts or one succeeds.
+   */
+  generationError?: string;
+  /**
+   * Whether the user has seen the above failure: drives the temporary "!" badge
+   * on the scene's filmstrip thumbnail. Set true when the failed scene is
+   * selected; reset whenever a new generationError is recorded. Persisted so the
+   * badge survives a reload until the scene is opened.
+   */
+  generationErrorAcknowledged?: boolean;
 }
 
 /**
@@ -251,9 +295,9 @@ export interface ProvidedVideoScene extends Scene {
 
 export interface ThumbnailMaterial {
   lowQualityThumbnail?: string;
-  highQualityThumbnail?: string;
-  referenceImage?: string;
-  videoUrl?: string;
+  highQualityThumbnail?: GcsFile;
+  referenceImage?: GcsFile;
+  videoUrl?: GcsFile;
 }
 
 /**
@@ -264,6 +308,22 @@ export interface ThumbnailMaterial {
  */
 export function toDecimals(value: number, decimals: number): number {
   return Math.floor(value * Math.pow(10, decimals)) / Math.pow(10, decimals);
+}
+
+/**
+ * Converts a loaded date value to a Date: Firestore Timestamps (objects with
+ * a toDate() method, e.g. legacy documents) and ISO strings (mediated `/api`
+ * JSON) are both handled.
+ */
+function asDate(value: unknown): Date {
+  if (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as {toDate?: unknown}).toDate === 'function'
+  ) {
+    return (value as {toDate: () => Date}).toDate();
+  }
+  return new Date(value as string | number | Date);
 }
 
 /**
@@ -296,25 +356,23 @@ export class ConfigService {
         visualOverlays: [],
       }) as ProjectConfig,
   );
-  private firestore = inject(Firestore);
+  private httpClient = inject(HttpClient);
+  private matSnackBar = inject(MatSnackBar);
   private router = inject(Router);
-  private injector = inject(EnvironmentInjector);
   private document = inject(DOCUMENT);
-  private auth = inject(Auth);
   private projectId = signal<string | null>(null);
+  /**
+   * Mediated mode only: ids known to exist server-side (loaded via GET or
+   * already POSTed). First save of a new project goes through
+   * POST /api/projects (server stamps createdBy); later saves PATCH.
+   */
+  private persistedProjectIds = new Set<string>();
 
   readonly VIDEO_GENERATION_MODELS = VIDEO_GENERATION_MODELS;
 
   globalConfig = resource({
     loader: async () => {
-      const documentSnapshot = await runInInjectionContext(this.injector, () =>
-        getDoc(doc(this.firestore, 'config/global')),
-      );
-      if (!documentSnapshot.exists()) {
-        console.error('Global config object not found');
-        return;
-      }
-      return documentSnapshot.data() as GlobalConfig;
+      return firstValueFrom(this.httpClient.get<GlobalConfig>('/api/config'));
     },
   });
 
@@ -324,36 +382,44 @@ export class ConfigService {
       if (params.projectId === null) {
         return {...this.DEFAULT_PROJECT_CONFIG()};
       }
-      const documentSnapshot = await runInInjectionContext(this.injector, () =>
-        getDoc(doc(this.firestore, `projects/${params.projectId}`)),
-      );
-      if (!documentSnapshot.exists()) {
-        void this.router.navigate(['/']);
-        console.error(`Project ${params.projectId} does not exist.`);
-        return {...this.DEFAULT_PROJECT_CONFIG()};
+      try {
+        const data = await firstValueFrom(
+          this.httpClient.get<ProjectConfig>(
+            `/api/projects/${params.projectId}`,
+          ),
+        );
+        this.persistedProjectIds.add(params.projectId);
+        return this.normalizeLoadedProject(data);
+      } catch (error) {
+        if (error instanceof HttpErrorResponse && error.status === 404) {
+          void this.router.navigate(['/']);
+          console.error(`Project ${params.projectId} does not exist.`);
+          return {...this.DEFAULT_PROJECT_CONFIG()};
+        }
+        throw error;
       }
-      const data = documentSnapshot.data() as ProjectConfig;
-      if (data.renderRuns) {
-        data.renderRuns = data.renderRuns.map(run => {
-          if (run.createdAt) {
-            run.createdAt = (
-              run.createdAt as unknown as {toDate: () => Date}
-            ).toDate();
-          }
-          return run;
-        });
-      }
-      // Backwards compatibility for projects created before audioTracks and visualOverlays were introduced.
-      if (!data.audioTracks) {
-        data.audioTracks = [];
-      }
-      if (!data.visualOverlays) {
-        data.visualOverlays = [];
-      }
-      return data;
     },
     defaultValue: {...this.DEFAULT_PROJECT_CONFIG()},
   });
+
+  private normalizeLoadedProject(data: ProjectConfig): ProjectConfig {
+    if (data.renderRuns) {
+      data.renderRuns = data.renderRuns.map(run => {
+        if (run.createdAt) {
+          run.createdAt = asDate(run.createdAt);
+        }
+        return run;
+      });
+    }
+    // Backwards compatibility for projects created before audioTracks and visualOverlays were introduced.
+    if (!data.audioTracks) {
+      data.audioTracks = [];
+    }
+    if (!data.visualOverlays) {
+      data.visualOverlays = [];
+    }
+    return data;
+  }
 
   shouldSave = false;
 
@@ -364,9 +430,28 @@ export class ConfigService {
         ? 'dark-mode'
         : 'light-mode'),
   );
+  /**
+   * Theme primary-color options, in the order shown in the theme picker.
+   * Single source of truth for the picker, the theme effect below, and anywhere
+   * that cycles through the colors (e.g. the storyboard run slivers).
+   */
+  static readonly THEME_COLORS: readonly string[] = [
+    'theme-azure',
+    'theme-magenta',
+    'theme-green',
+    'theme-orange',
+    'theme-violet',
+  ];
   primaryColor = signal<string>(
     localStorage.getItem('primaryColor') ?? 'theme-azure',
   );
+  /**
+   * The exact config object last handed to a save request; lets the
+   * debounced autosave skip a config that `flushPendingSave()` already
+   * persisted, keeping request counts identical to the pre-flush behavior.
+   */
+  private lastSavedConfig: ProjectConfig | null = null;
+
   constructor() {
     toObservable(this.projectConfig.value)
       .pipe(skip(1), debounceTime(5000), distinctUntilChanged())
@@ -374,15 +459,13 @@ export class ConfigService {
         if (!config.id) {
           return;
         }
+        if (config === this.lastSavedConfig) {
+          // Already persisted by flushPendingSave(); avoid a duplicate save.
+          return;
+        }
         if (this.shouldSave) {
           config.lastEdited = new Date();
-          runInInjectionContext(this.injector, () => {
-            setDoc(doc(this.firestore, `projects/${config.id}`), config).catch(
-              error => {
-                console.error('Error saving project config:', error);
-              },
-            );
-          });
+          this.persistNow(config);
         }
       });
     effect(() => {
@@ -393,15 +476,86 @@ export class ConfigService {
     effect(() => {
       localStorage.setItem('primaryColor', this.primaryColor());
       this.document.documentElement.classList.remove(
-        'theme-azure',
-        'theme-magenta',
-        'theme-green',
-        'theme-orange',
-        'theme-violet',
+        ...ConfigService.THEME_COLORS,
       );
       this.document.documentElement.classList.add(this.primaryColor());
     });
     this.initFaviconListener();
+  }
+
+  /** Saves one config object, recording it for dedupe. */
+  private persistNow(config: ProjectConfig) {
+    this.lastSavedConfig = config;
+    this.saveProjectMediated(config);
+  }
+
+  /**
+   * Persists the current project immediately if it has unsaved changes,
+   * bypassing the 5s autosave debounce. Used when leaving a project (where
+   * the pending debounced emission would otherwise be dropped after the
+   * reset/load) and when workflow state must be durable right away (e.g. an
+   * in-flight generation marker). A no-op when there is nothing new to save.
+   */
+  flushPendingSave() {
+    const config = this.projectConfig.value();
+    if (!this.shouldSave || !config.id || config === this.lastSavedConfig) {
+      return;
+    }
+    config.lastEdited = new Date();
+    this.persistNow(config);
+  }
+
+  /**
+   * Persists the current project IMMEDIATELY on a meaningful, discrete action
+   * (project creation, image upload, title commit) so it appears on the
+   * homepage and references uploaded media right away rather than 5s later.
+   *
+   * Unlike flushPendingSave(), this does not require shouldSave to be set: a
+   * brand-new project (setNewProject leaves shouldSave === false) must still
+   * be created server-side on demand. It reuses persistNow()'s mechanics and
+   * records lastSavedConfig, so the trailing debounced emission for the SAME
+   * config object is deduped at the autosave guard — no double POST/PATCH.
+   */
+  saveNow() {
+    const config = this.projectConfig.value();
+    if (!config.id || config === this.lastSavedConfig) {
+      return;
+    }
+    config.lastEdited = new Date();
+    this.persistNow(config);
+  }
+
+  /**
+   * Mediated autosave: POST creates the document on the first save of a new
+   * project (the server stamps createdBy from the verified identity); PATCH
+   * thereafter (full-document overwrite, createdBy immutable server-side).
+   * Unlike the legacy silent path, failures surface a persistent snackbar
+   * with a Retry affordance.
+   */
+  private saveProjectMediated(config: ProjectConfig) {
+    const isPersisted = this.persistedProjectIds.has(config.id);
+    const request = isPersisted
+      ? this.httpClient.patch(`/api/projects/${config.id}`, config)
+      : this.httpClient.post<{id: string}>('/api/projects', config);
+    request.subscribe({
+      next: () => {
+        this.persistedProjectIds.add(config.id);
+      },
+      error: error => {
+        console.error('Error saving project config:', error);
+        const snackBarRef = this.matSnackBar.open(
+          'Unsaved changes — failed to save the project.',
+          'Retry',
+          {panelClass: ['error-snackbar']},
+        );
+        snackBarRef.onAction().subscribe(() => {
+          // Retry with the latest state if the user is still on this
+          // project, otherwise with the state captured at failure time.
+          const latest = this.projectConfig.value();
+          this.saveProjectMediated(latest.id === config.id ? latest : config);
+        });
+      },
+    });
   }
 
   private initFaviconListener() {
@@ -451,6 +605,10 @@ export class ConfigService {
   }
 
   resetProjectConfig() {
+    // Leaving the project: persist the pending debounced autosave, which
+    // would otherwise be silently dropped once the config resets (the
+    // post-reset emission has id === '' / shouldSave === false).
+    this.flushPendingSave();
     this.projectId.set(null);
     this.projectConfig.set({...this.DEFAULT_PROJECT_CONFIG()});
     this.shouldSave = false;
@@ -467,11 +625,14 @@ export class ConfigService {
   }
 
   setNewProject(uuid: string) {
+    // Not persisted yet: the first autosave POSTs /api/projects, where the
+    // server stamps createdBy from the verified identity. Left undefined here.
+    this.persistedProjectIds.delete(uuid);
     this.projectConfig.set({
       ...this.DEFAULT_PROJECT_CONFIG(),
       id: uuid,
       name: 'Untitled Project',
-      createdBy: this.auth.currentUser?.email ?? undefined,
+      createdBy: undefined,
     });
     this.shouldSave = false;
   }
@@ -480,6 +641,16 @@ export class ConfigService {
     this.updateProjectConfig({
       renderRuns: [renderRun, ...(this.projectConfig.value().renderRuns ?? [])],
     });
+  }
+
+  /**
+   * Sets or clears the persisted in-flight render marker and persists the
+   * project immediately (mediated-only call sites), mirroring the per-scene
+   * setScenePendingGeneration so a render survives navigation.
+   */
+  setPendingRender(pendingRender: PendingRender | undefined) {
+    this.updateProjectConfig({pendingRender});
+    this.flushPendingSave();
   }
 
   newRenderRunCount = computed(() => {
@@ -493,35 +664,33 @@ export class ConfigService {
     if (this.projectConfig.value().id === projectId) {
       return;
     }
+    // Switching projects: persist the previous project's pending debounced
+    // autosave before it is dropped.
+    this.flushPendingSave();
     this.projectId.set(projectId);
     this.shouldSave = false;
   }
 
-  async getProjects(createdBy?: string): Promise<ProjectConfig[]> {
-    return runInInjectionContext(this.injector, async () => {
-      const projectsCollection = collection(this.firestore, 'projects');
-      const projectsQuery = createdBy
-        ? query(projectsCollection, where('createdBy', '==', createdBy))
-        : projectsCollection;
-      const querySnapshot = await getDocs(projectsQuery);
-
-      return querySnapshot.docs.map(doc => {
-        const data = doc.data() as ProjectConfig;
-        // firestore converts Date objects automatically so we need to convert
-        // them back.
-        if (data.lastEdited) {
-          data.lastEdited = (
-            data.lastEdited as unknown as {toDate: () => Date}
-          ).toDate();
-        }
-        return data;
-      });
+  async getProjects(mineOnly?: unknown): Promise<ProjectConfig[]> {
+    // The server filters on its own verified identity, so the client never
+    // sends an email — it only sets the 'createdBy=me' marker when the caller
+    // wants its own projects. `mineOnly` is used purely as a truthy flag: any
+    // truthy value (the homepage passes the current user's email/uid) means
+    // "my projects only", and a falsy value means "all projects".
+    const url = mineOnly ? '/api/projects?createdBy=me' : '/api/projects';
+    const response = await firstValueFrom(
+      this.httpClient.get<{projects: ProjectConfig[]}>(url),
+    );
+    return response.projects.map(data => {
+      if (data.lastEdited) {
+        data.lastEdited = asDate(data.lastEdited);
+      }
+      return data;
     });
   }
 
   async deleteProject(projectId: string) {
-    return runInInjectionContext(this.injector, async () => {
-      await deleteDoc(doc(this.firestore, `projects/${projectId}`));
-    });
+    await firstValueFrom(this.httpClient.delete(`/api/projects/${projectId}`));
+    this.persistedProjectIds.delete(projectId);
   }
 }

@@ -14,41 +14,38 @@
  * limitations under the License.
  */
 
-import {HttpClient} from '@angular/common/http';
+import {HttpClient, HttpErrorResponse} from '@angular/common/http';
+import {effect, inject, Injectable, signal, untracked} from '@angular/core';
 import {
-  EnvironmentInjector,
-  inject,
-  Injectable,
-  runInInjectionContext,
-  signal,
-} from '@angular/core';
-import {
-  getBlob,
-  getDownloadURL,
-  ref,
-  Storage,
-  uploadBytes,
-  uploadString,
-} from '@angular/fire/storage';
-import {MatSnackBar} from '@angular/material/snack-bar';
+  MatSnackBar,
+  MatSnackBarRef,
+  TextOnlySnackBar,
+} from '@angular/material/snack-bar';
 import {
   filter,
   firstValueFrom,
   Observable,
   retry,
   tap,
+  throwError,
+  timeout,
   timer,
   switchMap,
   take,
 } from 'rxjs';
+import {env} from '../../../env';
 import {ClientMediaService} from '../client-media/client-media';
+import {MediaService} from '../media/media';
 import {
   ASPECT_RATIO_DEVIATION_THRESHOLD,
   AudioTrack,
   Candidate,
   ConfigService,
   DEFAULT_TRANSITION_OVERLAP,
+  GcsFile,
   GeneratedScene,
+  PendingGeneration,
+  PendingRender,
   Product,
   ProductImage,
   ProvidedVideoScene,
@@ -59,11 +56,14 @@ import {
 import {
   CombineVideoArrangement as CombineScenesArrangement,
   CombineScenesWorkflowParameters,
+  NodeItem,
+  SIGN_URL_RETRY_DELAYS_MS,
   StoryboardGenerationWorkflowParameters,
   StoryboardItem,
   SupplyNodeResponse,
   VideoGenerationWorkflowParameters,
   WORKFLOW_STATUS_POLL_INTERVAL_MS,
+  WORKFLOW_STATUS_POLL_TIMEOUT_MS,
   WorkflowStatusResponse,
 } from './remix-engine.interface';
 
@@ -71,6 +71,20 @@ class ProjectChangedError extends Error {
   constructor() {
     super('Project changed, cancelling workflow polling');
     this.name = 'ProjectChangedError';
+  }
+}
+
+/**
+ * Thrown when a status poll exceeds WORKFLOW_STATUS_POLL_TIMEOUT_MS without the
+ * workflow's terminal sink output arriving. Treated like ProjectChangedError —
+ * the in-flight marker is kept so reopening the project resumes — but, unlike a
+ * deliberate navigation, it surfaces a user-facing message because the run may
+ * be stuck (e.g. an unrecovered IAP session) rather than merely backgrounded.
+ */
+class PollTimeoutError extends Error {
+  constructor() {
+    super('Workflow status polling timed out');
+    this.name = 'PollTimeoutError';
   }
 }
 
@@ -83,25 +97,71 @@ class ProjectChangedError extends Error {
 export class RemixEngineService {
   private configService = inject(ConfigService);
   private httpClient = inject(HttpClient);
-  private injector = inject(EnvironmentInjector);
-  private storage = inject(Storage);
   private clientMediaService = inject(ClientMediaService);
+  private mediaService = inject(MediaService);
+
+  /**
+   * Execution ids whose resume has already been kicked off this session, so
+   * the effect below does not start a second poll for the same run.
+   */
+  private readonly resumedExecutionIds = new Set<string>();
+
+  /** As resumedExecutionIds, but for render (combine-scenes) runs. */
+  private readonly resumedRenderExecutionIds = new Set<string>();
+
+  constructor() {
+    // Resume persisted in-flight candidate generations whenever a project
+    // with pendingGeneration markers is loaded (or re-loaded).
+    effect(() => {
+      const config = this.configService.projectConfig.value();
+      // untracked: generatingSceneIds changes must not re-run this scan.
+      const generating = untracked(this.generatingSceneIds);
+      for (const scene of config.storyboard) {
+        if (!this.configService.isGeneratedScene(scene)) {
+          continue;
+        }
+        const pending = scene.pendingGeneration;
+        if (
+          !pending ||
+          this.resumedExecutionIds.has(pending.executionId) ||
+          generating.has(scene.id)
+        ) {
+          continue;
+        }
+        this.resumedExecutionIds.add(pending.executionId);
+        void this.resumeGeneration(config.id, scene.id, pending);
+      }
+
+      // Resume a persisted in-flight render the same way. untracked: a live
+      // render (combiningScenes) is the in-memory guard that stops the just-
+      // started run from being resumed as a duplicate, so reading it must
+      // not re-run this scan.
+      const pendingRender = config.pendingRender;
+      if (
+        pendingRender &&
+        !this.resumedRenderExecutionIds.has(pendingRender.executionId) &&
+        !untracked(this.combiningScenes)
+      ) {
+        this.resumedRenderExecutionIds.add(pendingRender.executionId);
+        void this.resumeRender(config.id, pendingRender);
+      }
+    });
+  }
 
   private startWorkflow(
     workflowDefinition: object,
   ): Observable<SupplyNodeResponse> {
-    return this.httpClient.post<SupplyNodeResponse>(
-      `${this.configService.globalConfig.value()!.gatewayBaseUrl}/supplyNode?api_key=${this.configService.globalConfig.value()!.gatewayApiKey}`,
-      workflowDefinition,
-    );
+    // Same-origin: the app service serves the SPA and /api from one Cloud Run
+    // service, so the control plane is always reached relative to the page.
+    const url = '/api/supplyNode';
+    return this.httpClient.post<SupplyNodeResponse>(url, workflowDefinition);
   }
 
   private getWorkflowStatus(
     executionId: string,
   ): Observable<WorkflowStatusResponse> {
-    return this.httpClient.get<WorkflowStatusResponse>(
-      `${this.configService.globalConfig.value()!.gatewayBaseUrl}/getStatus?api_key=${this.configService.globalConfig.value()!.gatewayApiKey}&executionId=${executionId}&signedUrls=false&gcsBucket=${this.configService.globalConfig.value()!.gcsBucket}`,
-    );
+    const url = `/api/getStatus?executionId=${executionId}&signedUrls=false&gcsBucket=${this.configService.globalConfig.value()!.gcsBucket}`;
+    return this.httpClient.get<WorkflowStatusResponse>(url);
   }
 
   async pollWorkflow(
@@ -111,16 +171,87 @@ export class RemixEngineService {
     return await firstValueFrom(
       timer(0, WORKFLOW_STATUS_POLL_INTERVAL_MS).pipe(
         switchMap(() => this.getWorkflowStatus(workflowId)),
-        retry({delay: WORKFLOW_STATUS_POLL_INTERVAL_MS}),
+        retry({
+          delay: error => {
+            if (
+              env.controlPlaneMode === 'iap' &&
+              error instanceof HttpErrorResponse &&
+              error.status === 401
+            ) {
+              // IAP session-cookie expiry: open ONE session-refresh tab per
+              // expiry episode. The 401 consumes no retry budget and keeps
+              // the normal poll cadence, so the loop survives arbitrarily
+              // long expiry windows instead of dying silently.
+              this.onIapSessionExpiry();
+            }
+            // Non-401 (and non-iap) errors take exactly today's path: an
+            // unconditional retry after the poll interval.
+            return timer(WORKFLOW_STATUS_POLL_INTERVAL_MS);
+          },
+        }),
         tap(() => {
+          if (this.iapExpiryEpisodeActive) {
+            // A poll succeeded again: the session is valid — close the
+            // expiry episode. A later expiry is a new episode (and may
+            // open one new refresh tab).
+            this.iapExpiryEpisodeActive = false;
+            this.iapExpirySnackBarRef?.dismiss();
+            this.iapExpirySnackBarRef = undefined;
+          }
           if (this.configService.projectConfig.value().id !== projectId) {
             throw new ProjectChangedError();
           }
         }),
         filter(response => response.sink?.output !== undefined),
+        // Overall backstop so a poll can never spin forever (e.g. an IAP
+        // session that never recovers, or a backend run that ends without
+        // writing its sink output). Placed AFTER filter, so the clock measures
+        // time-to-terminal-output and is unaffected by the inner retry loop;
+        // it fires once if no sink output arrives within the window. The catch
+        // sites treat PollTimeoutError like ProjectChangedError (keep the marker
+        // so a reopen resumes), plus a user-facing "taking longer" message.
+        timeout({
+          first: WORKFLOW_STATUS_POLL_TIMEOUT_MS,
+          with: () => throwError(() => new PollTimeoutError()),
+        }),
         take(1),
       ),
     );
+  }
+
+  /**
+   * True while an IAP session-expiry episode is in progress (401s on the
+   * status polls). Service-level so that N concurrent polls share one
+   * episode: at most one refresh tab is opened per expiry, not per poll.
+   */
+  private iapExpiryEpisodeActive = false;
+  private iapExpirySnackBarRef?: MatSnackBarRef<TextOnlySnackBar>;
+
+  /**
+   * Handles an HTTP 401 on a status poll under the IAP control plane (the
+   * session cookie expired; the interceptor's X-Requested-With makes IAP
+   * return 401 instead of a 302 the XHR cannot follow). Opens the IAP
+   * session-refresh flow in a new tab once per episode and shows a
+   * persistent snackbar. Its "Sign in" action re-opens the tab — the
+   * window.open below runs from a timer callback (not a user gesture) and
+   * may be popup-blocked; the snackbar action IS a gesture.
+   */
+  private onIapSessionExpiry() {
+    if (this.iapExpiryEpisodeActive) {
+      return;
+    }
+    this.iapExpiryEpisodeActive = true;
+    const refreshUrl = `${window.location.origin}/?gcp-iap-mode=DO_SESSION_REFRESH`;
+    window.open(refreshUrl);
+    this.iapExpirySnackBarRef = this.matSnackBar.open(
+      'Your session expired — sign in again in the opened tab. ' +
+        'Generation will resume automatically.',
+      'Sign in',
+      {panelClass: ['error-snackbar']},
+    );
+    this.iapExpirySnackBarRef.onAction().subscribe(() => {
+      window.open(refreshUrl);
+    });
   }
 
   async startVideoGenerationWorkflow(
@@ -186,8 +317,7 @@ export class RemixEngineService {
             geminiLocation:
               this.configService.globalConfig.value()!.geminiLocation,
             aspectRatio: this.configService.projectConfig.value().aspectRatio,
-            imageModel:
-              this.configService.globalConfig.value()!.imageModel,
+            imageModel: this.configService.globalConfig.value()!.imageModel,
             imageLocation:
               this.configService.globalConfig.value()!.imageLocation,
           },
@@ -322,7 +452,7 @@ export class RemixEngineService {
         images: [] as Array<{
           file: string;
           product_id: string;
-          description: string;
+          product_description: string;
           image_id: string;
           image_instruction: string;
         }>,
@@ -333,7 +463,7 @@ export class RemixEngineService {
     for (const product of products) {
       for (const [index, image] of product.images.entries()) {
         let imageInstruction = params.imageDecision;
-        if (image.aspectRatioDeviation && image.aspectRatioDeviation === 0) {
+        if (image.aspectRatioDeviation === 0) {
           imageInstruction = 'none';
         } else if (
           image.aspectRatioDeviation &&
@@ -345,7 +475,10 @@ export class RemixEngineService {
           file: image.path,
           product_id: product.id.toString(),
           image_id: (index + 1).toString(),
-          description: product.description ?? '',
+          // The storyboard node consumes (flattens) this as a dimension and
+          // actions/generate_storyboard.py reads this exact key to build the
+          // prompt — it must be 'product_description', not 'description'.
+          product_description: product.description ?? '',
           image_instruction: imageInstruction,
         });
       }
@@ -494,16 +627,13 @@ export class RemixEngineService {
 
   async uploadText(content: string, fileName: string) {
     const contentHash = await this.generateHash(content);
-    return runInInjectionContext(this.injector, async () => {
-      const storageRef = ref(
-        this.storage,
-        `remix-input/${fileName}-${contentHash}.txt`,
-      );
-      const snapshot = await uploadString(storageRef, content, 'raw', {
-        contentType: 'text/plain',
-      });
-      return snapshot.metadata.fullPath;
-    });
+    const hashedFileName = `${fileName}-${contentHash}.txt`;
+    const {path} = await this.mediaService.upload(
+      content,
+      'remix-input',
+      hashedFileName,
+    );
+    return path;
   }
 
   async generateHash(input: string | File) {
@@ -557,9 +687,28 @@ export class RemixEngineService {
       }
       executionId = (await firstValueFrom(response)).executionId;
       console.debug(
-        'Video generation workflow started:',
+        `${this.sceneLabel(scene.id)} — video generation workflow started:`,
         `${window.location.origin}/status?executionId=${executionId}`,
       );
+      // Persist the in-flight run immediately (not debounced): navigating
+      // away must not lose it. Self-healing: if the completion save below
+      // never lands, the document still carries pendingGeneration and the
+      // next open re-collects the results from the completed execution.
+      const pending: PendingGeneration = {
+        executionId,
+        requestedCount:
+          this.configService.projectConfig.value().numberOfCandidates,
+        startedAt: new Date().toISOString(),
+        durationSeconds,
+        model,
+        generateAudio,
+        resolution,
+        prompt: scene.prompt,
+      };
+      if (scene.referenceImage) {
+        pending.referenceImage = {...scene.referenceImage};
+      }
+      this.setScenePendingGeneration(scene.id, pending);
       const workflowStatus = await this.pollWorkflow(executionId, projectId);
       if (workflowStatus.sink?.output['0']['video'][0]['_error']) {
         const errorMsg =
@@ -573,79 +722,60 @@ export class RemixEngineService {
       const currentMaxRun = scene.candidates?.length
         ? Math.max(...scene.candidates.map(c => c.runNumber))
         : 0;
-      const newCandidates = await Promise.all(
-        workflowStatus.sink.output['0']['video'].map(async e => {
-          const path = e.file!;
-          const url = await runInInjectionContext(this.injector, () => {
-            const reference = ref(this.storage, path);
-            return getDownloadURL(reference);
-          });
-
-          const lowQualityThumbnail = await this.clientMediaService
-            .generateLowQualityThumbnail(url, 'video')
-            .then(blob => this.clientMediaService.toBase64(blob))
-            .catch(e => {
-              console.log(e);
-              return undefined;
-            });
-          const highQualityThumbnail = await this.clientMediaService
-            .generateHighQualityThumbnail(url, 'video')
-            .then(blob => this.clientMediaService.toFile(blob))
-            .then(file => this.uploadThumbnail(file))
-            .catch(e => {
-              console.log(e);
-              return undefined;
-            });
-
-          const newCandidate: Candidate = {
-            runNumber: currentMaxRun + 1,
-            durationSeconds,
-            prompt: scene.prompt,
-            model,
-            generateAudio,
-            resolution,
-            video: {url, path},
-            lowQualityThumbnail,
-            highQualityThumbnail,
-          };
-          if (scene.referenceImage) {
-            newCandidate.referenceImage = {...scene.referenceImage};
-          }
-          return newCandidate;
-        }),
+      const newCandidates = await this.collectCandidates(
+        workflowStatus.sink.output['0']['video'],
+        currentMaxRun,
+        {
+          durationSeconds,
+          model,
+          generateAudio,
+          resolution,
+          prompt: scene.prompt,
+          referenceImage: scene.referenceImage,
+        },
       );
       if (newCandidates.length === 0) {
+        // The run is complete but produced no (new) videos: clear the
+        // persisted in-flight marker now instead of leaving it for the
+        // next project open's resume pass to clean up.
+        this.setScenePendingGeneration(scene.id, undefined);
         return;
       }
       const candidates = [...(scene.candidates ?? []), ...newCandidates];
-      const scenes = this.configService.projectConfig
-        .value()
-        .storyboard.map(s =>
-          s.id === scene.id && this.configService.isGeneratedScene(s)
-            ? {
-                ...s,
-                candidates,
-                selectedCandidateIndex: s.selectedCandidateIndex ?? 0,
-              }
-            : s,
-        );
-      this.configService.updateProjectConfig({storyboard: scenes});
+      this.attachCandidates(scene.id, candidates);
     } catch (error) {
       if (error instanceof ProjectChangedError) {
+        // The user left the project mid-run: pendingGeneration stays
+        // persisted so the run is resumed when the project is re-opened.
         console.info(error.message);
         return;
+      } else if (error instanceof PollTimeoutError) {
+        // Stalled, not failed: keep pendingGeneration so reopening the project
+        // resumes and still collects a late result. Only clear the in-memory
+        // spinner (finally) and tell the user it may still finish.
+        this.matSnackBar.open(
+          'Generation is taking longer than expected. It may still finish — ' +
+            'reopen the project to check.',
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
+        return;
       } else if (error instanceof Error) {
+        // Definitive failure: record the error on the scene itself — shown where
+        // the video would be, with a "!" badge on its thumbnail — instead of only
+        // a transient snackbar, so the user can tell which scene failed and why
+        // after the snackbar is gone. This also drops any in-flight marker so the
+        // next open does not replay the error.
+        this.setSceneGenerationError(scene.id, error.message);
         console.error('Video generation error:', {executionId, error});
         console.error(
-          'Debug URL:',
+          `${this.sceneLabel(scene.id)} — debug URL:`,
           `${window.location.origin}/status?executionId=${executionId}`,
         );
         this.matSnackBar.open(
-          'Failed to generate video(s). ' + error.message,
+          `${this.sceneLabel(scene.id)} failed to generate — open the marked scene to see why.`,
           'Dismiss',
-          {
-            panelClass: ['error-snackbar'],
-          },
+          {panelClass: ['error-snackbar']},
         );
       }
     } finally {
@@ -655,6 +785,334 @@ export class RemixEngineService {
         return newIds;
       });
     }
+  }
+
+  /**
+   * Resumes a candidate generation persisted in the project document
+   * (mediated data plane): re-registers the scene as generating (so the
+   * storyboard renders its loading placeholders), polls the persisted
+   * execution and runs the shared completion path.
+   */
+  private async resumeGeneration(
+    projectId: string,
+    sceneId: string,
+    pending: PendingGeneration,
+  ) {
+    this.generatingSceneIds.update(ids => {
+      const newIds = new Set(ids);
+      newIds.add(sceneId);
+      return newIds;
+    });
+    try {
+      console.debug(
+        `${this.sceneLabel(sceneId)} — resuming video generation workflow:`,
+        `${window.location.origin}/status?executionId=${pending.executionId}`,
+      );
+      const workflowStatus = await this.pollWorkflow(
+        pending.executionId,
+        projectId,
+      );
+      if (workflowStatus.sink?.output['0']['video'][0]['_error']) {
+        const errorMsg =
+          workflowStatus.sink?.output['0']['video'][0]['_error'] ||
+          'Unknown error';
+        throw new Error(errorMsg);
+      }
+      if (!workflowStatus.sink) {
+        throw new Error('Workflow completed without output');
+      }
+      const currentScene = this.configService.projectConfig
+        .value()
+        .storyboard.find(
+          (s): s is GeneratedScene =>
+            s.id === sceneId && this.configService.isGeneratedScene(s),
+        );
+      const existingCandidates = currentScene?.candidates ?? [];
+      // Idempotency: a prior completion save may already have attached some
+      // of these videos — skip any whose path is present on the scene.
+      const attachedPaths = new Set(
+        existingCandidates
+          .map(c => c.video?.path)
+          .filter((p): p is string => p !== undefined),
+      );
+      const videoItems = workflowStatus.sink.output['0']['video'].filter(
+        e => e.file === undefined || !attachedPaths.has(e.file),
+      );
+      const currentMaxRun = existingCandidates.length
+        ? Math.max(...existingCandidates.map(c => c.runNumber))
+        : 0;
+      const newCandidates = await this.collectCandidates(
+        videoItems,
+        currentMaxRun,
+        {
+          durationSeconds: pending.durationSeconds,
+          model: pending.model,
+          generateAudio: pending.generateAudio,
+          resolution: pending.resolution,
+          prompt: pending.prompt,
+          referenceImage: pending.referenceImage,
+        },
+      );
+      // Attach even when newCandidates is empty: the run is complete, so
+      // the pendingGeneration marker must be cleared either way.
+      this.attachCandidates(sceneId, [...existingCandidates, ...newCandidates]);
+    } catch (error) {
+      if (error instanceof ProjectChangedError) {
+        console.info(error.message);
+        // The user left again: keep pendingGeneration persisted and allow a
+        // later return to this project to resume once more.
+        this.resumedExecutionIds.delete(pending.executionId);
+        return;
+      } else if (error instanceof PollTimeoutError) {
+        // Stalled, not failed: keep pendingGeneration and allow a later reopen
+        // to resume again; surface a message rather than discarding the run.
+        this.resumedExecutionIds.delete(pending.executionId);
+        this.matSnackBar.open(
+          'Generation is taking longer than expected. It may still finish — ' +
+            'reopen the project to check.',
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
+        return;
+      } else if (error instanceof Error) {
+        // Definitive failure: record the error on the scene (shown in the
+        // preview, with a "!" badge) and clear the marker so reopening the
+        // project does not replay the error.
+        this.setSceneGenerationError(sceneId, error.message);
+        console.error('Video generation resume error:', {
+          executionId: pending.executionId,
+          error,
+        });
+        console.error(
+          `${this.sceneLabel(sceneId)} — debug URL:`,
+          `${window.location.origin}/status?executionId=${pending.executionId}`,
+        );
+        this.matSnackBar.open(
+          `${this.sceneLabel(sceneId)} failed to generate — open the marked scene to see why.`,
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
+      }
+    } finally {
+      this.generatingSceneIds.update(ids => {
+        const newIds = new Set(ids);
+        newIds.delete(sceneId);
+        return newIds;
+      });
+    }
+  }
+
+  /**
+   * Builds Candidate objects (signed URL + thumbnails) for the workflow's
+   * video outputs. The signUrl HTTP call is wrapped in a bounded retry and
+   * per-candidate failures are tolerated (allSettled) — only an all-failed
+   * batch escalates to the caller's error path.
+   */
+  private async collectCandidates(
+    videoItems: NodeItem[],
+    currentMaxRun: number,
+    params: {
+      durationSeconds: number;
+      model: string;
+      generateAudio: boolean;
+      resolution: Resolution;
+      prompt: string;
+      referenceImage?: GcsFile;
+    },
+  ): Promise<Candidate[]> {
+    const buildCandidate = async (
+      e: NodeItem & {file: string},
+    ): Promise<Candidate> => {
+      const path = e.file;
+      const url = await this.withRetry(() => this.mediaService.signUrl(path));
+
+      const lowQualityThumbnail = await this.clientMediaService
+        .generateLowQualityThumbnail(url, 'video')
+        .then(blob => this.clientMediaService.toBase64(blob))
+        .catch(e => {
+          console.error(e);
+          return undefined;
+        });
+      const highQualityThumbnail = await this.clientMediaService
+        .generateHighQualityThumbnail(url, 'video')
+        .then(blob => this.clientMediaService.toFile(blob))
+        .then(file => this.uploadThumbnail(file))
+        .catch(e => {
+          console.error(e);
+          return undefined;
+        });
+
+      const newCandidate: Candidate = {
+        runNumber: currentMaxRun + 1,
+        durationSeconds: params.durationSeconds,
+        prompt: params.prompt,
+        model: params.model,
+        generateAudio: params.generateAudio,
+        resolution: params.resolution,
+        video: {url, path},
+        lowQualityThumbnail,
+        highQualityThumbnail,
+      };
+      if (params.referenceImage) {
+        newCandidate.referenceImage = {...params.referenceImage};
+      }
+      return newCandidate;
+    };
+    // Drop file-less outputs: the resume filter keeps items with no `file`
+    // (they have no path to test against already-attached candidates), but such
+    // an item is not a real video — it has neither a file to sign nor an
+    // `_error`. Signing the literal path "undefined" would surface a scene that
+    // actually succeeded as a broken, definitive failure. Skip them so they are
+    // neither turned into candidates nor counted as load failures.
+    const fileItems = videoItems.filter(
+      (e): e is NodeItem & {file: string} => e.file !== undefined,
+    );
+    const settled = await Promise.allSettled(fileItems.map(buildCandidate));
+    const candidates = settled
+      .filter(
+        (r): r is PromiseFulfilledResult<Candidate> => r.status === 'fulfilled',
+      )
+      .map(r => r.value);
+    const failures = settled.filter(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    );
+    if (failures.length > 0) {
+      for (const failure of failures) {
+        console.error('Failed to load a generated video:', failure.reason);
+      }
+      if (candidates.length === 0) {
+        // Everything failed — escalate to the all-or-nothing error path.
+        throw failures[0].reason;
+      }
+      this.matSnackBar.open(
+        `${failures.length} of ${fileItems.length} generated videos could not be loaded`,
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    }
+    return candidates;
+  }
+
+  /**
+   * Attaches the full candidate list to a scene, clearing its
+   * pendingGeneration marker in the same signal update (atomic), and — on
+   * the mediated data plane — persists immediately.
+   */
+  private attachCandidates(sceneId: string, candidates: Candidate[]) {
+    const scenes = this.configService.projectConfig
+      .value()
+      .storyboard.map(s => {
+        if (s.id !== sceneId || !this.configService.isGeneratedScene(s)) {
+          return s;
+        }
+        const updated: GeneratedScene = {
+          ...s,
+          candidates,
+          selectedCandidateIndex: s.selectedCandidateIndex ?? 0,
+        };
+        delete updated.pendingGeneration;
+        // A successful run clears any prior failure marker + "!" badge.
+        delete updated.generationError;
+        delete updated.generationErrorAcknowledged;
+        return updated;
+      });
+    this.configService.updateProjectConfig({storyboard: scenes});
+    this.configService.flushPendingSave();
+  }
+
+  /**
+   * Sets or clears the persisted in-flight marker on a scene and persists
+   * the project immediately (mediated-only call sites).
+   */
+  private setScenePendingGeneration(
+    sceneId: string,
+    pendingGeneration: PendingGeneration | undefined,
+  ) {
+    const scenes = this.configService.projectConfig
+      .value()
+      .storyboard.map(s => {
+        if (s.id !== sceneId || !this.configService.isGeneratedScene(s)) {
+          return s;
+        }
+        const updated: GeneratedScene = {...s};
+        if (pendingGeneration === undefined) {
+          delete updated.pendingGeneration;
+        } else {
+          updated.pendingGeneration = pendingGeneration;
+          // Starting a (re)generation clears any prior failure marker + "!" badge.
+          delete updated.generationError;
+          delete updated.generationErrorAcknowledged;
+        }
+        return updated;
+      });
+    this.configService.updateProjectConfig({storyboard: scenes});
+    this.configService.flushPendingSave();
+  }
+
+  /**
+   * A short, position-based label for a scene, used in user messages and console
+   * hints, e.g. `Scene: [2] "Scene 55 a..."`. Uses the scene's CURRENT position
+   * (1-based) in the storyboard at the moment the message is built — not its
+   * title — and clips the name to ~10 characters so messages stay short.
+   */
+  private sceneLabel(sceneId: string): string {
+    const storyboard = this.configService.projectConfig.value().storyboard;
+    const index = storyboard.findIndex(s => s.id === sceneId);
+    const position = index >= 0 ? `${index + 1}` : '?';
+    const name = (index >= 0 ? storyboard[index].name : '') ?? '';
+    const clipped = name.length > 10 ? `${name.slice(0, 10)}...` : name;
+    return `Scene: [${position}] "${clipped}"`;
+  }
+
+  /**
+   * Records a definitive generation failure on a scene: stores the error
+   * message (shown in the preview area where the video would be), marks it
+   * unseen (drives the "!" badge on the thumbnail), and drops any in-flight
+   * marker. Persists immediately.
+   */
+  private setSceneGenerationError(sceneId: string, message: string) {
+    const scenes = this.configService.projectConfig
+      .value()
+      .storyboard.map(s => {
+        if (s.id !== sceneId || !this.configService.isGeneratedScene(s)) {
+          return s;
+        }
+        const updated: GeneratedScene = {
+          ...s,
+          generationError: message,
+          generationErrorAcknowledged: false,
+        };
+        delete updated.pendingGeneration;
+        return updated;
+      });
+    this.configService.updateProjectConfig({storyboard: scenes});
+    this.configService.flushPendingSave();
+  }
+
+  /**
+   * Bounded retry with backoff for transient failures (the mediated signUrl
+   * is an HTTP call, unlike the near-infallible SDK getDownloadURL it
+   * replaces). Attempts = SIGN_URL_RETRY_DELAYS_MS.length + 1.
+   */
+  private async withRetry<T>(fn: () => Promise<T>): Promise<T> {
+    let lastError: unknown;
+    for (
+      let attempt = 0;
+      attempt <= SIGN_URL_RETRY_DELAYS_MS.length;
+      attempt++
+    ) {
+      if (attempt > 0) {
+        await new Promise(resolve =>
+          setTimeout(resolve, SIGN_URL_RETRY_DELAYS_MS[attempt - 1]),
+        );
+      }
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError;
   }
 
   async generateStoryboard(
@@ -695,13 +1153,8 @@ export class RemixEngineService {
         throw new Error('Storyboard JSON file not found');
       }
 
-      const storyboardJson = await runInInjectionContext(
-        this.injector,
-        async () => {
-          const reference = ref(this.storage, storyboardJsonFile);
-          const blob = await getBlob(reference);
-          return JSON.parse(await blob.text());
-        },
+      const storyboardJson = JSON.parse(
+        await (await this.mediaService.getBlob(storyboardJsonFile)).text(),
       );
 
       if (
@@ -725,10 +1178,7 @@ export class RemixEngineService {
             productsToOutpaintedImages[productId] = {};
           }
           productsToOutpaintedImages[productId][String(image.image_id)] = {
-            url: await runInInjectionContext(this.injector, async () => {
-              const reference = ref(this.storage, imagePath);
-              return getDownloadURL(reference);
-            }),
+            url: await this.mediaService.signUrl(imagePath),
             path: imagePath,
           };
         }
@@ -759,6 +1209,14 @@ export class RemixEngineService {
     } catch (error) {
       if (error instanceof ProjectChangedError) {
         console.info(error.message);
+        return;
+      } else if (error instanceof PollTimeoutError) {
+        this.matSnackBar.open(
+          'Storyboard generation is taking longer than expected. It may still ' +
+            'finish — reopen the project to check.',
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
         return;
       } else if (error instanceof Error) {
         console.error('Storyboard generation error:', error);
@@ -806,33 +1264,34 @@ export class RemixEngineService {
         'Combine scenes workflow started:',
         `${window.location.origin}/status?executionId=${executionId}`,
       );
+      // Persist the in-flight render immediately so leaving and re-opening
+      // the project resumes it instead of abandoning the result and leaving
+      // the button stuck (mirrors the per-scene pendingGeneration marker).
+      this.configService.setPendingRender({
+        executionId,
+        startedAt: new Date().toISOString(),
+      });
       const workflowStatus = await this.pollWorkflow(executionId, projectId);
-      if (workflowStatus.sink?.output['0']['video'][0]['_error']) {
-        const errorMsg =
-          workflowStatus.sink?.output['0']['video'][0]['_error'] ||
-          'Unknown error';
-        throw new Error(errorMsg);
-      }
-      if (!workflowStatus.sink) {
-        throw new Error('Workflow completed without output');
-      }
-      const videoPath = workflowStatus.sink.output['0']['video'][0]['file'];
-      const videoUrl = await runInInjectionContext(this.injector, () => {
-        const reference = ref(this.storage, videoPath);
-        return getDownloadURL(reference);
-      });
-      this.configService.addRenderRun({
-        createdAt: new Date(),
-        outputVideo: {
-          path: videoPath!,
-          url: videoUrl,
-        },
-        wasPlayed: false,
-      });
+      await this.recordRenderOutput(workflowStatus);
       this.combiningScenes.set(false);
     } catch (error) {
       if (error instanceof ProjectChangedError) {
+        // The user left the project mid-render: reset the in-memory button
+        // state (otherwise it stays stuck on "Rendering...") but keep the
+        // persisted marker so returning to the project resumes the run.
         console.info(error.message);
+        this.combiningScenes.set(false);
+        return;
+      } else if (error instanceof PollTimeoutError) {
+        // Stalled, not failed: clear the button but keep pendingRender so a
+        // reopen resumes and collects a late result.
+        this.combiningScenes.set(false);
+        this.matSnackBar.open(
+          'Rendering is taking longer than expected. It may still finish — ' +
+            'reopen the project to check.',
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
         return;
       } else if (error instanceof Error) {
         console.error('Combine scenes error:', error);
@@ -854,6 +1313,97 @@ export class RemixEngineService {
           errorMessage: error.message,
         };
         this.configService.addRenderRun(renderRun);
+        // Definitive failure: clear the marker so reopening does not replay.
+        this.configService.setPendingRender(undefined);
+        this.combiningScenes.set(false);
+      }
+    }
+  }
+
+  /**
+   * Records a completed combine-scenes workflow's output as a render run and
+   * clears the in-flight render marker. Throws on a workflow error or missing
+   * output so the caller's catch handles it. Shared by combineScenes() and
+   * resumeRender() so the two paths cannot diverge.
+   */
+  private async recordRenderOutput(workflowStatus: WorkflowStatusResponse) {
+    if (workflowStatus.sink?.output['0']['video'][0]['_error']) {
+      const errorMsg =
+        workflowStatus.sink?.output['0']['video'][0]['_error'] ||
+        'Unknown error';
+      throw new Error(errorMsg);
+    }
+    if (!workflowStatus.sink) {
+      throw new Error('Workflow completed without output');
+    }
+    const videoPath = workflowStatus.sink.output['0']['video'][0]['file'];
+    const videoUrl = await this.mediaService.signUrl(videoPath!);
+    this.configService.addRenderRun({
+      createdAt: new Date(),
+      outputVideo: {
+        path: videoPath!,
+        url: videoUrl,
+      },
+      wasPlayed: false,
+    });
+    this.configService.setPendingRender(undefined);
+  }
+
+  /**
+   * Resumes a persisted in-flight render when its project is (re-)opened,
+   * mirroring resumeGeneration: re-poll the execution, record the finished
+   * video, and clear the marker. Keeps the marker on a repeat navigate-away
+   * so a later return can resume again; clears it on a definitive error.
+   */
+  private async resumeRender(projectId: string, pending: PendingRender) {
+    try {
+      this.combiningScenes.set(true);
+      console.debug(
+        'Resuming combine scenes workflow:',
+        `${window.location.origin}/status?executionId=${pending.executionId}`,
+      );
+      const workflowStatus = await this.pollWorkflow(
+        pending.executionId,
+        projectId,
+      );
+      await this.recordRenderOutput(workflowStatus);
+      this.combiningScenes.set(false);
+    } catch (error) {
+      if (error instanceof ProjectChangedError) {
+        console.info(error.message);
+        this.resumedRenderExecutionIds.delete(pending.executionId);
+        this.combiningScenes.set(false);
+        return;
+      } else if (error instanceof PollTimeoutError) {
+        // Stalled, not failed: keep pendingRender so a later reopen resumes and
+        // collects a late result (mirrors combineScenes). Do NOT record an
+        // error run or clear the marker, which would permanently abandon a
+        // render that is merely slow.
+        this.combiningScenes.set(false);
+        this.matSnackBar.open(
+          'Rendering is taking longer than expected. It may still finish — ' +
+            'reopen the project to check.',
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
+        return;
+      } else if (error instanceof Error) {
+        this.configService.addRenderRun({
+          createdAt: new Date(),
+          errorMessage: error.message,
+        });
+        this.configService.setPendingRender(undefined);
+        console.error('Combine scenes resume error:', {
+          executionId: pending.executionId,
+          error,
+        });
+        this.matSnackBar.open(
+          error.message || 'Failed to combine scenes',
+          'Dismiss',
+          {
+            panelClass: ['error-snackbar'],
+          },
+        );
         this.combiningScenes.set(false);
       }
     }
@@ -906,7 +1456,7 @@ export class RemixEngineService {
       }
       const duration = this.getSceneVideoDuration(scene, skipTime);
       if (!gcsVideoPath) {
-        console.log(`No video for scene ${scene.id}`);
+        console.debug(`No video for scene ${scene.id}`);
         continue;
       }
       const videoArrangement: CombineScenesArrangement = {
@@ -961,29 +1511,9 @@ export class RemixEngineService {
     const extension = fileNameParts.pop();
     const contentHash = await this.generateHash(media);
     const fileName = `${fileNameParts.join('.')}-${contentHash}.${extension}`;
-    return await runInInjectionContext(this.injector, async () => {
-      const storageRef = ref(this.storage, `${path}/${fileName}`);
-      try {
-        const downloadUrl = await getDownloadURL(storageRef);
-        return {
-          path: storageRef.fullPath,
-          url: downloadUrl,
-        };
-      } catch {
-        const snapshot = await runInInjectionContext(this.injector, () =>
-          uploadBytes(storageRef, media, {
-            contentType: media.type,
-          }),
-        );
-        const url = await runInInjectionContext(this.injector, () =>
-          getDownloadURL(storageRef),
-        );
-        return {
-          path: snapshot.metadata.fullPath,
-          url,
-        };
-      }
-    });
+    // Same hash-derived object name; the server skips the PUT when the object
+    // already exists.
+    return this.mediaService.upload(media, path, fileName);
   }
 
   async uploadThumbnail(media: File) {

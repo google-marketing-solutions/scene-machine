@@ -14,24 +14,9 @@
  * limitations under the License.
  */
 
-import {
-  EnvironmentInjector,
-  inject,
-  Injectable,
-  resource,
-  runInInjectionContext,
-} from '@angular/core';
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  Firestore,
-  getDocs,
-  orderBy,
-  query,
-  updateDoc,
-} from '@angular/fire/firestore';
+import {HttpClient} from '@angular/common/http';
+import {inject, Injectable, resource} from '@angular/core';
+import {firstValueFrom} from 'rxjs';
 
 /**
  * Represents a creative template.
@@ -53,49 +38,34 @@ export interface Template {
   providedIn: 'root',
 })
 export class TemplatesService {
-  private readonly firestore = inject(Firestore);
-  private readonly injector = inject(EnvironmentInjector);
+  private readonly httpClient = inject(HttpClient);
 
   templates = resource({
     loader: async () => {
-      const querySnapshot = await runInInjectionContext(this.injector, () =>
-        getDocs(
-          query(
-            collection(this.firestore, 'creativeTemplates'),
-            orderBy('createdAt', 'asc'),
-          ),
-        ),
+      // Server orders by createdAt asc and injects ids.
+      const response = await firstValueFrom(
+        this.httpClient.get<{templates: Template[]}>('/api/templates'),
       );
-      const templates: Template[] = [];
-      querySnapshot.forEach(doc => {
-        const data = doc.data() as Template;
-        data.id = doc.id;
-        templates.push(data);
-      });
-      return templates;
+      return response.templates;
     },
   });
 
   async createTemplate(templateData: Omit<Template, 'id'>) {
-    await runInInjectionContext(this.injector, () =>
-      addDoc(collection(this.firestore, 'creativeTemplates'), templateData),
+    await firstValueFrom(
+      this.httpClient.post<{id: string}>('/api/templates', templateData),
     );
     this.templates.reload();
   }
 
   async updateTemplate(id: string, templateData: Partial<Template>) {
-    await runInInjectionContext(this.injector, () => {
-      const docRef = doc(this.firestore, 'creativeTemplates', id);
-      return updateDoc(docRef, templateData);
-    });
+    await firstValueFrom(
+      this.httpClient.patch(`/api/templates/${id}`, templateData),
+    );
     this.templates.reload();
   }
 
   async deleteTemplate(id: string) {
-    await runInInjectionContext(this.injector, () => {
-      const docRef = doc(this.firestore, 'creativeTemplates', id);
-      return deleteDoc(docRef);
-    });
+    await firstValueFrom(this.httpClient.delete(`/api/templates/${id}`));
     this.templates.reload();
   }
 }
