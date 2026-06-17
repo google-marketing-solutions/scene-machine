@@ -384,6 +384,16 @@ _SIGNED_GET_TTL = datetime.timedelta(hours=24)
 _SIGNED_PUT_TTL = datetime.timedelta(hours=1)
 _UPLOAD_PREFIXES = ('remix-input', 'thumbnail')
 
+# Per-prefix maximum declared upload size (bytes). The client sends sizeBytes on
+# the /api/uploadUrl request and the server rejects an oversized declaration
+# before signing. This is a pre-sign convenience bound for the honest/accidental
+# case (a custom client could still understate or omit sizeBytes); a bypass-proof
+# bound would sign an x-goog-content-length-range into the PUT URL (follow-up).
+_MAX_UPLOAD_BYTES = {
+    'remix-input': 1024 * 1024 * 1024,  # 1 GiB (covers an uploaded source video)
+    'thumbnail': 50 * 1024 * 1024,  # 50 MiB (generated thumbnails)
+}
+
 # Content types the client legitimately uploads: media (image/audio/video), the
 # plain-text workflow payloads uploadText sends (prompts/briefings/arrangements),
 # and the application/octet-stream fallback the browser uses when a File has no
@@ -553,6 +563,18 @@ def upload_url_handler() -> flask_response:
     return _json_error('Missing contentType', 400)
   if not _is_allowed_upload_content_type(content_type):
     return _json_error('Unsupported contentType', 400)
+  # prefix is validated against _UPLOAD_PREFIXES above, so it is a key of
+  # _MAX_UPLOAD_BYTES here. Reject an oversized declared size before signing.
+  size_bytes = data.get('sizeBytes')
+  if size_bytes is not None:
+    if (
+        not isinstance(size_bytes, int)
+        or isinstance(size_bytes, bool)
+        or size_bytes < 0
+    ):
+      return _json_error('sizeBytes must be a non-negative integer', 400)
+    if size_bytes > _MAX_UPLOAD_BYTES[prefix]:
+      return _json_error(f'Upload exceeds the size limit for {prefix}', 400)
   bucket_name = config.get('gcsBucket')
   if not bucket_name:
     return _json_error('gcsBucket not configured', 500)

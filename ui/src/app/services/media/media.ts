@@ -115,11 +115,16 @@ export class MediaService {
       typeof content === 'string'
         ? 'text/plain'
         : content.type || 'application/octet-stream';
+    // Declare the size so the server can reject an oversized upload before it
+    // signs the PUT URL (the bytes then go straight to GCS, bypassing Flask).
+    const sizeBytes =
+      typeof content === 'string' ? new Blob([content]).size : content.size;
     const response = await firstValueFrom(
       this.httpClient.post<UploadUrlResponse>('/api/uploadUrl', {
         path: prefix,
         fileName,
         contentType,
+        sizeBytes,
       }),
     );
     if (!response.exists && response.uploadUrl) {

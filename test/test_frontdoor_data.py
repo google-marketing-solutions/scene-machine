@@ -402,6 +402,66 @@ def test_upload_url_rejects_disallowed_content_types(
     assert response.status_code == 200, good_type
 
 
+def test_upload_url_rejects_oversized_and_invalid_size(
+    monkeypatch, orchestrator_module
+):
+  """P2: when the client declares sizeBytes, the server rejects an oversized or
+  invalid declaration before signing, per the upload prefix's limit (the bytes
+  go browser->GCS directly, so Flask's request limit does not protect them)."""
+  del orchestrator_module
+  orch, _, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  # Oversized for remix-input (1 GiB cap).
+  response = client.post(
+      '/api/uploadUrl',
+      json={
+          'path': 'remix-input',
+          'fileName': 'big-abc.bin',
+          'contentType': 'video/mp4',
+          'sizeBytes': 2 * 1024 * 1024 * 1024,
+      },
+  )
+  assert response.status_code == 400
+  assert 'error' in response.get_json()
+
+  # thumbnail has a tighter cap (50 MiB).
+  response = client.post(
+      '/api/uploadUrl',
+      json={
+          'path': 'thumbnail',
+          'fileName': 't-abc.png',
+          'contentType': 'image/png',
+          'sizeBytes': 100 * 1024 * 1024,
+      },
+  )
+  assert response.status_code == 400
+
+  # A negative size is rejected as invalid.
+  response = client.post(
+      '/api/uploadUrl',
+      json={
+          'path': 'remix-input',
+          'fileName': 'neg-abc.png',
+          'contentType': 'image/png',
+          'sizeBytes': -1,
+      },
+  )
+  assert response.status_code == 400
+
+  # A within-limit declared size is accepted and still signs.
+  response = client.post(
+      '/api/uploadUrl',
+      json={
+          'path': 'remix-input',
+          'fileName': 'ok-abc.png',
+          'contentType': 'image/png',
+          'sizeBytes': 5 * 1024 * 1024,
+      },
+  )
+  assert response.status_code == 200
+
+
 def test_upload_url_existing_object_skips_upload(
     monkeypatch, orchestrator_module
 ):
