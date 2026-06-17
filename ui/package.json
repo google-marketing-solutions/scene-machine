@@ -4,6 +4,8 @@
   "scripts": {
     "ng": "ng",
     "start": "ng serve",
+    "dev:setup": "bash ../scripts/dev-setup.sh",
+    "dev": "npm run dev:setup && ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
@@ -22,7 +24,6 @@
     "@angular/common": "^21.2.5",
     "@angular/compiler": "^21.2.5",
     "@angular/core": "^21.2.5",
-    "@angular/fire": "^20.0.1",
     "@angular/forms": "^21.2.5",
     "@angular/material": "^21.2.4",
     "@angular/platform-browser": "^21.2.5",

@@ -8,6 +8,6 @@ google-cloud-firestore
 google-cloud-logging
 google-cloud-storage
 google-cloud-tasks
-firebase-admin
 google-genai
+gunicorn
 Pillow
