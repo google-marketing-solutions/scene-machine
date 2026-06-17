@@ -10,8 +10,9 @@ It encodes the data-plane's intended invariants for the mediated (IAP-only)
 model, so a regression that re-opens client write access (or widens the
 client-readable config surface) fails here, in every PR, with no infra:
 
-  * Firestore: NO broad authenticated WRITE (clients never write Firestore
-    directly; all writes go through the app backend's Admin SDK).
+  * Firestore: NO broad authenticated WRITE and NO broad authenticated READ
+    (clients never touch Firestore directly; all access goes through the app
+    backend's Admin SDK, which bypasses these rules).
   * Storage: NO authenticated WRITE rule AND NO authenticated READ rule
     (uploads use server-signed PUT URLs and reads use server-signed GET URLs,
     both of which bypass these rules). All client Storage access is denied.
@@ -56,6 +57,24 @@ def test_firestore_has_no_broad_authenticated_write():
   assert match is None, (
       "firestore.rules grants WRITE to any authenticated user "
       f"({match.group(0)!r}); the mediated model forbids direct client writes.")
+
+
+def test_firestore_has_no_broad_authenticated_read():
+  """No `allow read: if request.auth != null`. The catch-all denies all client
+  reads (`if false`); a regression reverting it to the bare signed-in condition
+  would re-expose projects, creativeTemplates, execution-state collections and
+  the server-only config/access list to any IAP-admitted user. Clients read only
+  via the backend's Admin SDK, which bypasses these rules."""
+  rules = _read_normalized(_FIRESTORE_RULES)
+  # Match an allow-clause that grants read (read alone, or read paired with
+  # write in either order) to the bare signed-in condition `request.auth !=
+  # null`. Mirrors test_storage_has_no_authenticated_read.
+  broad_read = re.compile(
+      r"allow\s+[^;{}]*\bread\b[^;{}]*:\s*if\s+request\.auth\s*!=\s*null")
+  match = broad_read.search(rules)
+  assert match is None, (
+      "firestore.rules grants READ to any authenticated user "
+      f"({match.group(0)!r}); the mediated model forbids direct client reads.")
 
 
 def test_storage_has_no_authenticated_write():
