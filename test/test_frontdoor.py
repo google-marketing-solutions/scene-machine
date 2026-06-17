@@ -239,6 +239,21 @@ def test_worker_url_overrides_host_for_supply_node(
   assert captured['instance'] == worker_url
 
 
+def _task_payload(
+    execution_id='exec-worker', node_id='node-1', group_id='group-1'
+):
+  """A valid Cloud Tasks /triggerAction payload, including the PR #113 lock
+  fields (executionId / nodeId / groupId / workflowDefinition)."""
+  return {
+      'action': 'pass',
+      'inputFiles': {},
+      'executionId': execution_id,
+      'nodeId': node_id,
+      'groupId': group_id,
+      'workflowDefinition': {node_id: {'action': 'pass'}},
+  }
+
+
 def test_worker_url_overrides_host_for_trigger_action(
     monkeypatch, orchestrator_module
 ):
@@ -254,13 +269,116 @@ def test_worker_url_overrides_host_for_trigger_action(
     captured['may_retry'] = may_retry
 
   monkeypatch.setattr(orch.orchestrator, 'trigger_action', fake_trigger_action)
-  client = orch.app.test_client()
-  response = client.post(
-      '/triggerAction', json={'action': 'pass', 'inputFiles': {}}
+  # First valid delivery acquires the PR #113 Cloud Tasks lock and runs.
+  monkeypatch.setattr(
+      orch.orchestrator.db, 'acquire_task_lock', lambda *a, **k: True
   )
+  client = orch.app.test_client()
+  response = client.post('/triggerAction', json=_task_payload())
   assert response.status_code == 200
   assert captured['instance'] == worker_url
   assert captured['may_retry'] is True
+
+
+def test_trigger_action_duplicate_delivery_is_skipped(
+    monkeypatch, orchestrator_module
+):
+  """PR #113: a duplicate Cloud Tasks delivery of the same (exec, node, group)
+  fails to acquire the lock, returns 'Already Triggered', and does NOT re-run
+  the action."""
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  called = {'trigger': False}
+  monkeypatch.setattr(
+      orch.orchestrator,
+      'trigger_action',
+      lambda *a, **k: called.__setitem__('trigger', True),
+  )
+  # The lock is already held by another delivery.
+  monkeypatch.setattr(
+      orch.orchestrator.db, 'acquire_task_lock', lambda *a, **k: False
+  )
+  client = orch.app.test_client()
+  response = client.post('/triggerAction', json=_task_payload())
+  assert response.status_code == 200
+  assert response.get_data(as_text=True) == 'Already Triggered'
+  assert called['trigger'] is False
+
+
+def test_trigger_action_retryable_error_releases_lock(
+    monkeypatch, orchestrator_module
+):
+  """PR #113: a retryable failure releases the lock (so Cloud Tasks can retry)
+  and returns 429."""
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  released = []
+  monkeypatch.setattr(
+      orch.orchestrator.db, 'acquire_task_lock', lambda *a, **k: True
+  )
+  monkeypatch.setattr(
+      orch.orchestrator.db,
+      'release_task_lock',
+      lambda *a, **k: released.append(a),
+  )
+
+  def boom(*_a, **_k):
+    raise RuntimeError('quota exceeded')
+
+  monkeypatch.setattr(orch.orchestrator, 'trigger_action', boom)
+  monkeypatch.setattr(orch.util_errors, 'is_retryable', lambda _e: True)
+  client = orch.app.test_client()
+  response = client.post('/triggerAction', json=_task_payload())
+  assert response.status_code == 429
+  assert len(released) == 1
+
+
+def test_trigger_action_non_retryable_error_keeps_lock(
+    monkeypatch, orchestrator_module
+):
+  """PR #113: a non-retryable failure does NOT release the lock (no retry) and
+  returns the existing non-retry response."""
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  released = []
+  monkeypatch.setattr(
+      orch.orchestrator.db, 'acquire_task_lock', lambda *a, **k: True
+  )
+  monkeypatch.setattr(
+      orch.orchestrator.db,
+      'release_task_lock',
+      lambda *a, **k: released.append(a),
+  )
+
+  def boom(*_a, **_k):
+    raise RuntimeError('fatal')
+
+  monkeypatch.setattr(orch.orchestrator, 'trigger_action', boom)
+  monkeypatch.setattr(orch.util_errors, 'is_retryable', lambda _e: False)
+  client = orch.app.test_client()
+  response = client.post('/triggerAction', json=_task_payload())
+  assert response.status_code == 200
+  assert response.get_data(as_text=True) == 'Internal Error'
+  assert released == []
+
+
+def test_trigger_action_rejects_malformed_payload(
+    monkeypatch, orchestrator_module
+):
+  """A task payload missing the required fields is a clean 400, not a 500, and
+  the action never runs."""
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  called = {'trigger': False}
+  monkeypatch.setattr(
+      orch.orchestrator,
+      'trigger_action',
+      lambda *a, **k: called.__setitem__('trigger', True),
+  )
+  client = orch.app.test_client()
+  response = client.post('/triggerAction', json={'action': 'pass'})
+  assert response.status_code == 400
+  assert called['trigger'] is False
 
 
 def test_app_worker_url_feeds_api_supply_node(monkeypatch, orchestrator_module):

@@ -273,7 +273,20 @@ def trigger_action_handler() -> tuple[str, int]:
     if not host:
       raise RuntimeError('No host header found')
     instance = 'https://' + host
-  data = flask_request.get_json()
+  data = flask_request.get_json(silent=True)
+  if not isinstance(data, dict) or not all(
+      key in data
+      for key in (
+          Key.ACTION.value,
+          Key.EXECUTION_ID.value,
+          Key.NODE_ID.value,
+          Key.GROUP_ID.value,
+          Key.WORKFLOW_DEF.value,
+      )
+  ):
+    # Malformed task payload (e.g. missing the Cloud Tasks lock fields): reject
+    # cleanly instead of raising a KeyError below and returning a 500.
+    return 'Bad Request', 400
   retry_count = int(flask_request.headers.get('X-CloudTasks-TaskRetryCount', 0))
   if retry_count > 0:
     logger.info('Retried %s %s times', data[Key.ACTION.value], retry_count)
