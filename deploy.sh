@@ -978,14 +978,26 @@ if [ "$IAP_FLAG_AVAILABLE" = "true" ]; then
     --service-account="$RUNTIME_SA" \
     --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI}
 else
-  echo "⚠ This gcloud has no 'gcloud run deploy --iap' flag — deploying the app"
-  echo "  service private (--no-allow-unauthenticated) WITHOUT IAP. Enable IAP"
-  echo "  manually after updating the gcloud CLI:"
-  echo "    gcloud run services update app --iap --region=$REGION --project=$PROJECT"
+  # 'gcloud run deploy' on this CLI has no --iap flag, but a slightly older CLI
+  # can still enable IAP via 'gcloud run services update --iap'. Deploy private,
+  # then enable IAP with the update command, so the deploy turns IAP on itself
+  # instead of leaving it as a manual step. Only fall back to a printed manual
+  # step if 'services update' lacks --iap too.
+  echo "⚠ 'gcloud run deploy' lacks --iap; deploying the app private, then"
+  echo "  enabling IAP via 'gcloud run services update'."
   gcloud run deploy app --image "$IMAGE" --region $REGION --project $PROJECT \
     --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated \
     --service-account="$RUNTIME_SA" \
     --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI}
+  echo "Enabling IAP on 'app' (gcloud run services update --iap)..."
+  if gcloud run services update app --iap --region=$REGION --project=$PROJECT; then
+    echo "✓ IAP enabled on 'app'."
+    IAP_FLAG_AVAILABLE=true  # so the summary does not print a manual enable step
+  else
+    echo "⚠ Could not enable IAP automatically — this gcloud also lacks"
+    echo "  'run services update --iap'. Update the gcloud CLI, then run:"
+    echo "    gcloud run services update app --iap --region=$REGION --project=$PROJECT"
+  fi
 fi
 # The IAP service agent must hold run.invoker on the app service so IAP can
 # forward authenticated traffic to it (Cloud Run built-in IAP requirement).
@@ -1103,11 +1115,14 @@ if [ "$AUTH_MODE" = "iap" ]; then
     echo
     step=$((step + 1))
   fi
-  echo "    ${step}. Configure the OAuth consent screen (one-time, prerequisite for"
-  echo "       the IAP OAuth client):"
-  echo "       https://console.cloud.google.com/auth/branding?project=${PROJECT}"
-  echo "       First time on this project: click 'Get started' and walk through"
-  echo "       the setup dialog. User Type is set under 'Audience'."
+  echo "    ${step}. Configure the OAuth consent screen FIRST. The custom OAuth"
+  echo "       client in the next step refuses to be created until this exists"
+  echo "       ('Before using custom OAuth credentials, you need to configure"
+  echo "       your OAuth consent screen'). Start here:"
+  echo "       https://console.cloud.google.com/auth/overview?project=${PROJECT}"
+  echo "       On a brand-new project this shows 'Get started' and walks you"
+  echo "       through the create flow (.../auth/overview/create); set User Type"
+  echo "       under 'Audience'."
   echo
   step=$((step + 1))
   echo "    ${step}. On a project WITHOUT an organization, configure a custom OAuth"
