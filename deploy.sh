@@ -18,15 +18,13 @@
 # Machine deployment with NO API Gateway and NO App Engine.
 #
 # Usage:
-#   ./deploy.sh [--auth-mode=iap] [--yes] [--non-interactive]
+#   ./deploy.sh [--yes] [--non-interactive]
 #
 #   Configuration comes from ./config.txt. (Any leftover API_GATEWAY* or
 #   APP_ENGINE_REGION entries from older config files are ignored — there is no
-#   API Gateway or App Engine in this topology.) AUTH_MODE may be set via the
-#   environment or the --auth-mode flag (flag wins). Default and only value:
-#   iap (the firebase public sign-in mode was removed).
-#     AUTH_MODE=iap       app service is IAP-gated (--no-allow-unauthenticated
-#                         --iap); UI mode 'iap'.
+#   API Gateway or App Engine in this topology.) The app service is always
+#   IAP-gated (deployed --no-allow-unauthenticated --iap); the firebase public
+#   sign-in mode was removed, so there is no auth-mode choice to make.
 #   --yes skips the interactive deployment-target confirmation.
 #   --non-interactive is for headless/agent runs: it implies --yes and makes any
 #   step that needs a human in the console FAIL FAST (printing what to do and to
@@ -158,9 +156,7 @@ close_phase() {
 }
 
 usage() {
-  echo "Usage: $0 [--auth-mode=iap] [--yes] [--non-interactive]"
-  echo "  --auth-mode        front-door auth arm (also via AUTH_MODE env; flag wins)."
-  echo "                     only 'iap' is supported (default: iap)"
+  echo "Usage: $0 [--yes] [--non-interactive]"
   echo "  --yes, -y          skip the interactive deployment-target confirmation"
   echo "  --non-interactive  headless/agent run: implies --yes, and fails fast"
   echo "                     (instead of waiting) on any step needing a human in"
@@ -183,7 +179,11 @@ usage() {
 set -euo pipefail
 
 # --- Argument parsing --------------------------------------------------------
-AUTH_MODE="${AUTH_MODE:-iap}"
+# The app service is always IAP-gated; the firebase public sign-in mode was
+# removed, so there is no auth-mode to choose. This fixed value only labels the
+# banners below and gates the IAP post-deploy steps; the deployed Cloud Run
+# services get AUTH_MODE=iap set explicitly where they are created.
+AUTH_MODE="iap"
 ASSUME_YES=0
 NONINTERACTIVE=0
 # Faster-deploy flags. All default OFF: a plain `./deploy.sh` is the full,
@@ -194,7 +194,6 @@ SKIP_UI_BUILD=0
 NO_BUILD_CACHE=0
 for arg in "$@"; do
   case "$arg" in
-    --auth-mode=*) AUTH_MODE="${arg#--auth-mode=}" ;;
     --yes|-y) ASSUME_YES=1 ;;
     # Headless/agent runs: auto-confirm the target prompt AND fail fast on the
     # human-in-the-console gates instead of waiting (see the header comment).
@@ -206,10 +205,6 @@ for arg in "$@"; do
     *) echo "ERROR: unknown argument '$arg'" >&2; usage >&2; exit 1 ;;
   esac
 done
-if [ "$AUTH_MODE" != "iap" ]; then
-  echo "ERROR: AUTH_MODE must be 'iap' (the firebase sign-in mode was removed; got '$AUTH_MODE')." >&2
-  exit 1
-fi
 
 echo
 echo "================================================================================"

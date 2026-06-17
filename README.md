@@ -346,10 +346,6 @@ firebase login                          # 3. the Firebase CLI (add --reauth if y
 
     -   *Note: The script prints per-phase run times as it goes.*
 
-    -   **Auth mode:** the deploy is IAP-gated. `./deploy.sh` defaults to
-        `--auth-mode=iap`, which is the only supported mode (a plain `./deploy.sh`
-        and `./deploy.sh --auth-mode=iap` do the same thing).
-
     -   **Headless / non-interactive runs:** add `--non-interactive` (which
         also implies `--yes`) for automated or agent-driven deploys. Instead of
         waiting at a manual console step, the script fails fast and prints the
