@@ -829,6 +829,46 @@ describe('RemixEngineService (mediated)', () => {
       await vi.waitFor(() => expect(service.combiningScenes()).toBe(false));
     });
 
+    it('retries a transient signing failure, then records the resumed render and clears the marker', async () => {
+      mockProjectWithRender();
+      setupHappyMedia();
+      // The render finished; signing its output URL fails once (a transient
+      // /api/signUrl blip) then succeeds on retry via withRetry. The finished
+      // video must be recorded normally and the marker cleared, not lost. (E3)
+      let attempts = 0;
+      mediaServiceMock.signUrl.mockImplementation((path: string) => {
+        if (++attempts === 1) {
+          return Promise.reject(new Error('transient'));
+        }
+        return Promise.resolve(`https://signed.example/${path}`);
+      });
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/final.mp4'}]}}},
+      } as any);
+
+      runResumeScan();
+      await vi.waitFor(() =>
+        expect(configServiceMock.addRenderRun).toHaveBeenCalled(),
+      );
+
+      expect(attempts).toBe(2); // failed once, retried, succeeded
+      expect(configServiceMock.addRenderRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outputVideo: {
+            path: 'p/final.mp4',
+            url: 'https://signed.example/p/final.mp4',
+          },
+          wasPlayed: false,
+        }),
+      );
+      expect(configServiceMock.setPendingRender).toHaveBeenCalledWith(
+        undefined,
+      );
+      // No error surfaced: the blip was fully recovered.
+      expect(matSnackBarMock.open).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(service.combiningScenes()).toBe(false));
+    });
+
     it('does not double-poll when the scan triggers repeatedly', async () => {
       mockProjectWithRender();
       const pollSpy = vi
@@ -922,6 +962,37 @@ describe('RemixEngineService (mediated)', () => {
       expect(matSnackBarMock.open).toHaveBeenCalledWith(
         'Your video is ready but could not be loaded right now — ' +
           'reopen the project to retry.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+  });
+
+  describe('global config guard (E1)', () => {
+    // The workflow builders read globalConfig fields. If /api/config has not
+    // loaded (value() is undefined), the generation paths must fail fast with a
+    // clear, recoverable message instead of a vague "Failed to start workflow"
+    // from a non-null-assertion TypeError.
+    it('fails generateStoryboard with a recoverable message when global config is not loaded', async () => {
+      configServiceMock.globalConfig.value.mockReturnValue(undefined);
+
+      await service.generateStoryboard([], '', 'none');
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Failed to generate storyboard. Configuration is not loaded yet. ' +
+          'Please try again in a moment.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('fails combineScenes with a recoverable message when global config is not loaded', async () => {
+      configServiceMock.globalConfig.value.mockReturnValue(undefined);
+
+      await service.combineScenes();
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Configuration is not loaded yet. Please try again in a moment.',
         'Dismiss',
         {panelClass: ['error-snackbar']},
       );

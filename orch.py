@@ -623,6 +623,12 @@ def sign_url_handler() -> flask_response:
   paths = flask_request.args.getlist('path')
   if not paths:
     return _json_error('Missing path parameter', 400)
+  # Sign each distinct path once: repeated 'path' params must not each spend an
+  # IAM signBlob RPC. dict.fromkeys keeps first-seen order for a stable response.
+  paths = list(dict.fromkeys(paths))
+  # Cap the DISTINCT-path count. Each distinct path is one signBlob RPC, so this
+  # bounds the signing work one request can trigger on the shared project's
+  # quota; deduping first means the cap measures real cost, not repeated params.
   if len(paths) > _MAX_SIGN_URL_PATHS:
     return _json_error(
         f'Too many paths: {len(paths)} (max {_MAX_SIGN_URL_PATHS})', 400

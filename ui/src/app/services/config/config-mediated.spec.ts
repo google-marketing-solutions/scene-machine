@@ -21,7 +21,7 @@ import {DOCUMENT} from '@angular/common';
 import {EnvironmentInjector, signal} from '@angular/core';
 import {MatSnackBar} from '@angular/material/snack-bar';
 import {Router} from '@angular/router';
-import {of, Subject} from 'rxjs';
+import {of, Subject, throwError} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ConfigService} from './config';
 
@@ -468,6 +468,51 @@ describe('ConfigService (mediated data plane)', () => {
       service.flushPendingSave();
 
       expect(saveRequestCount()).toBe(1);
+    });
+  });
+
+  describe('global config fetch failure (degrades, does not crash)', () => {
+    it('loads the config when /api/config succeeds', async () => {
+      httpClientMock.get.mockReturnValue(
+        of({gcsBucket: 'b', aspectRatio: '16:9'}),
+      );
+
+      const result = await (service as any).loadGlobalConfig();
+
+      expect(result).toEqual({gcsBucket: 'b', aspectRatio: '16:9'});
+      expect(httpClientMock.get).toHaveBeenCalledWith('/api/config');
+    });
+
+    it('resolves to undefined (does not reject) when /api/config fails', async () => {
+      // A failed fetch must NOT put the resource into an error state: value()
+      // throws there, and the optional-chaining config guards would then crash
+      // the home/setup pages. The loader swallows the error and degrades to
+      // undefined so value() stays callable. Covers a 500 and a 401.
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      for (const status of [500, 401]) {
+        httpClientMock.get.mockReturnValue(throwError(() => ({status})));
+        await expect(
+          (service as any).loadGlobalConfig(),
+        ).resolves.toBeUndefined();
+      }
+
+      expect(errorSpy).toHaveBeenCalled();
+      errorSpy.mockRestore();
+    });
+
+    it('builds a default project config without throwing when global config is unavailable', () => {
+      // Simulate the resource resolved to undefined (a failed /api/config).
+      // DEFAULT_PROJECT_CONFIG reads globalConfig.value()?.x with optional
+      // chaining, so it must still produce a usable object instead of crashing
+      // the setup flow. (E1)
+      (service as any).globalConfig.set(undefined);
+
+      const defaultConfig = (service as any).DEFAULT_PROJECT_CONFIG();
+
+      expect(defaultConfig).toBeDefined();
+      expect(defaultConfig.storyboard).toEqual([]);
+      expect(defaultConfig.aspectRatio).toBeUndefined();
     });
   });
 });

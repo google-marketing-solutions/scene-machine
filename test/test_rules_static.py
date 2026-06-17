@@ -68,9 +68,10 @@ def test_firestore_has_no_broad_authenticated_read():
   rules = _read_normalized(_FIRESTORE_RULES)
   # Match an allow-clause that grants read (read alone, or read paired with
   # write in either order) to the bare signed-in condition `request.auth !=
-  # null`. Mirrors test_storage_has_no_authenticated_read.
+  # null`, with or without parentheses around the condition. Mirrors
+  # test_storage_has_no_authenticated_read.
   broad_read = re.compile(
-      r"allow\s+[^;{}]*\bread\b[^;{}]*:\s*if\s+request\.auth\s*!=\s*null")
+      r"allow\s+[^;{}]*\bread\b[^;{}]*:\s*if\s+\(?\s*request\.auth\s*!=\s*null")
   match = broad_read.search(rules)
   assert match is None, (
       "firestore.rules grants READ to any authenticated user "

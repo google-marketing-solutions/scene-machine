@@ -537,6 +537,69 @@ def test_sign_url_ttl_param_clamped(monkeypatch, orchestrator_module):
     assert response.status_code == 400, bad_ttl
 
 
+def test_sign_url_caps_and_deduplicates_paths(monkeypatch, orchestrator_module):
+  """One request must not exhaust the shared project's signBlob quota: the batch
+  size is capped, and repeated paths are signed once (one signBlob RPC per
+  distinct path) instead of once per repeated query parameter."""
+  del orchestrator_module
+  orch, _, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  # Count actual signing calls (one signBlob RPC each) by wrapping the signer.
+  signed = []
+  real_signed_url = orch._signed_url
+
+  def counting_signed_url(blob, method, expiration, content_type=None):
+    signed.append(blob.name)
+    return real_signed_url(blob, method, expiration, content_type=content_type)
+
+  monkeypatch.setattr(orch, '_signed_url', counting_signed_url)
+
+  # Duplicate paths are signed once, not once per repeated param.
+  response = client.get(
+      '/api/signUrl?path=remix-input/a-abc.png'
+      '&path=remix-input/a-abc.png&path=remix-input/a-abc.png'
+  )
+  assert response.status_code == 200
+  assert set(response.get_json()['urls']) == {'remix-input/a-abc.png'}
+  assert signed == ['remix-input/a-abc.png']
+
+  # A normal batch under the cap returns a signed URL per distinct path.
+  signed.clear()
+  response = client.get(
+      '/api/signUrl?path=remix-input/a-abc.png&path=video-gen/out.mp4'
+  )
+  assert response.status_code == 200
+  assert set(response.get_json()['urls']) == {
+      'remix-input/a-abc.png',
+      'video-gen/out.mp4',
+  }
+  assert sorted(signed) == ['remix-input/a-abc.png', 'video-gen/out.mp4']
+
+  # The cap measures DISTINCT paths (real RPC cost), not raw params: the max
+  # number of distinct paths, each sent twice (raw count is double the cap), is
+  # still accepted and each distinct path is signed exactly once.
+  signed.clear()
+  at_cap = '&'.join(
+      f'path=remix-input/q{i}-abc.png&path=remix-input/q{i}-abc.png'
+      for i in range(orch._MAX_SIGN_URL_PATHS)
+  )
+  response = client.get(f'/api/signUrl?{at_cap}')
+  assert response.status_code == 200
+  assert len(response.get_json()['urls']) == orch._MAX_SIGN_URL_PATHS
+  assert len(signed) == orch._MAX_SIGN_URL_PATHS
+
+  # More than the cap of DISTINCT paths is rejected, and nothing is signed.
+  signed.clear()
+  over_cap = '&'.join(
+      f'path=remix-input/p{i}-abc.png'
+      for i in range(orch._MAX_SIGN_URL_PATHS + 1)
+  )
+  response = client.get(f'/api/signUrl?{over_cap}')
+  assert response.status_code == 400
+  assert signed == []
+
+
 # ---------------------------------------------------------------------------
 # /api/projects
 # ---------------------------------------------------------------------------
@@ -712,14 +775,12 @@ def test_project_storyboard_split_into_scenes_subcollection(
       'scene-2',
   ]
 
-  # The list endpoint reassembles per project too (homepage thumbnails read
-  # storyboard[0]), so the split is invisible there as well.
+  # The list endpoint returns only the FIRST scene per project (homepage cards
+  # read storyboard[0] for a thumbnail), so it does not reassemble the whole
+  # storyboard like the detail endpoint above. This keeps listing N projects
+  # from reading every scene of every project.
   listed = client.get('/api/projects').get_json()['projects']
-  assert [s['description'] for s in listed[0]['storyboard']] == [
-      'scene-0',
-      'scene-1',
-      'scene-2',
-  ]
+  assert [s['description'] for s in listed[0]['storyboard']] == ['scene-0']
 
 
 def test_project_patch_prunes_removed_scenes(monkeypatch, orchestrator_module):

@@ -1197,6 +1197,15 @@ export class RemixEngineService {
     const projectId = this.configService.projectConfig.value().id;
     let executionId;
     try {
+      // Fail fast and clearly if /api/config has not loaded: the workflow
+      // builder below reads globalConfig fields. Without this guard an
+      // undefined config throws a TypeError that surfaces as a vague "Failed to
+      // start workflow" instead of a recoverable "try again". (E1)
+      if (!this.configService.globalConfig.value()) {
+        throw new Error(
+          'Configuration is not loaded yet. Please try again in a moment.',
+        );
+      }
       const response = await this.startStoryboardWorkflow(
         products,
         briefing,
@@ -1316,6 +1325,15 @@ export class RemixEngineService {
     const projectId = this.configService.projectConfig.value().id;
     let executionId;
     try {
+      // Fail fast and clearly if /api/config has not loaded: the workflow
+      // builder reads globalConfig fields. Without this guard an undefined
+      // config throws a TypeError that surfaces as a vague "Failed to combine
+      // scenes" instead of a recoverable "try again". (E1)
+      if (!this.configService.globalConfig.value()) {
+        throw new Error(
+          'Configuration is not loaded yet. Please try again in a moment.',
+        );
+      }
       this.combiningScenes.set(true);
       const scenes = this.configService.projectConfig.value().storyboard;
       const audioTracks = this.configService.projectConfig.value().audioTracks;

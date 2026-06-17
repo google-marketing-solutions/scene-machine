@@ -371,23 +371,27 @@ export class ConfigService {
   readonly VIDEO_GENERATION_MODELS = VIDEO_GENERATION_MODELS;
 
   globalConfig = resource({
-    loader: async () => {
-      try {
-        return await firstValueFrom(
-          this.httpClient.get<GlobalConfig>('/api/config'),
-        );
-      } catch (error) {
-        // A failed /api/config fetch (transient 5xx, network blip, IAP session
-        // expiry) must degrade gracefully. Returning undefined keeps the
-        // resource out of the error state, so value() stays callable and the
-        // optional-chaining guards in DEFAULT_PROJECT_CONFIG keep working.
-        // Letting it reach the error state would make value() throw, defeating
-        // those guards and hard-breaking the home and setup pages.
-        console.error('Failed to load global config.', error);
-        return undefined;
-      }
-    },
+    loader: () => this.loadGlobalConfig(),
   });
+
+  /**
+   * Loads /api/config, degrading a failed fetch (transient 5xx, network blip,
+   * IAP session expiry) to undefined instead of letting the resource enter its
+   * error state. value() then stays callable and the optional-chaining guards
+   * in DEFAULT_PROJECT_CONFIG keep working; an error state would make value()
+   * throw, defeating those guards and hard-breaking the home and setup pages.
+   * Extracted from the resource loader so this degradation is unit-testable.
+   */
+  private async loadGlobalConfig(): Promise<GlobalConfig | undefined> {
+    try {
+      return await firstValueFrom(
+        this.httpClient.get<GlobalConfig>('/api/config'),
+      );
+    } catch (error) {
+      console.error('Failed to load global config.', error);
+      return undefined;
+    }
+  }
 
   projectConfig = resource({
     params: () => ({projectId: this.projectId()}),
