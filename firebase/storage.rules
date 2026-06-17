@@ -1,8 +1,19 @@
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
+    // Production Storage rules (mediated data plane). The UI uploads via POST
+    // /api/uploadUrl (server-signed PUT URLs) and reads via GET /api/signUrl
+    // (server-signed GET URLs); both are GCS-level signed URLs that do not
+    // consult these rules at all. Client WRITES through the Firebase SDK are
+    // therefore withdrawn: the remix-input/** and thumbnail/** write matches
+    // are REMOVED, so writes are implicitly denied bucket-wide.
+
+    // The transitional signed-in READ is REMOVED: there are no legacy Firebase
+    // token download URLs to keep (no migrations are supported), and the client
+    // never reads Storage directly — all reads go through server-signed GET
+    // URLs, which bypass these rules. Both reads and writes are denied here.
     match /{allPaths=**} {
-      allow read, write: if request.auth != null;
+      allow read, write: if false;
     }
   }
 }
