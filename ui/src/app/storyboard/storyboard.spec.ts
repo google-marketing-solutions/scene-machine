@@ -17,7 +17,6 @@
 import {CdkDragDrop} from '@angular/cdk/drag-drop';
 import {signal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
-import {Storage} from '@angular/fire/storage';
 import {MatDialog} from '@angular/material/dialog';
 import {of} from 'rxjs';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -30,6 +29,17 @@ import {
 } from '../services/config/config';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {Storyboard} from './storyboard';
+
+vi.mock('../../env', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../env')>();
+  return {
+    env: {
+      ...actual.env,
+      mediaMode: 'mediated',
+      dataPlaneMode: 'mediated',
+    },
+  };
+});
 
 describe('Storyboard', () => {
   let component: Storyboard;
@@ -67,6 +77,7 @@ describe('Storyboard', () => {
       projectConfigSignal.update(config => ({...config, ...partial}));
     },
     sceneIdCounter: sceneIdCounterSignal,
+    primaryColor: signal('theme-green'),
     isGeneratedScene: (
       scene: GeneratedScene | ProvidedVideoScene,
     ): scene is GeneratedScene => scene?.type === 'generated',
@@ -104,6 +115,7 @@ describe('Storyboard', () => {
         projectConfigSignal.update(config => ({...config, ...partial}));
       },
       sceneIdCounter: sceneIdCounterSignal,
+      primaryColor: signal('theme-green'),
       isGeneratedScene: (
         scene: GeneratedScene | ProvidedVideoScene,
       ): scene is GeneratedScene => scene?.type === 'generated',
@@ -127,7 +139,6 @@ describe('Storyboard', () => {
       imports: [Storyboard],
       providers: [
         {provide: ConfigService, useValue: mockConfigService},
-        {provide: Storage, useValue: {}},
         {provide: RemixEngineService, useValue: mockRemixEngineService},
       ],
     })
@@ -282,54 +293,222 @@ describe('Storyboard', () => {
     expect(component.trimmedDuration()).toBe(4);
   });
 
-  it('should display reference image in filmstrip when available', () => {
-    const scene: GeneratedScene = {
-      id: '1',
-      type: 'generated',
-      name: 'Scene 1',
-      prompt: 'test',
-      candidates: [
-        {
-          referenceImage: {
-            url: 'http://example.com/ref-image.jpg',
-            path: 'path/to/image',
-          },
-          runNumber: 1,
-          durationSeconds: 10,
-          trim: {start: 2, end: 8},
-          prompt: 'test prompt',
-          model: 'test-model',
-          generateAudio: false,
-          resolution: '1080p',
-        },
-      ],
-      selectedCandidateIndex: 0,
+  describe('run+letter candidate labels', () => {
+    const makeCandidate = (
+      runNumber: number,
+      url: string,
+      overrides: Partial<Candidate> = {},
+    ): Candidate => ({
+      video: {url, path: `path/${url}`},
+      runNumber,
+      durationSeconds: 4,
+      prompt: 'test prompt',
+      model: 'test-model',
+      generateAudio: false,
+      resolution: '1080p',
+      ...overrides,
+    });
+
+    const selectSceneWithCandidates = (candidates: Candidate[]) => {
+      const scene: GeneratedScene = {
+        id: '1',
+        type: 'generated',
+        name: 'Scene 1',
+        prompt: 'test',
+        candidates,
+      };
+      projectConfigSignal.set({
+        id: 'test-id',
+        name: 'Test Project',
+        storyboard: [scene],
+        aspectRatio: '16:9',
+        candidateDurationSeconds: 4,
+        generateAudio: false,
+        numberOfCandidates: 1,
+        model: 'veo-1',
+        resolution: '1080p',
+        inputConfig: {products: [], composition: ''},
+        audioTracks: [],
+        visualOverlays: [],
+      });
+      component.selectScene('1');
+      fixture.detectChanges();
     };
 
-    projectConfigSignal.set({
-      id: 'test-id',
-      name: 'Test Project',
-      storyboard: [scene],
-      aspectRatio: '16:9',
-      candidateDurationSeconds: 4,
-      generateAudio: false,
-      numberOfCandidates: 1,
-      model: 'veo-1',
-      resolution: '1080p',
-      inputConfig: {products: [], composition: ''},
-      audioTracks: [],
-      visualOverlays: [],
+    it('assigns run+letter labels per candidate (2 -> 2A,2B; 1 -> 1A,1B,1C)', () => {
+      // Interleave runs to prove letters track each run independently and in
+      // display (array) order.
+      const c2a = makeCandidate(2, 'r2a.mp4');
+      const c1a = makeCandidate(1, 'r1a.mp4');
+      const c2b = makeCandidate(2, 'r2b.mp4');
+      const c1b = makeCandidate(1, 'r1b.mp4');
+      const c1c = makeCandidate(1, 'r1c.mp4');
+      selectSceneWithCandidates([c2a, c1a, c2b, c1b, c1c]);
+
+      const labels = component.runLabels();
+      expect(labels.get(c2a)).toBe('2A');
+      expect(labels.get(c2b)).toBe('2B');
+      expect(labels.get(c1a)).toBe('1A');
+      expect(labels.get(c1b)).toBe('1B');
+      expect(labels.get(c1c)).toBe('1C');
     });
-    fixture.detectChanges();
 
-    const filmstripItem =
-      fixture.nativeElement.querySelector('.filmstrip-item');
-    const img = filmstripItem.querySelector('img.reference-image-bg');
-    expect(img).toBeTruthy();
-    expect(img.src).toBe('http://example.com/ref-image.jpg');
+    it('renders the run+letter label inside each active candidate item', () => {
+      selectSceneWithCandidates([
+        makeCandidate(2, 'r2a.mp4'),
+        makeCandidate(2, 'r2b.mp4'),
+      ]);
 
-    // Default icon should not be present (except potentially loading spinner if generating, which is false here)
-    const defaultIcon = filmstripItem.querySelector('.scene-icon mat-icon');
-    expect(defaultIcon).toBeNull();
+      const labelEls = Array.from(
+        fixture.nativeElement.querySelectorAll(
+          '.candidate-list .video-item .video-info .video-chip:first-child',
+        ),
+      ) as HTMLElement[];
+      const rendered = labelEls.map(el => el.textContent?.trim());
+      expect(rendered).toEqual(['2A', '2B']);
+    });
+
+    it('keeps letters stable across the active list and the archived panel', () => {
+      // 1A active, 1B archived: archiving must not renumber the survivor, and
+      // the archived candidate keeps its own letter in the archived panel.
+      const active = makeCandidate(1, 'r1a.mp4');
+      const archived = makeCandidate(1, 'r1b.mp4', {isArchived: true});
+      selectSceneWithCandidates([active, archived]);
+
+      const labels = component.runLabels();
+      expect(labels.get(active)).toBe('1A');
+      expect(labels.get(archived)).toBe('1B');
+
+      const activeLabel = fixture.nativeElement.querySelector(
+        '.candidate-list .video-item:not(.archived) .video-info .video-chip:first-child',
+      ) as HTMLElement;
+      expect(activeLabel.textContent?.trim()).toBe('1A');
+    });
+
+    it('cycles run sliver colors through the picker, starting at the active theme', () => {
+      // Mock theme is 'theme-green' (index 2 of [azure, magenta, green, orange,
+      // violet]). Run 1 = the active theme; each later run steps to the next
+      // swatch and wraps.
+      expect(component.runSliceTheme(1)).toBe('theme-green');
+      expect(component.runSliceTheme(2)).toBe('theme-orange');
+      expect(component.runSliceTheme(3)).toBe('theme-violet');
+      expect(component.runSliceTheme(4)).toBe('theme-azure');
+      expect(component.runSliceTheme(6)).toBe('theme-green'); // wraps to run 1's color
+    });
+
+    it('builds the run chip tooltip from the run number and candidate letter', () => {
+      const c2a = makeCandidate(2, 'r2a.mp4');
+      const c2b = makeCandidate(2, 'r2b.mp4');
+      selectSceneWithCandidates([c2a, c2b]);
+      expect(component.runTooltip(c2a)).toBe('Run: 2, Candidate: A');
+      expect(component.runTooltip(c2b)).toBe('Run: 2, Candidate: B');
+    });
+  });
+
+  describe('resizable + collapsible candidate sidebar', () => {
+    it('toggles the collapsed state', () => {
+      expect(component.sidebarCollapsed()).toBe(false);
+
+      component.toggleSidebarCollapsed();
+      expect(component.sidebarCollapsed()).toBe(true);
+
+      component.toggleSidebarCollapsed();
+      expect(component.sidebarCollapsed()).toBe(false);
+    });
+
+    it('updates the width signal within the min/max clamp', () => {
+      // A value inside the range is applied verbatim.
+      component.setSidebarWidth(420);
+      expect(component.sidebarWidth()).toBe(420);
+
+      // Below the minimum clamps up to SIDEBAR_MIN_WIDTH.
+      component.setSidebarWidth(10);
+      expect(component.sidebarWidth()).toBe(Storyboard.SIDEBAR_MIN_WIDTH);
+
+      // Above the maximum clamps down to SIDEBAR_MAX_WIDTH.
+      component.setSidebarWidth(9999);
+      expect(component.sidebarWidth()).toBe(Storyboard.SIDEBAR_MAX_WIDTH);
+    });
+
+    it('drives the grid track width and snaps to a rail when collapsed', () => {
+      component.setSidebarWidth(360);
+      expect(component.sidebarTrackWidth()).toBe(360);
+
+      component.toggleSidebarCollapsed();
+      expect(component.sidebarTrackWidth()).toBe(Storyboard.SIDEBAR_RAIL_WIDTH);
+      // The expanded width is preserved for when it expands again.
+      expect(component.sidebarWidth()).toBe(360);
+    });
+  });
+
+  describe('getPlaceholdersArray', () => {
+    const selectGeneratedScene = (scene: GeneratedScene) => {
+      projectConfigSignal.set({
+        id: 'test-id',
+        name: 'Test Project',
+        storyboard: [scene],
+        aspectRatio: '16:9',
+        candidateDurationSeconds: 4,
+        generateAudio: false,
+        numberOfCandidates: 1,
+        model: 'veo-1',
+        resolution: '1080p',
+        inputConfig: {products: [], composition: ''},
+        audioTracks: [],
+        visualOverlays: [],
+      });
+      component.selectScene(scene.id);
+      fixture.detectChanges();
+    };
+
+    it('snapshots the placeholder count from an in-flight generation and ignores live slider changes', () => {
+      const scene: GeneratedScene = {
+        id: '1',
+        type: 'generated',
+        name: 'Scene 1',
+        prompt: 'test',
+        pendingGeneration: {
+          executionId: 'exec-1',
+          requestedCount: 4,
+          startedAt: '2026-06-13T00:00:00.000Z',
+          durationSeconds: 4,
+          model: 'veo-1',
+          generateAudio: false,
+          resolution: '1080p',
+          prompt: 'test',
+        },
+      };
+      selectGeneratedScene(scene);
+
+      // The run requested 4 candidates, so 4 placeholders regardless of slider.
+      expect(component.getPlaceholdersArray().length).toBe(4);
+
+      // Drawing the slider during the in-flight run must NOT change the count.
+      component.config.updateProjectConfig({numberOfCandidates: 8});
+      fixture.detectChanges();
+      expect(component.getPlaceholdersArray().length).toBe(4);
+
+      component.config.updateProjectConfig({numberOfCandidates: 1});
+      fixture.detectChanges();
+      expect(component.getPlaceholdersArray().length).toBe(4);
+    });
+
+    it('follows the live numberOfCandidates config when no generation is in flight', () => {
+      const scene: GeneratedScene = {
+        id: '1',
+        type: 'generated',
+        name: 'Scene 1',
+        prompt: 'test',
+      };
+      selectGeneratedScene(scene);
+
+      component.config.updateProjectConfig({numberOfCandidates: 3});
+      fixture.detectChanges();
+      expect(component.getPlaceholdersArray().length).toBe(3);
+
+      component.config.updateProjectConfig({numberOfCandidates: 6});
+      fixture.detectChanges();
+      expect(component.getPlaceholdersArray().length).toBe(6);
+    });
   });
 });

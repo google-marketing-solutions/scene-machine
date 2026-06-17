@@ -15,17 +15,14 @@
  */
 
 import {TestBed} from '@angular/core/testing';
-import {Firestore} from '@angular/fire/firestore';
 import {TemplatesService} from './templates';
-import {describe, it, expect, beforeEach, vi} from 'vitest';
+import {describe, it, expect, beforeEach} from 'vitest';
 
 describe('TemplatesService', () => {
   let service: TemplatesService;
 
   beforeEach(() => {
-    TestBed.configureTestingModule({
-      providers: [{provide: Firestore, useValue: vi.mockObject(Firestore)}],
-    });
+    TestBed.configureTestingModule({});
     service = TestBed.inject(TemplatesService);
   });
 

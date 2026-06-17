@@ -67,8 +67,13 @@ def _get_action_functions() -> dict[str, Any]:
   return functions
 
 
-def verify_signatures() -> None:
-  """Verifies that function signatures match the JSON definitions."""
+def verify_signatures() -> int:
+  """Verifies that function signatures match the JSON definitions.
+
+  Returns the number of ERROR-level mismatches found (0 means the actions
+  match actions.json). WARNINGs are not counted.
+  """
+  errors = 0
   with open('ui/definitions/actions.json', 'r', encoding='utf-8') as file:
     actions_def = json.load(file)
   action_funcs = _get_action_functions()
@@ -81,6 +86,7 @@ def verify_signatures() -> None:
 
     if action_name not in action_funcs:
       print(f'  ERROR: "{action_name}" not found among actions.')
+      errors += 1
       continue
 
     func = action_funcs[action_name]
@@ -89,6 +95,7 @@ def verify_signatures() -> None:
       func_params = sig.parameters
     except ValueError:
       print(f'  ERROR: Function "{action_name}" missing.')
+      errors += 1
       continue
 
     all_actual_param_names = list(func_params.keys())
@@ -107,6 +114,7 @@ def verify_signatures() -> None:
           f'  ERROR: Function "{action_name}" is missing:'
           f' {", ".join(sorted(missing_in_func))}'
       )
+      errors += 1
 
     if extra_in_func:
       # Filter out allowed variable arguments like **kwargs if necessary.
@@ -126,6 +134,7 @@ def verify_signatures() -> None:
             f'  ERROR: Function "{action_name}" has unexpected:'
             f' {", ".join(sorted(true_extra))}'
         )
+        errors += 1
 
     simple_types = ('str', 'int', 'float', 'bool')
     # Optional: Basic type-hint verification
@@ -172,5 +181,13 @@ def verify_signatures() -> None:
   else:
     print('All found implemented actions match actions.json.')
 
+  return errors
 
-verify_signatures()
+
+if __name__ == '__main__':
+  error_count = verify_signatures()
+  if error_count:
+    raise SystemExit(
+        f'\nactions.json signature check FAILED with {error_count} error(s).'
+    )
+  print('\nactions.json signature check passed.')

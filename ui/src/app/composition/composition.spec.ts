@@ -17,20 +17,40 @@
 import {signal, WritableSignal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {MatSnackBarModule} from '@angular/material/snack-bar';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {env} from '../../env';
 import {
   ConfigService,
   GeneratedScene,
   ProjectConfig,
   ProvidedVideoScene,
 } from '../services/config/config';
+import {MediaService} from '../services/media/media';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {Composition} from './composition';
+
+// Pin the media plane so these specs do not depend on the rendered
+// (gitignored) src/env.ts. The held-src player tests below assume the
+// mediated plane.
+vi.mock('../../env', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../env')>();
+  return {
+    env: {...actual.env, mediaMode: 'mediated'},
+  };
+});
 
 describe('CompositionComponent', () => {
   let component: Composition;
   let fixture: ComponentFixture<Composition>;
   let mockConfigService: unknown;
+  let mockMediaService: {
+    getCachedUrl: ReturnType<typeof vi.fn>;
+    resolve: ReturnType<typeof vi.fn>;
+    signUrl: ReturnType<typeof vi.fn>;
+    signUrls: ReturnType<typeof vi.fn>;
+    upload: ReturnType<typeof vi.fn>;
+    getBlob: ReturnType<typeof vi.fn>;
+  };
   let projectConfigSignal: WritableSignal<ProjectConfig>;
 
   beforeEach(async () => {
@@ -70,10 +90,24 @@ describe('CompositionComponent', () => {
       combiningScenes: signal(false),
     };
 
+    // The template's mediaSrc pipe and the component's held-src/pre-warm
+    // effects inject MediaService, which in turn injects HttpClient and
+    // Firebase Storage; stub the service itself so no real providers are
+    // needed. The held-src specs below reconfigure the mocks per test.
+    mockMediaService = {
+      getCachedUrl: vi.fn().mockReturnValue(undefined),
+      resolve: vi.fn().mockResolvedValue(''),
+      signUrl: vi.fn().mockResolvedValue(''),
+      signUrls: vi.fn().mockResolvedValue(new Map()),
+      upload: vi.fn(),
+      getBlob: vi.fn(),
+    };
+
     await TestBed.configureTestingModule({
       imports: [Composition, MatSnackBarModule],
       providers: [
         {provide: ConfigService, useValue: mockConfigService},
+        {provide: MediaService, useValue: mockMediaService},
         {provide: RemixEngineService, useValue: mockRemixEngineService},
       ],
     }).compileComponents();
@@ -81,6 +115,11 @@ describe('CompositionComponent', () => {
     fixture = TestBed.createComponent(Composition);
     component = fixture.componentInstance;
     fixture.detectChanges();
+  });
+
+  afterEach(() => {
+    // Reset the mocked (plain-object) env between tests.
+    (env as {mediaMode: string}).mediaMode = 'mediated';
   });
 
   it('should create', () => {
@@ -157,7 +196,71 @@ describe('CompositionComponent', () => {
     expect(component.filmstripScenes()[0].id).toBe('2');
   });
 
-  it('should NOT show a video scene in the filmstrip if it has NO videoUrl', () => {
+  it('should show a generated scene whose candidate has a path but a blank url', () => {
+    // Downstream resolves media by path, so a scene persisted with only a path
+    // (no url) must still appear in the filmstrip.
+    const generatedScene: GeneratedScene = {
+      id: '1',
+      type: 'generated',
+      name: 'Scene 1',
+      prompt: 'test prompt',
+      candidates: [
+        {
+          runNumber: 1,
+          durationSeconds: 5,
+          prompt: 'test prompt',
+          model: 'veo-1',
+          generateAudio: false,
+          video: {url: '', path: 'path/to/video'},
+          resolution: '1080p',
+        },
+      ],
+      selectedCandidateIndex: 0,
+    };
+
+    projectConfigSignal.set({
+      ...projectConfigSignal(),
+      storyboard: [generatedScene],
+    });
+
+    expect(component.filmstripScenes().length).toBe(1);
+    expect(component.filmstripScenes()[0].id).toBe('1');
+  });
+
+  it('should show a video scene that has a path but a blank url', () => {
+    const videoScene: ProvidedVideoScene = {
+      id: '2',
+      type: 'video',
+      name: 'Scene 2',
+      video: {url: '', path: 'path/to/video/2'},
+    };
+
+    projectConfigSignal.set({
+      ...projectConfigSignal(),
+      storyboard: [videoScene],
+    });
+
+    expect(component.filmstripScenes().length).toBe(1);
+    expect(component.filmstripScenes()[0].id).toBe('2');
+  });
+
+  it('should NOT show a video scene if it has neither a path nor a url', () => {
+    const videoScene: ProvidedVideoScene = {
+      id: '2',
+      type: 'video',
+      name: 'Scene 2',
+      video: {url: '', path: ''},
+    };
+
+    projectConfigSignal.set({
+      ...projectConfigSignal(),
+      storyboard: [videoScene],
+    });
+
+    expect(component.filmstripScenes().length).toBe(0);
+  });
+
+  it('should NOT show a video scene in the filmstrip if it has NO video', () => {
     const videoScene: ProvidedVideoScene = {
       id: '2',
       type: 'video',
@@ -277,10 +380,233 @@ describe('CompositionComponent', () => {
 
   it('should enable the render button when combiningScenes is false', () => {
     const remixEngineService = TestBed.inject(RemixEngineService);
+    // The render button also requires at least one renderable scene (a
+    // non-empty playlist), so seed a generated scene with a selected candidate.
+    const renderableScene: GeneratedScene = {
+      id: '1',
+      type: 'generated',
+      name: 'Scene 1',
+      prompt: 'test prompt',
+      candidates: [
+        {
+          video: {url: 'http://video.url', path: 'path/to/video'},
+          resolution: '1080p',
+        },
+      ],
+      selectedCandidateIndex: 0,
+    };
+    projectConfigSignal.set({
+      ...projectConfigSignal(),
+      storyboard: [renderableScene],
+    });
     remixEngineService.combiningScenes.set(false);
     fixture.detectChanges();
     const button = fixture.nativeElement.querySelector('button.mat-primary');
     expect(button.disabled).toBe(false);
     expect(button.textContent).toContain('Render Video');
+  });
+
+  describe('player src (held, never null)', () => {
+    // Two clips: clip 1 spans 0-10s, clip 2 spans 10-15s on the timeline.
+    const twoClipStoryboard: ProvidedVideoScene[] = [
+      {
+        id: 's1',
+        type: 'video',
+        name: 'Clip 1',
+        video: {url: 'http://stored/1', path: 'videos/clip1.mp4'},
+        durationSeconds: 10,
+      },
+      {
+        id: 's2',
+        type: 'video',
+        name: 'Clip 2',
+        video: {url: 'http://stored/2', path: 'videos/clip2.mp4'},
+        durationSeconds: 5,
+      },
+    ];
+
+    function loadTwoClipStoryboard() {
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        storyboard: structuredClone(twoClipStoryboard),
+      });
+      fixture.detectChanges();
+    }
+
+    function seekTo(seconds: number) {
+      component.seek({
+        target: {value: String(seconds)},
+      } as unknown as Event);
+      fixture.detectChanges();
+    }
+
+    it('pre-signs every playlist entry path in one batch when the playlist computes', () => {
+      loadTwoClipStoryboard();
+
+      expect(mockMediaService.signUrls).toHaveBeenCalledWith([
+        'videos/clip1.mp4',
+        'videos/clip2.mp4',
+      ]);
+    });
+
+    it('holds the previous src (never null) across a cross-clip seek while the new URL resolves', async () => {
+      mockMediaService.getCachedUrl.mockImplementation((path: string) =>
+        path === 'videos/clip1.mp4' ? 'https://signed/clip1' : undefined,
+      );
+      // resolve() backs both the filmstrip thumbnail pipe (cold clip-2
+      // thumbnail at load) and the held-src cache-miss fallback (clip 2 at
+      // seek); the overwrite capture keeps the latest resolver — the
+      // seek's.
+      let resolveClip2!: (url: string) => void;
+      mockMediaService.resolve.mockImplementation(
+        () =>
+          new Promise<string>(resolve => {
+            resolveClip2 = resolve;
+          }),
+      );
+
+      loadTwoClipStoryboard();
+      expect(component.heldVideoSrc()).toBe('https://signed/clip1');
+
+      seekTo(12); // Lands in clip 2 (10-15s).
+
+      expect(component.currentPlaylistIndex()).toBe(1);
+      // Cache misses go through MediaService.resolve — the per-mode shim —
+      // never directly through the mediated-plane signUrl.
+      expect(mockMediaService.resolve).toHaveBeenCalledWith(
+        expect.objectContaining({path: 'videos/clip2.mp4'}),
+      );
+      expect(mockMediaService.signUrl).not.toHaveBeenCalled();
+      // The new clip's URL is still in flight: the bound src must hold the
+      // previous URL instead of transitioning to null.
+      expect(component.heldVideoSrc()).toBe('https://signed/clip1');
+
+      resolveClip2('https://signed/clip2');
+      await vi.waitFor(() => {
+        expect(component.heldVideoSrc()).toBe('https://signed/clip2');
+      });
+      expect(component.currentPlaylistIndex()).toBe(1);
+    });
+
+    it('swaps the src synchronously on a cross-clip seek when the URL is cached', () => {
+      mockMediaService.getCachedUrl.mockImplementation((path: string) =>
+        path === 'videos/clip1.mp4'
+          ? 'https://signed/clip1'
+          : 'https://signed/clip2',
+      );
+
+      loadTwoClipStoryboard();
+      expect(component.heldVideoSrc()).toBe('https://signed/clip1');
+
+      seekTo(12);
+
+      expect(component.heldVideoSrc()).toBe('https://signed/clip2');
+      expect(mockMediaService.signUrl).not.toHaveBeenCalled();
+      expect(mockMediaService.resolve).not.toHaveBeenCalled();
+    });
+
+    it('resolves the src in the same pass the playlist computes (no one-tick null binding)', () => {
+      mockMediaService.getCachedUrl.mockImplementation((path: string) =>
+        path === 'videos/clip1.mp4' ? 'https://signed/clip1' : undefined,
+      );
+
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        storyboard: structuredClone(twoClipStoryboard),
+      });
+
+      // Read synchronously, before any change detection or effect flush:
+      // the src must already be the cached URL — the same-pass timing the
+      // impure mediaSrc pipe gave this binding at baseline, so the <video>
+      // element never sees an interim null src.
+      expect(component.heldVideoSrc()).toBe('https://signed/clip1');
+    });
+
+    it('keeps a null src while the playlist is empty', () => {
+      fixture.detectChanges();
+
+      expect(component.heldVideoSrc()).toBeNull();
+      expect(mockMediaService.signUrls).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('scrubbing pauses playback while the dot is held', () => {
+    // Two clips: clip 1 spans 0-10s, clip 2 spans 10-15s on the timeline.
+    const twoClipStoryboard: ProvidedVideoScene[] = [
+      {
+        id: 's1',
+        type: 'video',
+        name: 'Clip 1',
+        video: {url: 'http://stored/1', path: 'videos/clip1.mp4'},
+        durationSeconds: 10,
+      },
+      {
+        id: 's2',
+        type: 'video',
+        name: 'Clip 2',
+        video: {url: 'http://stored/2', path: 'videos/clip2.mp4'},
+        durationSeconds: 5,
+      },
+    ];
+
+    function loadTwoClipStoryboard() {
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        storyboard: structuredClone(twoClipStoryboard),
+      });
+      fixture.detectChanges();
+    }
+
+    function seekTo(seconds: number) {
+      component.seek({
+        target: {value: String(seconds)},
+      } as unknown as Event);
+      fixture.detectChanges();
+    }
+
+    it('pauses on drag-start while playing, holds the seeked position, and resumes on drag-end', () => {
+      loadTwoClipStoryboard();
+
+      // User is playing the composed video.
+      component.isPlaying.set(true);
+      expect(component.isPlaying()).toBe(true);
+
+      // User grabs the dot: playback must pause so the held frame stays put.
+      component.onScrubStart();
+      expect(component.isPlaying()).toBe(false);
+
+      // User drags the dot to 4s and holds it there. The playback loop is
+      // gated on isPlaying(), so with playback paused it never runs to advance
+      // totalCurrentTime past the held position.
+      seekTo(4);
+      expect(component.totalCurrentTime()).toBe(4);
+
+      // Simulate the playback loop firing while the dot is held: because the
+      // pause stopped the loop, the held position is unchanged. onTimeUpdate()
+      // bails before reaching a ready <video>, so the held time stays at 4s.
+      component.onTimeUpdate();
+      expect(component.totalCurrentTime()).toBe(4);
+
+      // User releases the dot: playback resumes because it was playing before.
+      component.onScrubEnd();
+      expect(component.isPlaying()).toBe(true);
+    });
+
+    it('does not start playback on drag-end when it was paused before the drag', () => {
+      loadTwoClipStoryboard();
+
+      // User is paused (the default state) and scrubs to preview a frame.
+      expect(component.isPlaying()).toBe(false);
+
+      component.onScrubStart();
+      expect(component.isPlaying()).toBe(false);
+
+      seekTo(4);
+      expect(component.totalCurrentTime()).toBe(4);
+
+      // Releasing must NOT auto-start playback: it was not playing before.
+      component.onScrubEnd();
+      expect(component.isPlaying()).toBe(false);
+    });
   });
 });

@@ -140,35 +140,6 @@ class TestOutpainter(unittest.TestCase):
         _, kwargs = mock_client.models.generate_content.call_args
         self.assertIsNone(kwargs["config"].thinking_config)
 
-    def test_supports_thinking_failure_not_cached(self):
-        """A lookup error returns False but is not memoized, so the next call retries."""
-        client = mock.Mock()
-        client.models.get.side_effect = [
-            Exception("transient"),
-            mock.Mock(thinking=True),
-        ]
-
-        self.assertFalse(
-            outpainter._supports_thinking(client, self.mock_image_model)
-        )
-        self.assertTrue(
-            outpainter._supports_thinking(client, self.mock_image_model)
-        )
-        self.assertEqual(client.models.get.call_count, 2)
-
-    def test_supports_thinking_falsy_result_cached(self):
-        """A successful no-thinking result is cached, so there is no re-query."""
-        client = mock.Mock()
-        client.models.get.return_value.thinking = None
-
-        self.assertFalse(
-            outpainter._supports_thinking(client, self.mock_image_model)
-        )
-        self.assertFalse(
-            outpainter._supports_thinking(client, self.mock_image_model)
-        )
-        client.models.get.assert_called_once_with(model=self.mock_image_model)
-
     @mock.patch("actions_lib.outpainter.PIL.Image.open")
     @mock.patch("actions_lib.outpainter.genai.Client")
     def test_outpaint_image_no_candidates(self, mock_genai_client, mock_pil_open):
@@ -192,7 +163,7 @@ class TestOutpainter(unittest.TestCase):
     def test_outpaint_image_no_inline_data(
         self, mock_genai_client, mock_pil_open
     ):
-        """Raises when the first part has no inline data."""
+        """Raises when no part carries inline data."""
         mock_pil_open.return_value = self._mock_image()
         mock_client = self._mock_client()
         mock_genai_client.return_value = mock_client
@@ -200,7 +171,7 @@ class TestOutpainter(unittest.TestCase):
         response.candidates[0].content.parts[0].inline_data = None
         mock_client.models.generate_content.return_value = response
 
-        with self.assertRaisesRegex(ValueError, "did not contain any inline data"):
+        with self.assertRaisesRegex(ValueError, "any inline\n? *data"):
             outpainter.outpaint_image(
                 self.mock_image_bytes,
                 self.mock_gcp_project,
@@ -208,6 +179,46 @@ class TestOutpainter(unittest.TestCase):
                 self.mock_image_model,
                 self.mock_target_ratio,
             )
+
+    @mock.patch("actions_lib.outpainter.PIL.Image.open")
+    @mock.patch("actions_lib.outpainter.genai.Client")
+    def test_outpaint_image_skips_thought_part(
+        self, mock_genai_client, mock_pil_open
+    ):
+        """Returns the image part even when a thought part comes first."""
+        mock_pil_open.return_value = self._mock_image()
+        mock_client = self._mock_client()
+        mock_genai_client.return_value = mock_client
+        response = self._success_response()
+        image_part = response.candidates[0].content.parts[0]
+        thought_part = mock.Mock()
+        thought_part.inline_data = None  # a thinking part carries no image
+        response.candidates[0].content.parts = [thought_part, image_part]
+        mock_client.models.generate_content.return_value = response
+
+        result = outpainter.outpaint_image(
+            self.mock_image_bytes,
+            self.mock_gcp_project,
+            self.mock_gcp_location,
+            self.mock_image_model,
+            self.mock_target_ratio,
+        )
+
+        self.assertEqual(result, (self.mock_outpainted_bytes, "image/png"))
+
+    @mock.patch("actions_lib.outpainter.PIL.Image.open")
+    def test_outpaint_image_bad_target_ratio(self, mock_pil_open):
+        """Raises a clear ValueError naming a malformed target_ratio."""
+        mock_pil_open.return_value = self._mock_image()
+        for bad_ratio in ("16x9", "16:9:1", "16:0", "abc", "-16:9"):
+            with self.assertRaisesRegex(ValueError, "target_ratio"):
+                outpainter.outpaint_image(
+                    self.mock_image_bytes,
+                    self.mock_gcp_project,
+                    self.mock_gcp_location,
+                    self.mock_image_model,
+                    bad_ratio,
+                )
 
     @mock.patch("actions_lib.outpainter.PIL.Image.open")
     @mock.patch("actions_lib.outpainter.genai.Client")

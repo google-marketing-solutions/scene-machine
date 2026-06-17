@@ -15,25 +15,32 @@
  */
 
 import {ComponentFixture, TestBed} from '@angular/core/testing';
-import {Auth} from '@angular/fire/auth';
-import {Firestore} from '@angular/fire/firestore';
 import {provideRouter} from '@angular/router';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {routes} from '../app.routes';
+import {ConfigService} from '../services/config/config';
 import {Generate} from './generate';
 import '../testing/mocks/match-media.mock';
 
 describe('Generate', () => {
   let component: Generate;
   let fixture: ComponentFixture<Generate>;
+  let configMock: {
+    setNewProject: ReturnType<typeof vi.fn>;
+    saveNow: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
+    configMock = {
+      setNewProject: vi.fn(),
+      saveNow: vi.fn(),
+    };
+
     await TestBed.configureTestingModule({
       imports: [Generate],
       providers: [
         provideRouter(routes),
-        {provide: Firestore, useValue: vi.mockObject(Firestore)},
-        {provide: Auth, useValue: vi.mockObject(Auth)},
+        {provide: ConfigService, useValue: configMock},
       ],
     }).compileComponents();
 
@@ -44,5 +51,18 @@ describe('Generate', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('persists the brand-new project immediately on creation', () => {
+    // A discrete creation event: the project is set up and then saved right
+    // away (saveNow), so it exists server-side and shows on the homepage
+    // without waiting for the 5s autosave.
+    expect(configMock.setNewProject).toHaveBeenCalledTimes(1);
+    expect(configMock.saveNow).toHaveBeenCalledTimes(1);
+
+    // saveNow runs after the project is set up.
+    const setNewOrder = configMock.setNewProject.mock.invocationCallOrder[0];
+    const saveNowOrder = configMock.saveNow.mock.invocationCallOrder[0];
+    expect(saveNowOrder).toBeGreaterThan(setNewOrder);
   });
 });

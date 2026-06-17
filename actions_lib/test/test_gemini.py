@@ -202,7 +202,9 @@ class TestGemini(unittest.TestCase):
         mock_client = mock_client_class.return_value
         mock_response = mock.Mock()
         mock_candidate = mock.Mock()
-        mock_part = mock.Mock(spec=[])
+        # The SDK always sets .text; a non-text part has text=None.
+        mock_part = mock.Mock()
+        mock_part.text = None
         mock_candidate.content.parts = [mock_part]
         mock_response.candidates = [mock_candidate]
         mock_client.models.generate_content.return_value = mock_response
@@ -216,6 +218,42 @@ class TestGemini(unittest.TestCase):
                 gcp_project="test-proj",
                 text_prompt="get json",
                 response_schema=schema,
+            )
+
+    @mock.patch("google.genai.Client")
+    def test_prompt_skips_text_none_parts(self, mock_client_class):
+        """Joins only real text, skipping thought parts whose text is None."""
+        mock_client = mock_client_class.return_value
+        mock_response = mock.Mock()
+        mock_candidate = mock.Mock()
+        thought_part = mock.Mock()
+        thought_part.text = None  # a "thought" part carries no text
+        text_part = mock.Mock()
+        text_part.text = "real answer"
+        mock_candidate.content.parts = [thought_part, text_part]
+        mock_response.candidates = [mock_candidate]
+        mock_client.models.generate_content.return_value = mock_response
+
+        output = gemini.prompt(
+            gcp_project="test-proj", text_prompt="say something"
+        )
+        self.assertEqual(output, "real answer")
+
+    @mock.patch("google.genai.Client")
+    def test_prompt_all_text_none_raises_value_error(self, mock_client_class):
+        """Raises the friendly ValueError, not TypeError, when text is None."""
+        mock_client = mock_client_class.return_value
+        mock_response = mock.Mock()
+        mock_candidate = mock.Mock()
+        thought_part = mock.Mock()
+        thought_part.text = None
+        mock_candidate.content.parts = [thought_part]
+        mock_response.candidates = [mock_candidate]
+        mock_client.models.generate_content.return_value = mock_response
+
+        with self.assertRaises(ValueError):
+            gemini.prompt(
+                gcp_project="test-proj", text_prompt="say something"
             )
 
 

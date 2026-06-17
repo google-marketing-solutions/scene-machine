@@ -1,0 +1,55 @@
+name: UI Tests
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  ui:
+    name: UI build, lint, and unit tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: ui/package-lock.json
+
+    - name: Install dependencies
+      run: npm ci --legacy-peer-deps
+
+    - name: Generate env.ts (CI placeholder values; not a real deploy)
+      # ui/src/env.ts is rendered from env.template.txt by deploy.sh and is
+      # gitignored, so CI must generate it before any compile/build/test. The
+      # values only need to be type-valid; CI never runs the app.
+      env:
+        UI_CONTROL_PLANE_MODE: none
+        UI_MEDIA_MODE: mediated
+        UI_DATA_PLANE_MODE: mediated
+        PROJECT: ci
+        FIRESTORE_DB_UI: ci
+        FIREBASE_API_KEY: ''
+        FIREBASE_AUTH_DOMAIN: ''
+        GCS_BUCKET: ''
+      run: envsubst < src/env.template.txt > src/env.ts
+
+    - name: Type-check
+      run: npm run compile
+
+    - name: Lint
+      run: npm run lint
+
+    - name: Unit tests
+      run: npx vitest run
+
+    - name: Production build
+      run: npx ng build --configuration production

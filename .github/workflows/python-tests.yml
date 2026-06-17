@@ -31,3 +31,7 @@ jobs:
     - name: Run tests with pytest
       run: |
         python -m pytest actions/test actions_lib/test test
+
+    - name: Check action definitions match implementations
+      run: |
+        python -m test.test_actions_sig

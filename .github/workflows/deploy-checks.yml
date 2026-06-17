@@ -1,0 +1,31 @@
+name: Deploy Script Checks
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  shellcheck:
+    name: ShellCheck deploy scripts
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    # ShellCheck is preinstalled on the ubuntu-latest runner image, so no
+    # install step is needed.
+    - name: ShellCheck
+      # Scope to error-level findings only: the deploy scripts carry many
+      # intentional info/warning patterns (e.g. unquoted $PROJECT in gcloud
+      # flags, sourcing ./config.txt) that should not block the gate. This
+      # still catches real breakage like undefined-variable use or bad syntax.
+      run: shellcheck --severity=error deploy.sh deploy/libs.sh deploy/grant-access.sh
+
+    - name: Bash syntax check (bash -n)
+      run: |
+        for script in deploy.sh deploy/libs.sh deploy/grant-access.sh; do
+          echo "Checking syntax: $script"
+          bash -n "$script"
+        done

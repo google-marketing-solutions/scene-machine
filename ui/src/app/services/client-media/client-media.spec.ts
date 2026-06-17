@@ -15,9 +15,13 @@
  */
 
 import {TestBed} from '@angular/core/testing';
-import {beforeEach, describe, expect, it} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ClientMediaService} from './client-media';
 
+// Note: convertImage / convertVideoToImage / canvasFromMedia draw to a real
+// canvas 2D context and wait for <img>/<video> load events, which jsdom does not
+// implement. Those are exercised in a real browser (and via the higher-level
+// composition specs); here we cover the pure/FileReader-backed helpers.
 describe('ClientMediaService', () => {
   let service: ClientMediaService;
 
@@ -30,5 +34,64 @@ describe('ClientMediaService', () => {
 
   it('should be created', () => {
     expect(service).toBeTruthy();
+  });
+
+  describe('toFile', () => {
+    it('derives the file name and type from the blob type by default', () => {
+      const file = service.toFile(new Blob(['x'], {type: 'image/png'}));
+      expect(file).toBeInstanceOf(File);
+      expect(file.type).toBe('image/png');
+      expect(file.name).toBe('thumbnail.png');
+    });
+
+    it('falls back to image/jpeg when the blob has no type', () => {
+      const file = service.toFile(new Blob(['x']));
+      expect(file.type).toBe('image/jpeg');
+      expect(file.name).toBe('thumbnail.jpeg');
+    });
+
+    it('honors an explicit file name and mime type', () => {
+      const file = service.toFile(new Blob(['x'], {type: 'image/png'}), {
+        fileName: 'custom.webp',
+        mimeType: 'image/webp',
+      });
+      expect(file.name).toBe('custom.webp');
+      expect(file.type).toBe('image/webp');
+    });
+  });
+
+  describe('toBase64', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it('encodes a blob as a data: URL carrying its mime type', async () => {
+      const result = await service.toBase64(
+        new Blob(['hello'], {type: 'text/plain'}),
+      );
+      expect(result.startsWith('data:text/plain;base64,')).toBe(true);
+      // base64 of "hello".
+      expect(result).toContain('aGVsbG8=');
+    });
+
+    it('rejects (does not hang) when the reader yields a non-string result', async () => {
+      // A FileReader whose result is null must reject the promise, not throw
+      // inside the async callback where the error would be swallowed and the
+      // awaiting caller would hang forever.
+      class NullResultFileReader {
+        result: string | null = null;
+        onloadend: (() => void) | null = null;
+        onerror: (() => void) | null = null;
+        readAsDataURL(): void {
+          // Fire the load callback asynchronously, as the real reader does.
+          queueMicrotask(() => this.onloadend?.());
+        }
+      }
+      vi.stubGlobal('FileReader', NullResultFileReader);
+
+      await expect(
+        service.toBase64(new Blob(['x'], {type: 'image/png'})),
+      ).rejects.toThrow('Failed to convert blob to base64');
+    });
   });
 });

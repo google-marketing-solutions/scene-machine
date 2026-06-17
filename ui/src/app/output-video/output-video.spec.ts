@@ -17,7 +17,9 @@
 import {provideHttpClient} from '@angular/common/http';
 import {provideHttpClientTesting} from '@angular/common/http/testing';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {vi} from 'vitest';
 import {ConfigService} from '../services/config/config';
+import {MediaService} from '../services/media/media';
 import {OutputVideo} from './output-video';
 
 describe('OutputVideo', () => {
@@ -30,8 +32,29 @@ describe('OutputVideo', () => {
         value: () => ({
           title: 'Test Project',
           outputVideoUrl: 'http://test.com/video.mp4',
+          aspectRatio: '16:9',
+          renderRuns: [
+            {
+              createdAt: 1,
+              wasPlayed: true,
+              isArchived: false,
+              outputVideo: {path: 'output/video.mp4'},
+            },
+          ],
+          storyboard: [],
         }),
       },
+      updateProjectConfig: vi.fn(),
+      isGeneratedScene: () => false,
+    };
+
+    // The output template binds the video src through the (impure) mediaSrc
+    // pipe, which calls MediaService.getCachedUrl(); returning a URL keeps the
+    // binding synchronous so the rendered <video> reflects the template
+    // attributes in this pass.
+    const mediaServiceMock = {
+      getCachedUrl: vi.fn().mockReturnValue('http://test.com/video.mp4'),
+      resolve: vi.fn().mockResolvedValue('http://test.com/video.mp4'),
     };
 
     await TestBed.configureTestingModule({
@@ -40,6 +63,7 @@ describe('OutputVideo', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         {provide: ConfigService, useValue: configServiceMock},
+        {provide: MediaService, useValue: mediaServiceMock},
       ],
     }).compileComponents();
 
@@ -50,5 +74,19 @@ describe('OutputVideo', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('renders the output video without autoplay (opening the output tab must not auto-play)', () => {
+    const video: HTMLVideoElement | null =
+      fixture.nativeElement.querySelector('video');
+    // Guard: the assertion below is only meaningful if the <video> actually
+    // rendered (i.e. videoFile() resolved truthy).
+    expect(video).not.toBeNull();
+    expect(video!.hasAttribute('autoplay')).toBe(false);
+    expect(video!.autoplay).toBe(false);
+    // The deliberate product change removes only autoplay — controls and
+    // playsinline must stay.
+    expect(video!.hasAttribute('controls')).toBe(true);
+    expect(video!.hasAttribute('playsinline')).toBe(true);
   });
 });
