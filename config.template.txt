@@ -5,7 +5,7 @@
 # How to use:
 # 1. cp config.template.txt config.txt
 # 2. Replace <YOUR_PROJECT_ID> with your GCP Project ID parameter
-# 3. Run ./deploy.sh and ./deploy-ui.sh
+# 3. Run ./deploy.sh
 
 export PROJECT=<YOUR_PROJECT_ID>
 
@@ -33,18 +33,21 @@ export VEO_REGION=global # choose from: https://docs.cloud.google.com/vertex-ai/
 export IMAGE_MODEL=gemini-3-pro-image
 export IMAGE_MODEL_REGION=global # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models
 
-API_GATEWAY_REGION=us-central1 # europe-west1 | europe-west2 | us-central1
-APP_ENGINE_REGION=us-central # europe-west | europe-west2/3/6 | us-central
-
 # These resources will be created automatically if they don't exist
 export GCS_BUCKET=${PROJECT}-scene-machine # Must be unique across Google Cloud globally
 export FIRESTORE_DB=scene-machine # Backend: Firestore database ID
 export FIRESTORE_DB_UI=scene-machine-ui # UI: Firestore database ID
 export ARTIFACT_REPO=scene-machine # your Artifact Repository ID
-API_GATEWAY=scenemachine-api-gateway # your API Gateway ID
 
 export TASKS_QUEUE_PREFIX=SceneMachine- # prefix for the Cloud Tasks queue name; can contain only letters, numbers, or hyphens (-)
 export BACKEND_SERVICE_NAME=remix-engine-backend
+
+# App service scale-to-zero vs. warm instance.
+# 0 (default) = scale to zero when idle: lowest cost, but the first request
+#   after an idle period pays a cold-start delay.
+# 1 = keep one instance always warm: no cold start, but you pay for one
+#   idle instance continuously. (Worker service is unaffected.)
+export APP_MIN_INSTANCES=0
 
 # Optional: Custom domain for the application UI.
 # If you use a custom domain for the Scene Machine UI, uncomment the following

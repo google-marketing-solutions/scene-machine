@@ -1,2 +1,42 @@
+# Mirror .gcloudignore's intent for local `docker build`: keep docs, examples,
+# tests, deploy/host-only tooling, caches and editor files out of the build
+# context. The Dockerfile copies only the runtime paths explicitly, so this
+# mainly shrinks the context sent to the Docker daemon. Do NOT exclude anything
+# the Dockerfile COPYs (actions/, actions_lib/, util/, *.py, deployed_version.txt,
+# ui/dist, ui/definitions, ui/remix-engine-status-viewer) or requirements.txt
+# (the builder stage installs from it).
 .git
-__pycache__
+.gitignore
+.firebase/
+.firebaserc
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+node_modules/
+
+# Docs, example inputs, tests, and host-only tooling (not in the image)
+docs/
+workflow_examples/
+test/
+tools/
+scripts/
+deploy/
+firebase/
+creative_templates/
+
+# Deploy-time-only config / dev deps (the image installs requirements.txt only)
+config.txt
+requirements-dev.txt
+requirements-dev.in
+gcs-cors-config.json
+
+# Local-only logs and editor/OS files
+firebase-debug.log
+firestore-debug.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

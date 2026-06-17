@@ -1,9 +1,11 @@
 {
-  "appEngineUrl": "https://$UI_HOST",
   "firestoreDatabase": "$FIRESTORE_DB",
+  "gcpProject": "$PROJECT",
+  "gcpLocation": "$REGION",
   "gcsBucket": "$GCS_BUCKET",
-  "apiGatewaySettings": {
-    "baseUrl": "https://$API_GATEWAY_HOST",
+  "tasksQueuePrefix": "$TASKS_QUEUE_PREFIX",
+  "backendApi": {
+    "baseUrl": "/api",
     "apiKey": "$API_KEY"
   }
 }
