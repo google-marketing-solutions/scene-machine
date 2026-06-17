@@ -346,11 +346,11 @@ firebase login                          # 3. the Firebase CLI (add --reauth if y
 
     -   *Note: The script prints per-phase run times as it goes.*
 
-    -   **Headless / non-interactive runs:** add `--non-interactive` (which
-        also implies `--yes`) for automated or agent-driven deploys. Instead of
-        waiting at a manual console step, the script fails fast and prints the
-        exact console URL and the command to re-run, so an automation can
-        surface it and continue once the step is done.
+    -   **Headless / non-interactive runs:** add `--non-interactive` for
+        automated or agent-driven deploys. It auto-confirms the deploy-target
+        prompt, and instead of waiting at a manual console step, the script
+        fails fast and prints the exact console URL and the command to re-run,
+        so an automation can surface it and continue once the step is done.
 
     -   **Faster repeat deploys (opt-in):** a plain `./deploy.sh` always does the
         full, safe deploy. For everyday iteration on an already-set-up project,

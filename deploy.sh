@@ -18,16 +18,16 @@
 # Machine deployment with NO API Gateway and NO App Engine.
 #
 # Usage:
-#   ./deploy.sh [--yes] [--non-interactive]
+#   ./deploy.sh [--non-interactive]
 #
 #   Configuration comes from ./config.txt. (Any leftover API_GATEWAY* or
 #   APP_ENGINE_REGION entries from older config files are ignored — there is no
 #   API Gateway or App Engine in this topology.) The app service is always
 #   IAP-gated (deployed --no-allow-unauthenticated --iap); the firebase public
 #   sign-in mode was removed, so there is no auth-mode choice to make.
-#   --yes skips the interactive deployment-target confirmation.
-#   --non-interactive is for headless/agent runs: it implies --yes and makes any
-#   step that needs a human in the console FAIL FAST (printing what to do and to
+#   --non-interactive is for headless/agent runs: it auto-confirms the
+#   deployment-target prompt and makes any step that needs a human in the
+#   console FAIL FAST (printing what to do and to
 #   re-run) instead of waiting. It does NOT short-circuit the automatic
 #   GCP-provisioning waits (default-SA / bucket-link), which resolve on their
 #   own. The IAP arm's post-deploy console steps are printed in the final
@@ -156,9 +156,9 @@ close_phase() {
 }
 
 usage() {
-  echo "Usage: $0 [--yes] [--non-interactive]"
-  echo "  --yes, -y          skip the interactive deployment-target confirmation"
-  echo "  --non-interactive  headless/agent run: implies --yes, and fails fast"
+  echo "Usage: $0 [--non-interactive]"
+  echo "  --non-interactive  headless/agent run: auto-confirms the deploy-target"
+  echo "                     prompt, and fails fast"
   echo "                     (instead of waiting) on any step needing a human in"
   echo "                     the console — printing what to do and to re-run."
   echo
@@ -184,7 +184,6 @@ set -euo pipefail
 # banners below and gates the IAP post-deploy steps; the deployed Cloud Run
 # services get AUTH_MODE=iap set explicitly where they are created.
 AUTH_MODE="iap"
-ASSUME_YES=0
 NONINTERACTIVE=0
 # Faster-deploy flags. All default OFF: a plain `./deploy.sh` is the full,
 # safe, end-to-end deploy. Each flag only shortcuts work that is safe to skip
@@ -194,10 +193,9 @@ SKIP_UI_BUILD=0
 NO_BUILD_CACHE=0
 for arg in "$@"; do
   case "$arg" in
-    --yes|-y) ASSUME_YES=1 ;;
     # Headless/agent runs: auto-confirm the target prompt AND fail fast on the
     # human-in-the-console gates instead of waiting (see the header comment).
-    --non-interactive) NONINTERACTIVE=1; ASSUME_YES=1 ;;
+    --non-interactive) NONINTERACTIVE=1 ;;
     --app-only) APP_ONLY=1 ;;
     --skip-ui-build|--use-existing-ui-dist) SKIP_UI_BUILD=1 ;;
     --no-build-cache) NO_BUILD_CACHE=1 ;;
@@ -320,11 +318,11 @@ echo "    Project:    $PROJECT"
 echo "    Region:     $REGION"
 echo "    Auth mode:  $AUTH_MODE"
 echo "════════════════════════════════════════════════════════════════════════"
-if [ "$ASSUME_YES" = "1" ]; then
-  echo "✓ Auto-confirming the deployment target (--non-interactive/--yes)."
+if [ "$NONINTERACTIVE" = "1" ]; then
+  echo "✓ Auto-confirming the deployment target (--non-interactive)."
 else
   if [ ! -t 0 ]; then
-    echo "ERROR: stdin is not a TTY — cannot confirm. Re-run interactively or pass --yes." >&2
+    echo "ERROR: stdin is not a TTY — cannot confirm. Re-run interactively or pass --non-interactive." >&2
     exit 1
   fi
   read -r -p "Proceed and deploy to '$PROJECT'? (y/N) " confirm
