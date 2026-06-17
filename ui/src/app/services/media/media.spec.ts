@@ -244,6 +244,49 @@ describe('MediaService', () => {
       );
       expect(httpClientMock.get).toHaveBeenCalledTimes(2);
     });
+
+    it('omits a path the server leaves out without rejecting the whole batch (M1)', async () => {
+      // The server returns a URL for a.mp4 but omits b.mp4 from the response.
+      httpClientMock.get.mockReturnValueOnce(
+        of(signUrlResponse(['videos/a.mp4'])),
+      );
+
+      const result = await service.signUrls(['videos/a.mp4', 'videos/b.mp4']);
+
+      // The signed path is returned and the omitted one is simply absent — a
+      // single missing path must NOT reject the batch or drop the path that
+      // did sign.
+      expect(result.get('videos/a.mp4')).toBe(
+        'https://signed.example/videos/a.mp4',
+      );
+      expect(result.has('videos/b.mp4')).toBe(false);
+    });
+  });
+
+  describe('signed-URL expiry caching', () => {
+    it('caches against a finite fallback TTL when the server expiresAt is malformed, instead of re-signing on every read (M2)', async () => {
+      httpClientMock.get.mockReturnValueOnce(
+        of({
+          urls: {'videos/a.mp4': 'https://signed.example/videos/a.mp4'},
+          expiresAt: 'not-a-date',
+        }),
+      );
+
+      const first = await service.signUrl('videos/a.mp4');
+      expect(first).toBe('https://signed.example/videos/a.mp4');
+
+      // A NaN expiry must NOT make the entry permanently stale (which would
+      // re-sign on every change-detection read — an HTTP storm). It is cached
+      // against a finite fallback TTL and served synchronously from the cache.
+      expect(service.getCachedUrl('videos/a.mp4')).toBe(
+        'https://signed.example/videos/a.mp4',
+      );
+
+      // A second signUrl is served from the cache: no second HTTP request.
+      const second = await service.signUrl('videos/a.mp4');
+      expect(second).toBe('https://signed.example/videos/a.mp4');
+      expect(httpClientMock.get).toHaveBeenCalledTimes(1);
+    });
   });
 
   // The resolve() contract the composition held-src effect and the mediaSrc

@@ -491,40 +491,46 @@ describe('RemixEngineService (mediated)', () => {
       expect(matSnackBarMock.open).not.toHaveBeenCalled();
     });
 
-    it('should fall back to the all-or-nothing error path when every candidate fails', async () => {
+    it('keeps the in-flight marker (does not fail the scene) when signing every completed video fails', async () => {
       const mockScene = mockTwoVideoRun();
       setupHappyMedia();
-      // Both the per-candidate failures and the escalated generation error are
-      // logged by design; spy to keep them out of the test output, then assert
-      // both were emitted.
+      // The per-candidate signing failures are logged by design; spy to keep
+      // them out of the test output.
       const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       mediaServiceMock.signUrl.mockRejectedValue(new Error('sign failed'));
 
       await service.generateCandidates(mockScene as any, generationParams);
 
+      // The run COMPLETED (it produced video outputs) but signing them all
+      // failed transiently. (E3) That is not a generation failure: the marker
+      // is KEPT so reopening re-collects the finished videos, the scene is NOT
+      // stamped with a generationError, and the user is told to reopen.
       expect(errSpy).toHaveBeenCalledWith(
         'Failed to load a generated video:',
         expect.objectContaining({message: 'sign failed'}),
       );
-      expect(errSpy).toHaveBeenCalledWith(
+      // The definitive-failure path (which would clear the marker and stamp the
+      // scene) is NOT taken.
+      expect(errSpy).not.toHaveBeenCalledWith(
         'Video generation error:',
-        expect.objectContaining({executionId: 'mock-execution-id'}),
+        expect.anything(),
       );
       expect(matSnackBarMock.open).toHaveBeenCalledWith(
-        expect.stringContaining(
-          'failed to generate — open the marked scene to see why.',
-        ),
+        expect.stringContaining('could not be loaded right now'),
         'Dismiss',
         {panelClass: ['error-snackbar']},
       );
-      // The marker was persisted at start and cleared on the failure; no
-      // candidates were attached.
-      expect(configServiceMock.updateProjectConfig).toHaveBeenCalledTimes(2);
+      expect(matSnackBarMock.open).not.toHaveBeenCalledWith(
+        expect.stringContaining('failed to generate'),
+        expect.anything(),
+        expect.anything(),
+      );
+      // Only the start marker was persisted; the signing-failure path did not
+      // write again, so pendingGeneration survives and no generationError set.
+      expect(configServiceMock.updateProjectConfig).toHaveBeenCalledTimes(1);
       const finalScene = lastUpdatedScene();
-      expect(finalScene).not.toHaveProperty('pendingGeneration');
-      expect(finalScene).toHaveProperty('generationError', 'sign failed');
-      expect(finalScene.candidates).toEqual([]);
-      expect(configServiceMock.flushPendingSave).toHaveBeenCalledTimes(2);
+      expect(finalScene).toHaveProperty('pendingGeneration');
+      expect(finalScene).not.toHaveProperty('generationError');
     });
   });
 
@@ -725,6 +731,29 @@ describe('RemixEngineService (mediated)', () => {
 
       expect(pollSpy).not.toHaveBeenCalled();
     });
+
+    it('does not resume until global config has loaded (E1)', () => {
+      mockProjectWithPending();
+      const pollSpy = vi
+        .spyOn(service, 'pollWorkflow')
+        .mockReturnValue(new Promise(() => {}));
+
+      // Global config (gcsBucket etc.) has not loaded yet. The poll path would
+      // dereference it, so the resume effect must early-return and NOT resume
+      // (which, before the guard, threw a swallowed TypeError that could clear
+      // a healthy run's marker).
+      configServiceMock.globalConfig.value.mockReturnValue(undefined);
+      runResumeScan();
+      expect(pollSpy).not.toHaveBeenCalled();
+      expect(service.generatingSceneIds().has('scene-1')).toBe(false);
+
+      // Once /api/config resolves, the effect re-runs and the resume proceeds.
+      configServiceMock.globalConfig.value.mockReturnValue({
+        gcsBucket: 'mock-bucket',
+      });
+      runResumeScan();
+      expect(pollSpy).toHaveBeenCalledWith('persisted-exec-id', 'project-1');
+    });
   });
 
   describe('resume of a persisted in-flight render', () => {
@@ -741,6 +770,29 @@ describe('RemixEngineService (mediated)', () => {
       configServiceMock.projectConfig.value.mockReturnValue(project);
       return project;
     }
+
+    it("resumes a different project's pending render even while another render is in flight (E2)", () => {
+      // Simulate project A's live render in flight: the SHARED combiningScenes
+      // flag is set. The old gate keyed on this flag, so opening any other
+      // project with its own pendingRender was wrongly skipped. The guard is
+      // now per-execution, so project B's distinct render resumes regardless.
+      service.combiningScenes.set(true);
+      configServiceMock.projectConfig.value.mockReturnValue({
+        id: 'project-B',
+        storyboard: [],
+        pendingRender: {
+          executionId: 'render-exec-B',
+          startedAt: '2026-06-12T00:00:00.000Z',
+        },
+      });
+      const pollSpy = vi
+        .spyOn(service, 'pollWorkflow')
+        .mockReturnValue(new Promise(() => {}));
+
+      runResumeScan();
+
+      expect(pollSpy).toHaveBeenCalledWith('render-exec-B', 'project-B');
+    });
 
     it('resumes the render, records the output and clears the marker', async () => {
       mockProjectWithRender();

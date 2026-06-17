@@ -89,6 +89,21 @@ class PollTimeoutError extends Error {
 }
 
 /**
+ * Thrown when a generation COMPLETED (the workflow produced video outputs) but
+ * signing every output's URL failed transiently — e.g. a brief /api/signUrl
+ * blip after the run finished. Treated like PollTimeoutError (keep the
+ * pendingGeneration marker so reopening re-collects the finished videos) rather
+ * than a definitive failure, which would delete the marker and permanently lose
+ * a successful generation. (E3)
+ */
+class CandidateSigningError extends Error {
+  constructor(readonly reason: unknown) {
+    super('Failed to sign generated video URLs');
+    this.name = 'CandidateSigningError';
+  }
+}
+
+/**
  * Service for interacting with the Remix Engine.
  */
 @Injectable({
@@ -114,6 +129,16 @@ export class RemixEngineService {
     // with pendingGeneration markers is loaded (or re-loaded).
     effect(() => {
       const config = this.configService.projectConfig.value();
+      // Don't resume until global config has loaded: the poll path
+      // (getWorkflowStatus) reads globalConfig().gcsBucket. globalConfig is a
+      // separate async resource with no default value, so a resume that fires
+      // before /api/config resolves would dereference undefined and — because
+      // the TypeError is swallowed by the generic error branch — clear a
+      // healthy run's pendingGeneration marker. Reading globalConfig here
+      // registers it as a dependency, so the effect re-runs once it loads. (E1)
+      if (!this.configService.globalConfig.value()) {
+        return;
+      }
       // untracked: generatingSceneIds changes must not re-run this scan.
       const generating = untracked(this.generatingSceneIds);
       for (const scene of config.storyboard) {
@@ -132,15 +157,16 @@ export class RemixEngineService {
         void this.resumeGeneration(config.id, scene.id, pending);
       }
 
-      // Resume a persisted in-flight render the same way. untracked: a live
-      // render (combiningScenes) is the in-memory guard that stops the just-
-      // started run from being resumed as a duplicate, so reading it must
-      // not re-run this scan.
+      // Resume a persisted in-flight render the same way, guarded per-execution
+      // by resumedRenderExecutionIds. A live combineScenes() run claims its own
+      // executionId in that set the moment it starts, so it is never resumed as
+      // a duplicate — without coupling this to the SHARED combiningScenes flag,
+      // which would wrongly block resuming a DIFFERENT project's render while
+      // any render is in flight. (E2)
       const pendingRender = config.pendingRender;
       if (
         pendingRender &&
-        !this.resumedRenderExecutionIds.has(pendingRender.executionId) &&
-        !untracked(this.combiningScenes)
+        !this.resumedRenderExecutionIds.has(pendingRender.executionId)
       ) {
         this.resumedRenderExecutionIds.add(pendingRender.executionId);
         void this.resumeRender(config.id, pendingRender);
@@ -160,7 +186,14 @@ export class RemixEngineService {
   private getWorkflowStatus(
     executionId: string,
   ): Observable<WorkflowStatusResponse> {
-    const url = `/api/getStatus?executionId=${executionId}&signedUrls=false&gcsBucket=${this.configService.globalConfig.value()!.gcsBucket}`;
+    const globalConfig = this.configService.globalConfig.value();
+    if (!globalConfig) {
+      // The resume effect gates on this, and live generation only runs after
+      // config has loaded, so this is a defensive guard for any future caller:
+      // fail loud instead of dereferencing undefined with a non-null assertion.
+      return throwError(() => new Error('Global config not loaded'));
+    }
+    const url = `/api/getStatus?executionId=${executionId}&signedUrls=false&gcsBucket=${globalConfig.gcsBucket}`;
     return this.httpClient.get<WorkflowStatusResponse>(url);
   }
 
@@ -760,6 +793,17 @@ export class RemixEngineService {
           {panelClass: ['error-snackbar']},
         );
         return;
+      } else if (error instanceof CandidateSigningError) {
+        // The run finished but its video URLs could not be signed right now.
+        // Keep pendingGeneration so reopening re-collects the finished videos;
+        // do NOT mark the scene failed (which would discard a successful run).
+        this.matSnackBar.open(
+          'Generated videos are ready but could not be loaded right now — ' +
+            'reopen the project to retry.',
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
+        return;
       } else if (error instanceof Error) {
         // Definitive failure: record the error on the scene itself — shown where
         // the video would be, with a "!" badge on its thumbnail — instead of only
@@ -874,6 +918,18 @@ export class RemixEngineService {
           {panelClass: ['error-snackbar']},
         );
         return;
+      } else if (error instanceof CandidateSigningError) {
+        // The run finished but its video URLs could not be signed right now.
+        // Keep pendingGeneration so reopening re-collects the finished videos;
+        // release the resume claim so a later reopen retries. (E3)
+        this.resumedExecutionIds.delete(pending.executionId);
+        this.matSnackBar.open(
+          'Generated videos are ready but could not be loaded right now — ' +
+            'reopen the project to retry.',
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
+        return;
       } else if (error instanceof Error) {
         // Definitive failure: record the error on the scene (shown in the
         // preview, with a "!" badge) and clear the marker so reopening the
@@ -981,8 +1037,12 @@ export class RemixEngineService {
         console.error('Failed to load a generated video:', failure.reason);
       }
       if (candidates.length === 0) {
-        // Everything failed — escalate to the all-or-nothing error path.
-        throw failures[0].reason;
+        // Everything failed. The only thing that can reject buildCandidate is
+        // signUrl (thumbnail steps are caught), and we only reach here when the
+        // run produced video outputs — so this is a transient signing failure on
+        // a COMPLETED run, not a failed generation. Signal it as such so the
+        // caller keeps the marker instead of deleting a successful run. (E3)
+        throw new CandidateSigningError(failures[0].reason);
       }
       this.matSnackBar.open(
         `${failures.length} of ${fileItems.length} generated videos could not be loaded`,
@@ -1271,6 +1331,10 @@ export class RemixEngineService {
         executionId,
         startedAt: new Date().toISOString(),
       });
+      // Claim this executionId so the resume effect treats the live render as
+      // already-resumed and never double-resumes it. (E2 — replaces the old
+      // reliance on the shared combiningScenes flag.)
+      this.resumedRenderExecutionIds.add(executionId);
       const workflowStatus = await this.pollWorkflow(executionId, projectId);
       await this.recordRenderOutput(workflowStatus);
       this.combiningScenes.set(false);
@@ -1278,13 +1342,23 @@ export class RemixEngineService {
       if (error instanceof ProjectChangedError) {
         // The user left the project mid-render: reset the in-memory button
         // state (otherwise it stays stuck on "Rendering...") but keep the
-        // persisted marker so returning to the project resumes the run.
+        // persisted marker so returning to the project resumes the run. Release
+        // the per-execution claim so that return can re-resume it. (E2 —
+        // mirrors resumeRender's ProjectChangedError branch.)
         console.info(error.message);
+        if (executionId) {
+          this.resumedRenderExecutionIds.delete(executionId);
+        }
         this.combiningScenes.set(false);
         return;
       } else if (error instanceof PollTimeoutError) {
         // Stalled, not failed: clear the button but keep pendingRender so a
-        // reopen resumes and collects a late result.
+        // reopen resumes and collects a late result. Release the per-execution
+        // claim (added at start) so that reopen can actually re-resume it —
+        // otherwise the resumed-id guard would skip it. (E2)
+        if (executionId) {
+          this.resumedRenderExecutionIds.delete(executionId);
+        }
         this.combiningScenes.set(false);
         this.matSnackBar.open(
           'Rendering is taking longer than expected. It may still finish — ' +
@@ -1378,7 +1452,9 @@ export class RemixEngineService {
         // Stalled, not failed: keep pendingRender so a later reopen resumes and
         // collects a late result (mirrors combineScenes). Do NOT record an
         // error run or clear the marker, which would permanently abandon a
-        // render that is merely slow.
+        // render that is merely slow. Release the per-execution claim so the
+        // reopen can re-resume it (mirrors resumeGeneration's timeout branch). (E2)
+        this.resumedRenderExecutionIds.delete(pending.executionId);
         this.combiningScenes.set(false);
         this.matSnackBar.open(
           'Rendering is taking longer than expected. It may still finish — ' +

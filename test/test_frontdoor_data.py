@@ -344,6 +344,62 @@ def test_upload_url_validates_prefix_and_filename(
   assert 'method=GET' in body['url']
   assert 'method=PUT' in body['uploadUrl']
   assert 'ct=image/png' in body['uploadUrl']
+  # ARCH2: the GET URL's expiry is returned so the client caches against the
+  # server's actual TTL instead of a hard-coded constant.
+  assert 'expiresAt' in body and body['expiresAt']
+
+
+def test_upload_url_rejects_disallowed_content_types(
+    monkeypatch, orchestrator_module
+):
+  """P2#2: the signed PUT binds the content type, so the server allow-lists it.
+
+  Media (image/audio/video), the plain-text workflow payloads, and the
+  application/octet-stream fallback the browser uses for typeless Files are
+  accepted; anything else (pdf, html, executables, zip, json) is rejected with a
+  400 before any URL is signed, so a caller cannot mint a capability to store
+  arbitrary, mislabelled content in the bucket.
+  """
+  del orchestrator_module
+  orch, _, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  for bad_type in (
+      'application/pdf',
+      'text/html',
+      'application/x-msdownload',
+      'application/zip',
+      'application/json',
+  ):
+    response = client.post(
+        '/api/uploadUrl',
+        json={
+            'path': 'remix-input',
+            'fileName': 'x-abc.bin',
+            'contentType': bad_type,
+        },
+    )
+    assert response.status_code == 400, bad_type
+    assert 'error' in response.get_json(), bad_type
+
+  # Every content type the client legitimately uploads must still be accepted.
+  for i, good_type in enumerate((
+      'image/png',
+      'image/jpeg',
+      'audio/mpeg',
+      'video/mp4',
+      'text/plain',
+      'application/octet-stream',
+  )):
+    response = client.post(
+        '/api/uploadUrl',
+        json={
+            'path': 'remix-input',
+            'fileName': f'asset-{i}.bin',
+            'contentType': good_type,
+        },
+    )
+    assert response.status_code == 200, good_type
 
 
 def test_upload_url_existing_object_skips_upload(
@@ -694,6 +750,16 @@ def test_templates_crud_and_read_only_guard(monkeypatch, orchestrator_module):
   assert response.status_code == 200
   assert docs[template_id]['name'] == 'Renamed'
   assert docs[template_id]['readOnly'] is False
+
+  # O4: a PATCH whose only field is readOnly strips to an empty payload. The
+  # server must reject it (400), not return 200 without writing — a silent
+  # no-op save would tell the client the edit saved when nothing changed.
+  before = dict(docs[template_id])
+  response = client.patch(
+      f'/api/templates/{template_id}', json={'readOnly': False}
+  )
+  assert response.status_code == 400
+  assert docs[template_id] == before  # nothing written
 
   # Read-only guard on both PATCH and DELETE.
   response = client.patch('/api/templates/seeded', json={'name': 'h4x'})

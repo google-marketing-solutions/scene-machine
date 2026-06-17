@@ -70,6 +70,29 @@ function statusApiKeyParam() {
   return `&api_key=${encodeURIComponent(apiKey)}`;
 }
 
+/**
+ * Classifies a /getStatus response body. After an IAP session expires, IAP
+ * answers with a 302 to the Google sign-in page; fetch follows it to a 200 HTML
+ * page, so `response.ok` is true and JSON.parse throws on the HTML. This
+ * distinguishes that "session expired" case from a genuinely malformed JSON
+ * body, so the caller can prompt re-auth instead of failing silently. (V4)
+ *
+ * @param {{redirected?: boolean}} response The fetch Response.
+ * @param {string} text The response body text.
+ * @return {{kind: string, data: object}} kind is 'auth-redirect', 'ok', or
+ *     'bad-json'; data holds the parsed JSON only when kind is 'ok'.
+ */
+function classifyStatusResponse(response, text) {
+  if (response.redirected || /^\s*<(?:!doctype|html)/i.test(text)) {
+    return {kind: 'auth-redirect'};
+  }
+  try {
+    return {kind: 'ok', data: JSON.parse(text)};
+  } catch (jsonError) {
+    return {kind: 'bad-json'};
+  }
+}
+
 async function callCloudRunEndpoint() {
   const executionId = executionIdInput.value.trim();
   if (!executionId || !config.gcsBucket) {
@@ -96,17 +119,30 @@ async function callCloudRunEndpoint() {
       );
     }
 
-    let data;
-    try {
-      data = JSON.parse(responseText); // Try parsing as JSON
-      console.log('Response from Cloud Run:', data);
-      initializeExecutionData(data);
-    } catch (jsonError) {
-      console.warn('Response was not valid JSON:', jsonError);
+    const classified = classifyStatusResponse(response, responseText);
+    if (classified.kind === 'auth-redirect') {
+      // The IAP session expired: fetch followed the login redirect to an HTML
+      // sign-in page (200 OK). Prompt re-auth instead of failing silently. (V4)
+      alert('Your session has expired. Reload the page to sign in again.');
+      return;
     }
+    if (classified.kind === 'bad-json') {
+      console.warn('Response was not valid JSON:', responseText);
+      alert('Could not read the status response. See the console for details.');
+      return;
+    }
+    console.log('Response from Cloud Run:', classified.data);
+    initializeExecutionData(classified.data);
   } catch (error) {
     console.error('Error calling Cloud Run:', error);
   } finally {
     getStatusButton.disabled = false;
   }
+}
+
+// Exported for the Node unit test (callBackend.spec.js). In the browser the
+// status viewer loads this as a plain <script>, where `module` is undefined, so
+// this guard is a no-op there.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {classifyStatusResponse};
 }

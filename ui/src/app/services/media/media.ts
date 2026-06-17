@@ -33,6 +33,7 @@ interface UploadUrlResponse {
   path: string;
   url: string;
   uploadUrl: string | null;
+  expiresAt: string;
 }
 
 interface SignUrlResponse {
@@ -43,8 +44,14 @@ interface SignUrlResponse {
 /** Re-sign this long before a cached signed URL actually expires. */
 const SIGNED_URL_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
 
-/** TTL of the signed GET URL returned by POST /api/uploadUrl (server contract). */
-const UPLOAD_GET_URL_TTL_MS = 24 * 60 * 60 * 1000;
+/**
+ * Cache TTL used only when the server's expiresAt is missing or unparseable.
+ * Longer than the re-sign margin (so getCachedUrl can still serve the entry) but
+ * short enough to re-sign well before any real signed-URL lifetime, instead of
+ * caching NaN — which would make getCachedUrl treat the entry as permanently
+ * stale and re-sign on every change-detection pass (an HTTP storm). (M2)
+ */
+const SIGNED_URL_FALLBACK_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Mediated media access: uploads via server-issued signed PUT URLs and reads
@@ -75,6 +82,17 @@ export class MediaService {
       return cached.url;
     }
     return undefined;
+  }
+
+  /**
+   * Parses the server's ISO `expiresAt` to epoch ms, guarding a missing or
+   * malformed value: `new Date(bad).getTime()` is NaN, and a NaN expiry makes
+   * getCachedUrl treat the entry as permanently stale, re-signing on every
+   * change-detection pass. Fall back to a short, finite TTL instead. (M2)
+   */
+  private parseExpiresAt(expiresAt: string | undefined): number {
+    const ms = expiresAt ? new Date(expiresAt).getTime() : NaN;
+    return Number.isNaN(ms) ? Date.now() + SIGNED_URL_FALLBACK_TTL_MS : ms;
   }
 
   /**
@@ -115,9 +133,12 @@ export class MediaService {
         }),
       );
     }
+    // ARCH2: the server returns expiresAt on /api/uploadUrl (as it does on
+    // /api/signUrl), so the client no longer hard-codes the 24h TTL — the
+    // signing policy stays server-side, with one source of truth.
     this.urlCache.set(response.path, {
       url: response.url,
-      expiresAt: Date.now() + UPLOAD_GET_URL_TTL_MS,
+      expiresAt: this.parseExpiresAt(response.expiresAt),
     });
     return {path: response.path, url: response.url};
   }
@@ -148,7 +169,7 @@ export class MediaService {
         }
         this.urlCache.set(path, {
           url,
-          expiresAt: new Date(response.expiresAt).getTime(),
+          expiresAt: this.parseExpiresAt(response.expiresAt),
         });
         return url;
       })
@@ -180,7 +201,7 @@ export class MediaService {
       }
       const pending = this.pendingSignRequests.get(path);
       if (pending) {
-        joins.push(pending.then(url => results.set(path, url)));
+        joins.push(pending.then(url => results.set(path, url)).catch(() => {}));
         continue;
       }
       toFetch.push(path);
@@ -192,7 +213,7 @@ export class MediaService {
       const batch = firstValueFrom(
         this.httpClient.get<SignUrlResponse>(`/api/signUrl?${query}`),
       ).then(response => {
-        const expiresAt = new Date(response.expiresAt).getTime();
+        const expiresAt = this.parseExpiresAt(response.expiresAt);
         for (const path of toFetch) {
           const url = response.urls[path];
           if (url) {
@@ -214,8 +235,20 @@ export class MediaService {
             this.pendingSignRequests.delete(path);
           });
         this.pendingSignRequests.set(path, request);
-        joins.push(request.then(url => results.set(path, url)));
+        // M1: tolerate a per-path omission here. A path the server leaves out of
+        // the response rejects its own request (still surfaced to a direct
+        // signUrl(path) via pendingSignRequests), but it must NOT reject the
+        // whole batch via Promise.all and drop every successfully-signed path
+        // from the returned Map. Swallow that single-path case in the
+        // aggregation only.
+        joins.push(request.then(url => results.set(path, url)).catch(() => {}));
       }
+      // ...but a whole-batch (HTTP/transport) failure must STILL propagate, so
+      // signUrls() rejects on a real request failure instead of silently
+      // resolving with an empty Map. `batch` rejects only when the request
+      // itself failed (not when a single path is missing), so awaiting it
+      // unguarded reraises exactly that case. (M1)
+      joins.push(batch.then(() => undefined));
     }
     await Promise.all(joins);
     return results;

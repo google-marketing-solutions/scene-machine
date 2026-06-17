@@ -437,10 +437,19 @@ gcloud services identity create --service=iap.googleapis.com --project=$PROJECT 
 # --- Derived values ----------------------------------------------------------
 phase "Resolving project number and runtime service account..."
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT --format="value(projectNumber)")
-# Keep the proven default-compute-SA choice — it is also the default Cloud
-# Build SA on fresh projects, so one SA covers build + runtime with the
-# existing role list.
-RUNTIME_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+# Two distinct identities (least privilege, P2#1):
+#   BUILD_SA   - the default Compute Engine SA, which is also the default Cloud
+#                Build identity. Used ONLY to build and push the container image
+#                (`gcloud builds submit`, no --service-account). It holds the
+#                build-time roles (artifactregistry.writer, logging.logWriter,
+#                storage.objectUser for the source) and is NOT a request-serving
+#                identity.
+#   RUNTIME_SA - a dedicated SA that the app + worker Cloud Run services run as.
+#                It carries only the roles the running app needs. Crucially it
+#                does NOT get roles/artifactregistry.writer, so a compromise of
+#                the public-facing app cannot push or overwrite container images.
+BUILD_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+RUNTIME_SA="sm-runtime@${PROJECT}.iam.gserviceaccount.com"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${ARTIFACT_REPO}/${IMAGE_NAME}:latest"
 # The IAP audience is the app service's RESOURCE path (project number + region +
 # service name) — deterministic and known before the service exists. We do NOT
@@ -452,22 +461,41 @@ IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${ARTIFACT_REPO}/${IMAGE_NAME}:latest
 # that list is irrelevant) - see issue #102, which the old deploy-ui.sh wiped.
 IAP_AUDIENCE="/projects/${PROJECT_NUMBER}/locations/${REGION}/services/app"
 echo "  Project number: ${PROJECT_NUMBER}"
+echo "  Build SA:       ${BUILD_SA}"
 echo "  Runtime SA:     ${RUNTIME_SA}"
 echo "  Image:          ${IMAGE}"
 
-# The default Compute Engine SA is created when compute.googleapis.com is
-# enabled (above), but its propagation isn't instant on fresh projects.
-# Wait for it to exist before attempting role bindings below, rather than
-# failing inside the loop with a confusing "service account not found" error.
+# The default Compute Engine SA (BUILD_SA) is created when compute.googleapis.com
+# is enabled (above), but its propagation isn't instant on fresh projects. Wait
+# for it to exist before attempting role bindings below, rather than failing
+# inside the loop with a confusing "service account not found" error.
 phase "Waiting for default Compute Engine service account to exist..."
 SA_WAIT_ATTEMPTS=0
 SA_WAIT_MAX=120   # 120 × 5s = 10 min total
-until gcloud iam service-accounts describe "${RUNTIME_SA}" --project=$PROJECT &> /dev/null; do
+until gcloud iam service-accounts describe "${BUILD_SA}" --project=$PROJECT &> /dev/null; do
   SA_WAIT_ATTEMPTS=$((SA_WAIT_ATTEMPTS + 1))
   if [ $SA_WAIT_ATTEMPTS -ge $SA_WAIT_MAX ]; then
     echo "ERROR: default Compute Engine SA did not appear after 10 minutes." >&2
     echo "Try enabling Compute Engine API manually, then re-run $0:" >&2
     echo "  gcloud services enable compute.googleapis.com --project=$PROJECT" >&2
+    exit 1
+  fi
+  sleep 5
+done
+echo "✓ Service account ${BUILD_SA} ready."
+
+# The dedicated runtime SA is NOT auto-created with the project, so create it on
+# demand (idempotent: skip if it already exists), then wait for propagation the
+# same way before granting it roles below.
+phase "Ensuring runtime service account ${RUNTIME_SA} exists..."
+gcloud iam service-accounts describe "${RUNTIME_SA}" --project=$PROJECT &> /dev/null \
+  || gcloud iam service-accounts create sm-runtime --project=$PROJECT \
+       --display-name="Scene Machine runtime (app + worker)"
+RUNTIME_SA_WAIT_ATTEMPTS=0
+until gcloud iam service-accounts describe "${RUNTIME_SA}" --project=$PROJECT &> /dev/null; do
+  RUNTIME_SA_WAIT_ATTEMPTS=$((RUNTIME_SA_WAIT_ATTEMPTS + 1))
+  if [ $RUNTIME_SA_WAIT_ATTEMPTS -ge $SA_WAIT_MAX ]; then
+    echo "ERROR: runtime SA ${RUNTIME_SA} did not appear after 10 minutes." >&2
     exit 1
   fi
   sleep 5
@@ -481,15 +509,14 @@ echo "✓ Service account ${RUNTIME_SA} ready."
 # setting itself as the Cloud Tasks OIDC SA) are granted on the SA's OWN
 # resource below, NOT project-wide, so a compromised app can only act as
 # itself. run.invoker is granted service-scoped on the worker only (later),
-# not project-wide. artifactregistry.writer is build-time: the image build runs
-# as this same compute-default SA (gcloud builds submit), so it stays for now;
-# a dedicated build SA would let it move off the runtime identity entirely.
+# not project-wide. roles/artifactregistry.writer is a BUILD-time role and is
+# deliberately NOT here: it is granted to BUILD_SA instead (below), so the
+# request-serving identity cannot push or overwrite container images (P2#1).
 ROLES=(
   "roles/datastore.user"
   "roles/aiplatform.user"
   "roles/cloudtasks.enqueuer"
   "roles/storage.objectUser"
-  "roles/artifactregistry.writer"
   "roles/logging.logWriter"
 )
 phase "Granting ${#ROLES[@]} roles to ${RUNTIME_SA}..."
@@ -508,15 +535,23 @@ echo
 echo "Granting roles/storage.objectUser to Vertex AI service agent..."
 add_iam_binding $PROJECT --member="serviceAccount:${AIPLATFORM_SA}" --role="roles/storage.objectUser" --condition=None
 
-# Cloud Build runs as the Compute Engine default service account; the image
-# build's CLOUD_LOGGING_ONLY mode (cloudbuild.yaml) needs it to hold
-# logging.logWriter to write build logs to Cloud Logging. Grant it HERE, early —
-# the binding then has minutes to propagate before the build runs (after the UI
-# build); granting it right before the build risks the build starting first.
-CLOUD_BUILD_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+# Build-time roles, granted ONLY to BUILD_SA (the Compute Engine default SA that
+# `gcloud builds submit` runs as), never to the runtime SA:
+#   - logging.logWriter:        the build's CLOUD_LOGGING_ONLY mode
+#                               (cloudbuild.yaml) writes build logs to Cloud
+#                               Logging.
+#   - artifactregistry.writer:  the build pushes the image to Artifact Registry.
+#   - storage.objectUser:       `gcloud builds submit` stages the source tarball
+#                               in the build bucket, which the build reads.
+# Granted HERE, early — the bindings then have minutes to propagate before the
+# build runs (after the UI build); granting them right before the build risks
+# the build starting first.
 echo
-echo "Granting roles/logging.logWriter to the Cloud Build service account..."
-add_iam_binding $PROJECT --member="serviceAccount:${CLOUD_BUILD_SA}" --role="roles/logging.logWriter" --condition=None
+echo "Granting build-time roles to the Cloud Build service account..."
+for BUILD_ROLE in "roles/logging.logWriter" "roles/artifactregistry.writer" "roles/storage.objectUser"; do
+  echo "  - $BUILD_ROLE"
+  add_iam_binding $PROJECT --member="serviceAccount:${BUILD_SA}" --role="$BUILD_ROLE" --condition=None
+done
 
 # Cloud Tasks service agent: project-level serviceAgent role, plus the
 # SA-resource-level tokenCreator binding that lets the Tasks agent mint OIDC
@@ -525,9 +560,7 @@ CLOUD_TASKS_ACCOUNT="service-${PROJECT_NUMBER}@gcp-sa-cloudtasks.iam.gserviceacc
 echo
 echo "Granting Cloud Tasks service agent permissions..."
 add_iam_binding "${PROJECT}" --member="serviceAccount:${CLOUD_TASKS_ACCOUNT}" --role="roles/cloudtasks.serviceAgent" --condition=None
-gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
-  --member="serviceAccount:${CLOUD_TASKS_ACCOUNT}" \
-  --role="roles/iam.serviceAccountTokenCreator" --project=$PROJECT --quiet > /dev/null
+add_sa_iam_binding "${RUNTIME_SA}" "serviceAccount:${CLOUD_TASKS_ACCOUNT}" "roles/iam.serviceAccountTokenCreator" "$PROJECT"
 
 # Runtime SA self-impersonation, scoped to its OWN resource (not project-wide):
 #   - serviceAccountTokenCreator (self): lets the app sign GCS URLs as itself
@@ -538,12 +571,8 @@ gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
 # tokens for or impersonate other service accounts in the project.
 echo
 echo "Granting the runtime SA self-impersonation (signBlob + Cloud Tasks OIDC)..."
-gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
-  --member="serviceAccount:${RUNTIME_SA}" \
-  --role="roles/iam.serviceAccountTokenCreator" --project=$PROJECT --quiet > /dev/null
-gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
-  --member="serviceAccount:${RUNTIME_SA}" \
-  --role="roles/iam.serviceAccountUser" --project=$PROJECT --quiet > /dev/null
+add_sa_iam_binding "${RUNTIME_SA}" "serviceAccount:${RUNTIME_SA}" "roles/iam.serviceAccountTokenCreator" "$PROJECT"
+add_sa_iam_binding "${RUNTIME_SA}" "serviceAccount:${RUNTIME_SA}" "roles/iam.serviceAccountUser" "$PROJECT"
 
 # --- Cloud Tasks queues -------------------------------------------------------
 phase "Setting up Cloud Tasks queues..."
@@ -601,6 +630,15 @@ if ! gcloud firestore databases describe --database="$FIRESTORE_DB" --project=$P
 else
     echo "Firestore database $FIRESTORE_DB already exists in the following location:"
     gcloud firestore databases describe --database="$FIRESTORE_DB" --project=$PROJECT --format="value(locationId)"
+fi
+
+echo
+echo "[>] Configuring TTL on cloudTasks collection..."
+if gcloud firestore fields ttls list --collection-group=cloudTasks --database="$FIRESTORE_DB" --project=$PROJECT 2>/dev/null | grep -q "expiresAt"; then
+    echo "✓ TTL is already enabled on cloudTasks collection."
+else
+    echo "Enabling TTL on cloudTasks collection..."
+    gcloud firestore fields ttls update expiresAt --collection-group=cloudTasks --enable-ttl --database="$FIRESTORE_DB" --project=$PROJECT --async || echo "  ⚠ Could not enable TTL (it might already be enabled or provisioning)."
 fi
 if ! gcloud firestore databases describe --database="$FIRESTORE_DB_UI" --project=$PROJECT &> /dev/null; then
     echo "Creating Firestore database: $FIRESTORE_DB_UI"
@@ -761,7 +799,12 @@ phase "Deploying Firestore rules for Backend DB (${FIRESTORE_DB})..."
   export CURRENT_FIRESTORE_DB=$FIRESTORE_DB
   envsubst < ./firebase.template.json > ./firebase.json
   envsubst < ./.firebaserc.template > ./.firebaserc
-  firebase target:apply storage bucket_target $GCS_BUCKET --project $PROJECT
+  # No `firebase target:apply storage` here: this phase deploys ONLY firestore
+  # rules (--only firestore), so a storage target is unnecessary. Applying it
+  # would also make this phase fail (set -e, no `|| true`) if the bucket's
+  # Firebase-Storage link has not finished propagating, which would leave the
+  # backend DB without its deny-all rules. The storage target is applied in the
+  # UI-DB phase below, which is the only phase that deploys storage rules.
   firebase deploy --config ./firebase.json --only firestore --project $PROJECT
 )
 rm firebase/firebase.json
@@ -902,10 +945,13 @@ if [ "$APP_ONLY" = "1" ]; then
   echo "  Reusing worker: ${WORKER_URL}"
 else
   phase "Deploying 'worker' Cloud Run service (private)..."
+  # GUNICORN_TIMEOUT just above the worker's 1800s Cloud Run request timeout so
+  # gunicorn reaps a thread only AFTER Cloud Run has already returned, never
+  # killing a legitimate long render mid-flight. (D7)
   gcloud run deploy worker --image "$IMAGE" --region $REGION --project $PROJECT \
     --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated \
     --service-account="$RUNTIME_SA" \
-    --set-env-vars=ROLE=worker
+    --set-env-vars=ROLE=worker,GUNICORN_TIMEOUT=1830
   WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)')
   echo "✓ Worker deployed: ${WORKER_URL}"
 
@@ -914,8 +960,7 @@ else
   # (There is no project-wide run.invoker, so the app cannot invoke other
   # Cloud Run services.)
   echo "Granting service-scoped run.invoker on 'worker' to ${RUNTIME_SA}..."
-  gcloud run services add-iam-policy-binding worker --region=$REGION --project=$PROJECT \
-    --member="serviceAccount:${RUNTIME_SA}" --role="roles/run.invoker" > /dev/null
+  add_run_invoker_binding worker "$REGION" "$PROJECT" "serviceAccount:${RUNTIME_SA}"
 fi
 
 # --- Cloud Run: app (UI + same-origin /api control plane) -----------------------
@@ -946,8 +991,7 @@ fi
 # forward authenticated traffic to it (Cloud Run built-in IAP requirement).
 IAP_SA="service-${PROJECT_NUMBER}@gcp-sa-iap.iam.gserviceaccount.com"
 echo "Granting service-scoped run.invoker on 'app' to the IAP service agent..."
-gcloud run services add-iam-policy-binding app --region=$REGION --project=$PROJECT \
-  --member="serviceAccount:${IAP_SA}" --role="roles/run.invoker" > /dev/null
+add_run_invoker_binding app "$REGION" "$PROJECT" "serviceAccount:${IAP_SA}"
 APP_URL=$(gcloud run services describe app --region=$REGION --project=$PROJECT --format='value(status.url)')
 ACTUAL_APP_HOST="${APP_URL#https://}"
 echo "✓ App deployed: ${APP_URL}"

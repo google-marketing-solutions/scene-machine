@@ -31,14 +31,16 @@ def case(exp, method, path, auth=AUTH):
     if auth is not None: req["auth"] = auth
     return {"expectation": exp, "request": req}
 cases = [
-    # signed-in reads across all prefixes: retained for the transition
-    case("ALLOW","get","generate_video/abc/sample_0.mp4"),
-    case("ALLOW","get","combine_video/abc/output.mp4"),
-    case("ALLOW","get","generate_storyboard/abc/storyboard.json"),
-    case("ALLOW","get","outpaint_image/abc/x.png"),
-    case("ALLOW","get","examples/CatSofa.png"),
-    case("ALLOW","get","remix-input/x.txt"),
-    case("ALLOW","get","thumbnail/x.png"),
+    # All client Storage access is denied (deny-all rules). Reads go through
+    # server-signed GET URLs, which bypass these rules, so there is no signed-in
+    # read allowance to keep — every direct client read is DENIED.
+    case("DENY","get","generate_video/abc/sample_0.mp4"),
+    case("DENY","get","combine_video/abc/output.mp4"),
+    case("DENY","get","generate_storyboard/abc/storyboard.json"),
+    case("DENY","get","outpaint_image/abc/x.png"),
+    case("DENY","get","examples/CatSofa.png"),
+    case("DENY","get","remix-input/x.txt"),
+    case("DENY","get","thumbnail/x.png"),
     # client writes to remix-input + thumbnail: DENIED even authed (mediated via /api)
     case("DENY","create","remix-input/img.png"),
     case("DENY","update","remix-input/img.png"),

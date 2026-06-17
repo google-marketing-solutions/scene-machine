@@ -29,3 +29,19 @@ jobs:
           echo "Checking syntax: $script"
           bash -n "$script"
         done
+
+  whitespace:
+    name: Diff whitespace check
+    # Only meaningful on a PR: it checks the lines this PR adds against the base
+    # branch. git diff --check flags trailing whitespace, space-before-tab, and
+    # stray conflict markers in the introduced lines (P3).
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: git diff --check against base
+      run: |
+        git fetch --no-tags origin "${{ github.base_ref }}"
+        git diff --check "origin/${{ github.base_ref }}...HEAD"

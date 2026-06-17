@@ -277,6 +277,20 @@ def trigger_action_handler() -> tuple[str, int]:
   retry_count = int(flask_request.headers.get('X-CloudTasks-TaskRetryCount', 0))
   if retry_count > 0:
     logger.info('Retried %s %s times', data[Key.ACTION.value], retry_count)
+  execution_id = data[Key.EXECUTION_ID.value]
+  node_id = data[Key.NODE_ID.value]
+  group_id = data[Key.GROUP_ID.value]
+  node = data[Key.WORKFLOW_DEF.value][node_id]
+  if not orchestrator.db.acquire_task_lock(execution_id, node_id, group_id):
+    logger.warning(
+        '[%s] Node %s (group %s) was already triggered. Skipping execution.'
+        ' (%s)',
+        execution_id,
+        node_id,
+        group_id,
+        node,
+    )
+    return 'Already Triggered', 200
   try:
     orchestrator.trigger_action(
         copy.deepcopy(data),
@@ -286,6 +300,8 @@ def trigger_action_handler() -> tuple[str, int]:
   except Exception as e:  # pylint: disable=broad-exception-caught
     if util_errors.is_retryable(e):
       logger.error('Retrying action %s: %s', data[Key.ACTION.value], e)
+      # Release the lock so that the retry can proceed
+      orchestrator.db.release_task_lock(execution_id, node_id, group_id)
       return 'Quota Exceeded', 429  # Cloud Tasks may retry this
     else:
       logger.error('Fatal error for action %s: %s', data[Key.ACTION.value], e)
@@ -354,6 +370,23 @@ def get_status_handler() -> flask_response:
 _SIGNED_GET_TTL = datetime.timedelta(hours=24)
 _SIGNED_PUT_TTL = datetime.timedelta(hours=1)
 _UPLOAD_PREFIXES = ('remix-input', 'thumbnail')
+
+# Content types the client legitimately uploads: media (image/audio/video), the
+# plain-text workflow payloads uploadText sends (prompts/briefings/arrangements),
+# and the application/octet-stream fallback the browser uses when a File has no
+# detected type. The signed PUT binds this content type, so allow-listing it
+# server-side stops a caller from minting a signed URL that stores arbitrary,
+# mislabelled content (e.g. application/pdf, text/html, application/x-msdownload)
+# in the bucket. (Size is a separate concern — see the upload handler.)
+_ALLOWED_UPLOAD_TYPE_PREFIXES = ('image/', 'audio/', 'video/')
+_ALLOWED_UPLOAD_TYPES_EXACT = ('text/plain', 'application/octet-stream')
+
+
+def _is_allowed_upload_content_type(content_type: str) -> bool:
+  """Whether a client-supplied upload content type is on the allow-list."""
+  return content_type in _ALLOWED_UPLOAD_TYPES_EXACT or content_type.startswith(
+      _ALLOWED_UPLOAD_TYPE_PREFIXES
+  )
 
 _storage_client = None
 _ui_db = None
@@ -505,6 +538,8 @@ def upload_url_handler() -> flask_response:
     return _json_error('Invalid fileName', 400)
   if not content_type or not isinstance(content_type, str):
     return _json_error('Missing contentType', 400)
+  if not _is_allowed_upload_content_type(content_type):
+    return _json_error('Unsupported contentType', 400)
   bucket_name = config.get('gcsBucket')
   if not bucket_name:
     return _json_error('gcsBucket not configured', 500)
@@ -516,10 +551,17 @@ def upload_url_handler() -> flask_response:
     upload_url = _signed_url(
         blob, 'PUT', _SIGNED_PUT_TTL, content_type=content_type
     )
+  # Return the GET URL's expiry so the client caches it against the server's
+  # actual TTL instead of hard-coding it (ARCH2 — one source of truth, like
+  # sign_url_handler). The GET URL is signed for _SIGNED_GET_TTL below.
+  expires_at = (
+      datetime.datetime.now(datetime.timezone.utc) + _SIGNED_GET_TTL
+  ).isoformat()
   return _json_response({
       'exists': exists,
       'path': object_path,
       'url': _signed_url(blob, 'GET', _SIGNED_GET_TTL),
+      'expiresAt': expires_at,
       'uploadUrl': upload_url,
   })
 
@@ -832,8 +874,12 @@ def template_detail_handler(template_id: str) -> flask_response:
       return _json_error('Malformed JSON body', 400)
     payload = copy.deepcopy(data)
     payload.pop('readOnly', None)
-    if payload:
-      doc_ref.update(payload)
+    if not payload:
+      # readOnly is server-controlled and stripped above, so a body of only
+      # {readOnly: ...} (or {}) leaves nothing to write. Returning 200 here
+      # would tell the client the edit saved when no write happened; reject it.
+      return _json_error('No updatable fields in request', 400)
+    doc_ref.update(payload)
     return _json_response({'id': template_id})
   # DELETE: idempotent for missing docs, guarded for read-only ones.
   if snapshot.exists and snapshot.to_dict().get('readOnly'):

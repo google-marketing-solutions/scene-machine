@@ -52,7 +52,7 @@ video prototyping platform for rapidly sharing and iterating on ideas.
 [< TL;DR](#tldr) • [Top](#readme-top) •
 [Technical Requirements >](#technical-requirements)
 
-> [!TIP] 
+> [!TIP]
 > For a step-by-step guide with screen recordings, see
 > [`docs/walkthrough.md`](./docs/walkthrough.md).
 
@@ -386,7 +386,7 @@ firebase login                          # 3. the Firebase CLI (add --reauth if y
 > end of the run. Once the project has been set up this way, later deploys need
 > no console steps at all.
 
-> [!TIP] 
+> [!TIP]
 > **Troubleshooting Firebase deployment failures:** If `./deploy.sh`
 > fails at the Firebase step with an error like `Error: Project not found`, it
 > usually means the Firebase CLI cannot access the project or terms have not
@@ -483,7 +483,7 @@ Save.
 
 [< Adding Users](#adding-users) • [Top](#readme-top) • [Caveats >](#caveats)
 
-> [!TIP] 
+> [!TIP]
 > For a step-by-step guide with screen recordings, see
 > [`docs/walkthrough.md`](./docs/walkthrough.md).
 

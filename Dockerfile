@@ -73,4 +73,14 @@ COPY ui/remix-engine-status-viewer/ ui/remix-engine-status-viewer/
 # Drop privileges last, after every step that needs root (apt, the COPYs).
 USER appuser
 
-CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-8080} --workers 1 --threads 32 --timeout 0 orch:app"]
+# gunicorn args are env-driven so each service can size them to its workload.
+# The defaults suit the I/O-bound 'app' (front door); deploy.sh overrides
+# GUNICORN_TIMEOUT for the CPU-bound 'worker'. A FINITE timeout (the previous
+# config disabled it entirely) lets gunicorn reap a wedged request thread
+# instead of leaking it for the life of the instance; it is set above each
+# service's Cloud Run request timeout so a legitimate in-budget request is
+# never killed early. (D7)
+ENV GUNICORN_WORKERS=1
+ENV GUNICORN_THREADS=32
+ENV GUNICORN_TIMEOUT=330
+CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT:-8080} --workers ${GUNICORN_WORKERS} --threads ${GUNICORN_THREADS} --timeout ${GUNICORN_TIMEOUT} orch:app"]
