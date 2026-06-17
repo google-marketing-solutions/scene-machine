@@ -62,7 +62,7 @@
 
               @if (thumb.highQualityThumbnail) {
                 <img
-                  [src]="thumb.highQualityThumbnail"
+                  [src]="thumb.highQualityThumbnail | mediaSrc"
                   class="high-res-img"
                   #highResImg
                   (load)="
@@ -75,13 +75,13 @@
 
               <!-- Fallback 1: Reference image -->
               @if (thumb.showReference) {
-                <img [src]="thumb.referenceImage" alt="Thumbnail" />
+                <img [src]="thumb.referenceImage | mediaSrc" alt="Thumbnail" />
               }
 
               <!-- Fallback 2: Video -->
               @if (thumb.showVideo) {
                 <video
-                  [src]="thumb.videoUrl"
+                  [src]="thumb.videoUrl | mediaSrc"
                   muted
                   loop
                   onmouseover="this.play()"
@@ -95,18 +95,16 @@
                   <mat-icon>movie</mat-icon>
                 </div>
               }
-              @if (project.createdBy === userEmail()) {
-                <button
-                  mat-icon-button
-                  class="delete-project-btn"
-                  title="Delete Project"
-                  (click)="
-                    $event.preventDefault(); $event.stopPropagation(); deleteProject(project.id)
-                  "
-                >
-                  <mat-icon>delete</mat-icon>
-                </button>
-              }
+              <button
+                mat-icon-button
+                class="delete-project-btn"
+                title="Delete Project"
+                (click)="
+                  $event.preventDefault(); $event.stopPropagation(); deleteProject(project.id)
+                "
+              >
+                <mat-icon>delete</mat-icon>
+              </button>
             </div>
             <mat-card-content>
               <h3 class="project-title">{{ project.name || 'Untitled Project' }}</h3>

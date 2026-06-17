@@ -22,6 +22,7 @@ import {
   effect,
   ElementRef,
   inject,
+  linkedSignal,
   signal,
   viewChild,
 } from '@angular/core';
@@ -39,7 +40,10 @@ import {
   ConfigService,
   DEFAULT_TRANSITION_OVERLAP,
 } from '../services/config/config';
+import {MediaRef, MediaService} from '../services/media/media';
+import {MediaSrcPipe} from '../services/media/media-src.pipe';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
+import {EditableProjectTitle} from '../shared/editable-project-title/editable-project-title';
 import {AudioUploadDialog} from './audio-upload-dialog/audio-upload-dialog';
 import {ImageUploadDialog} from './image-upload-dialog/image-upload-dialog';
 import {TransitionModal} from './transition-modal/transition-modal';
@@ -70,7 +74,9 @@ export interface SceneTiming {
     MatFormFieldModule,
     MatSliderModule,
     MatTooltipModule,
+    MediaSrcPipe,
     TransitionModal,
+    EditableProjectTitle,
   ],
   templateUrl: './composition.html',
   styleUrl: './composition.scss',
@@ -79,6 +85,7 @@ export interface SceneTiming {
 export class Composition {
   configService = inject(ConfigService);
   private remixEngineService = inject(RemixEngineService);
+  private mediaService = inject(MediaService);
   private dialog = inject(MatDialog);
 
   combiningScenes = this.remixEngineService.combiningScenes;
@@ -99,10 +106,14 @@ export class Composition {
         scene.candidates &&
         scene.selectedCandidateIndex !== undefined
       ) {
-        return scene.candidates[scene.selectedCandidateIndex].video?.url;
+        // Downstream resolves media by path (signing it on read), so a scene
+        // persisted with a path but a blank url is still renderable: accept
+        // either a path or a url.
+        const video = scene.candidates[scene.selectedCandidateIndex].video;
+        return !!(video?.path || video?.url);
       }
       if (this.configService.isProvidedVideoScene(scene)) {
-        return scene.video?.url;
+        return !!(scene.video?.path || scene.video?.url);
       }
       return false;
     });
@@ -121,7 +132,7 @@ export class Composition {
           return {
             id: scene.id,
             name: scene.name,
-            url: candidate.video?.url,
+            video: candidate.video,
             start,
             end,
             duration: end - start,
@@ -135,7 +146,7 @@ export class Composition {
           return {
             id: scene.id,
             name: scene.name,
-            url: scene.video?.url,
+            video: scene.video,
             start,
             end,
             duration: end - start,
@@ -147,8 +158,22 @@ export class Composition {
       .filter(item => item !== undefined);
   });
 
+  /**
+   * True when at least one scene contributes a usable video to the render
+   * (a selected candidate with a video, or an uploaded video scene). The
+   * playlist already filters to exactly those scenes, so an empty playlist
+   * means there is nothing to combine — rendering would fail in the backend
+   * with "cannot generate video without at least one video input", so we block
+   * it in the UI instead.
+   */
+  canRender = computed(() => this.playlist().length > 0);
+
   currentPlaylistIndex = signal(0);
   isPlaying = signal(false);
+  // Records whether playback was running when a scrubber drag began, so the
+  // drag-end handler knows whether to resume. Reset to false whenever no drag
+  // is in progress; non-null only between onScrubStart and onScrubEnd.
+  private wasPlayingBeforeScrub = false;
   isMuted = signal(false);
   videoVolume = signal(0.5);
   // Total playback progress across all scenes (in seconds)
@@ -176,18 +201,98 @@ export class Composition {
     });
   });
 
+  // The current scene's media reference; the held-src effect below resolves
+  // it to the URL string bound to the player's [src].
   currentVideoSrc = computed(() => {
     const playlist = this.playlist();
     const index = this.currentPlaylistIndex();
     if (index >= 0 && index < playlist.length) {
-      return playlist[index].url;
+      return playlist[index].video;
     }
     return '';
   });
 
+  // The URL string bound to the player's [src]. Computed synchronously
+  // whenever the URL needs no I/O (a warm signed-URL cache hit), so it is
+  // available in the same
+  // change-detection pass that computes the playlist — the exact timing the
+  // impure mediaSrc pipe gave this binding at baseline. On a cache miss the
+  // previous URL is held (never reset to null; stale-while-revalidate)
+  // while the constructor effect below resolves the new one, so cross-clip
+  // seeks never tear the <video> element down mid-resolve. Scoped to the
+  // composition player only — the mediaSrc pipe used elsewhere is
+  // unchanged.
+  heldVideoSrc = linkedSignal<MediaRef | '' | undefined, string | null>({
+    source: () => this.currentVideoSrc(),
+    computation: (ref, previous) => {
+      if (!ref) {
+        return null;
+      }
+      const synchronous = this.syncVideoSrc(ref);
+      if (synchronous !== undefined) {
+        return synchronous;
+      }
+      // Cache miss: hold the previous src while the constructor effect
+      // resolves the new one.
+      return previous?.value ?? null;
+    },
+  });
+
+  /**
+   * Resolves a media ref to a player src without I/O where that is possible:
+   * the cached signed URL for the path, or the stored URL for path-less
+   * legacy refs. Returns undefined when only `MediaService.resolve`'s async
+   * fetch (signing the path via /api/signUrl) can produce the URL.
+   */
+  private syncVideoSrc(ref: MediaRef): string | null | undefined {
+    if (!ref.path) {
+      // Path-less legacy ref: fall back to the stored URL.
+      return ref.url ?? null;
+    }
+    return this.mediaService.getCachedUrl(ref.path);
+  }
+
   constructor() {
+    // Pre-warm the signed-URL cache for every playlist entry with one batch
+    // request, so cross-clip seeks resolve the new src synchronously from
+    // the cache in the same change-detection pass.
     effect(() => {
-      const src = this.currentVideoSrc();
+      const paths = this.playlist()
+        .map(item => item.video?.path)
+        .filter((path): path is string => !!path);
+      if (paths.length === 0) {
+        return;
+      }
+      void this.mediaService.signUrls(paths).catch((error: unknown) => {
+        // Best-effort: the held-src effect below re-signs the current clip
+        // on demand, so playback recovers per clip.
+        console.error('Failed to pre-sign playlist video URLs', error);
+      });
+    });
+
+    // Resolve current-clip cache misses (heldVideoSrc holds the previous
+    // src meanwhile). Delegates to MediaService.resolve, which signs the path
+    // via /api/signUrl (deduped against the pre-warm batch above).
+    effect(() => {
+      const ref = this.currentVideoSrc();
+      if (!ref || this.syncVideoSrc(ref) !== undefined) {
+        return;
+      }
+      void this.mediaService
+        .resolve(ref)
+        .then(url => {
+          // Only apply if this clip is still the current one.
+          if (this.currentVideoSrc() === ref) {
+            this.heldVideoSrc.set(url || null);
+          }
+        })
+        .catch((error: unknown) => {
+          console.error(`Failed to resolve video src for ${ref.path}`, error);
+        });
+    });
+
+    effect(() => {
+      const src = this.heldVideoSrc();
       const playing = this.isPlaying();
       const video = this.videoElement()?.nativeElement;
 
@@ -322,6 +427,14 @@ export class Composition {
     this.totalCurrentTime.set(previousDuration + effectiveCurrentTime);
   }
 
+  /**
+   * Within-clip offset to restore after the next clip's metadata loads. Set by
+   * seek() for a cross-clip seek, where the [src] swap reloads the <video> and
+   * would otherwise snap playback to the clip start, dropping the scrubbed-to
+   * position. Reset to 0 once applied (and for normal clip advancement).
+   */
+  private pendingSeekOffset = 0;
+
   onVideoLoadedMetadata(): void {
     const video = this.videoElement()?.nativeElement;
     if (!video) return;
@@ -331,8 +444,10 @@ export class Composition {
     const currentItem = playlist[index];
 
     if (currentItem) {
-      if (Math.abs(video.currentTime - currentItem.start) > 0.5) {
-        video.currentTime = currentItem.start;
+      const target = currentItem.start + this.pendingSeekOffset;
+      this.pendingSeekOffset = 0;
+      if (Math.abs(video.currentTime - target) > 0.5) {
+        video.currentTime = target;
       }
     }
   }
@@ -360,14 +475,49 @@ export class Composition {
     }
 
     if (foundIndex !== -1) {
+      const previousIndex = this.currentPlaylistIndex();
       this.currentPlaylistIndex.set(foundIndex);
       const item = playlist[foundIndex];
+      this.totalCurrentTime.set(seekTime);
       const video = this.videoElement()?.nativeElement;
       if (video) {
-        video.currentTime = item.start + timeInClip;
-        this.totalCurrentTime.set(seekTime);
+        if (foundIndex === previousIndex) {
+          // Same clip already loaded: seek directly, no reload coming.
+          this.pendingSeekOffset = 0;
+          video.currentTime = item.start + timeInClip;
+        } else {
+          // Different clip: the [src] swap reloads the <video> and fires
+          // onVideoLoadedMetadata; stash the within-clip offset so it restores
+          // the scrubbed-to position instead of snapping to the clip start.
+          this.pendingSeekOffset = timeInClip;
+        }
       }
     }
+  }
+
+  /**
+   * Called when the user grabs the timeline scrubber (Material's `dragStart`).
+   * Records whether playback was running and pauses, so the position the user
+   * holds is what stays on screen — the playback loop is gated on isPlaying()
+   * and would otherwise keep advancing currentTime past the held frame.
+   */
+  onScrubStart(): void {
+    this.wasPlayingBeforeScrub = this.isPlaying();
+    if (this.wasPlayingBeforeScrub) {
+      this.isPlaying.set(false);
+    }
+  }
+
+  /**
+   * Called when the user releases the timeline scrubber (Material's `dragEnd`).
+   * Resumes playback only if it was running when the drag began, matching the
+   * least-surprising editor-scrubbing behavior.
+   */
+  onScrubEnd(): void {
+    if (this.wasPlayingBeforeScrub) {
+      this.isPlaying.set(true);
+    }
+    this.wasPlayingBeforeScrub = false;
   }
 
   formatTime(seconds: number): string {

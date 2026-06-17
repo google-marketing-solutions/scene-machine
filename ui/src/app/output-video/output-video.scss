@@ -107,6 +107,16 @@
       height: 100%;
       object-fit: contain;
     }
+
+    .render-failed {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 24px 32px;
+      color: var(--mat-sys-on-surface);
+      background: var(--mat-sys-surface);
+      text-align: center;
+    }
   }
 }
 
@@ -193,6 +203,12 @@
           .render-run-subtitle {
             font-size: 0.75rem;
             color: var(--mat-sys-on-surface-variant);
+            margin-top: 2px;
+          }
+
+          .render-run-failed-label {
+            font-size: 0.75rem;
+            color: var(--mat-sys-error);
             margin-top: 2px;
           }
         }

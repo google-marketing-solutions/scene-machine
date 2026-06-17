@@ -18,12 +18,12 @@ import {CommonModule} from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
+  HostListener,
   computed,
   effect,
   inject,
   signal,
 } from '@angular/core';
-import {Auth} from '@angular/fire/auth';
 import {FormsModule} from '@angular/forms';
 import {MatButtonModule} from '@angular/material/button';
 import {MatButtonToggleModule} from '@angular/material/button-toggle';
@@ -42,6 +42,11 @@ import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {MatTooltipModule} from '@angular/material/tooltip';
 import {ActivatedRoute, Router, RouterLink} from '@angular/router';
 import {ClientMediaService} from '../services/client-media/client-media';
+import {
+  ImageImportService,
+  ImportFailure,
+} from '../services/image-import/image-import';
+import {MediaSrcPipe} from '../services/media/media-src.pipe';
 import {
   ASPECT_RATIO_DEVIATION_THRESHOLD,
   AspectRatio,
@@ -82,6 +87,7 @@ import {GenerateStoryboardDialog} from './generate-storyboard-dialog/generate-st
     MatExpansionModule,
     MatTooltipModule,
     MatDialogModule,
+    MediaSrcPipe,
     TemplateCard,
     RouterLink,
   ],
@@ -97,13 +103,29 @@ export class Setup {
   private readonly snackBar = inject(MatSnackBar);
   readonly config = inject(ConfigService);
   readonly clientMediaService = inject(ClientMediaService);
+  private readonly imageImport = inject(ImageImportService);
   readonly templatesService = inject(TemplatesService);
-  readonly auth = inject(Auth);
 
-  userEmail = computed(() => this.auth.currentUser?.email ?? null);
-  createdByEmail = computed(
-    () => this.config.projectConfig.value().createdBy || this.userEmail(),
-  );
+  /** Per-product: true while that product's links are being fetched. */
+  importingLinks = signal<Record<number, boolean>>({});
+  /** Per-product: links / base64 from the last import that could not be added. */
+  importFailures = signal<Record<number, ImportFailure[]>>({});
+  /** The product whose area was last interacted with — where a page-level
+   * image paste lands. */
+  activeProductId = signal<number | null>(null);
+
+  /** Whether the given product's link import is in progress. */
+  isImporting(productId: number): boolean {
+    return this.importingLinks()[productId] ?? false;
+  }
+
+  /** The given product's last set of failed links/base64 entries. */
+  failuresFor(productId: number): ImportFailure[] {
+    return this.importFailures()[productId] ?? [];
+  }
+  /** The product whose drop zone is currently being dragged over (for the
+   * highlight cue), or null. */
+  dragOverProductId = signal<number | null>(null);
 
   creationMode = signal<'ai' | 'manual'>('ai');
 
@@ -248,17 +270,40 @@ export class Setup {
     });
   }
 
-  onDragOver(event: DragEvent) {
+  onDragOver(event: DragEvent, productId: number) {
     event.preventDefault();
     event.stopPropagation();
+    this.dragOverProductId.set(productId);
+  }
+
+  onDragLeave(event: DragEvent, productId: number) {
+    // Ignore leaving for a child element still inside the drop zone.
+    const current = event.currentTarget as HTMLElement;
+    const next = event.relatedTarget as Node | null;
+    if (
+      (!next || !current.contains(next)) &&
+      this.dragOverProductId() === productId
+    ) {
+      this.dragOverProductId.set(null);
+    }
   }
 
   onDrop(event: DragEvent, productId: number) {
     event.preventDefault();
     event.stopPropagation();
-    const files = event.dataTransfer?.files;
-    if (files) {
+    this.dragOverProductId.set(null);
+    const files = this.imageImport.imageFilesFromDataTransfer(
+      event.dataTransfer,
+    );
+    if (files.length > 0) {
       this.processFiles(productId, files);
+      return;
+    }
+    // Dragged from another tab: only the image's URL came across — fetch it,
+    // reusing the same path (and failure reporting) as the links box.
+    const url = this.imageImport.imageUrlFromDataTransfer(event.dataTransfer);
+    if (url) {
+      void this.addImagesFromLinks(productId, url);
     }
   }
 
@@ -270,7 +315,7 @@ export class Setup {
     }
   }
 
-  processFiles(productId: number, files: FileList) {
+  processFiles(productId: number, files: FileList | File[]) {
     const fileArray = Array.from(files);
     const oversizedFile = fileArray.find(
       file => file.size > this.MAX_FILE_SIZE_BYTES,
@@ -329,7 +374,88 @@ export class Setup {
             ),
         },
       });
+      // Image upload is a discrete, expensive, irreversible event (bytes are
+      // already in GCS). Persist immediately (mediated mode) so the project
+      // document references the uploaded media right away rather than 5s later;
+      // the trailing debounce is deduped on the same config. No-op in legacy.
+      this.config.saveNow();
     });
+  }
+
+  /**
+   * Fetches/decodes a list of pasted image links and/or base64 entries and adds
+   * the ones that work, reporting the rest via {@link importFailures}.
+   */
+  async addImagesFromLinks(productId: number, text: string) {
+    const trimmed = text.trim();
+    if (!trimmed) {
+      this.snackBar.open(
+        'Paste at least one image link or base64 string.',
+        'Close',
+        {duration: 4000},
+      );
+      return;
+    }
+    this.importingLinks.update(m => ({...m, [productId]: true}));
+    this.importFailures.update(m => ({...m, [productId]: []}));
+    try {
+      const {files, failures} = await this.imageImport.importText(trimmed);
+      this.importFailures.update(m => ({...m, [productId]: failures}));
+      if (files.length > 0) {
+        this.processFiles(productId, files);
+      }
+      if (files.length > 0 || failures.length > 0) {
+        const parts: string[] = [];
+        if (files.length > 0) {
+          parts.push(
+            `Added ${files.length} image${files.length === 1 ? '' : 's'}.`,
+          );
+        }
+        if (failures.length > 0) {
+          parts.push(`${failures.length} could not be added.`);
+        }
+        this.snackBar.open(parts.join(' '), 'Close', {duration: 6000});
+      }
+    } finally {
+      this.importingLinks.update(m => ({...m, [productId]: false}));
+    }
+  }
+
+  /** Dismiss a product's import-failures box so fresh links can be pasted. */
+  dismissImportFailures(productId: number) {
+    this.importFailures.update(m => ({...m, [productId]: []}));
+  }
+
+  /**
+   * Paste a copied image anywhere on the setup page to add it to the product
+   * you're working on (the one you last interacted with, or the only one) — no
+   * need to click into the links box first. Plain-text pastes carry no image,
+   * so they fall through untouched (e.g. typing links into the box).
+   */
+  @HostListener('document:paste', ['$event'])
+  onSetupPaste(event: ClipboardEvent) {
+    // Don't consume pastes meant for an open dialog.
+    if (this.dialog.openDialogs.length > 0) {
+      return;
+    }
+    // If the user is typing in a text field, leave their paste alone.
+    if (this.imageImport.isEditableTarget(document.activeElement)) {
+      return;
+    }
+    const images = this.imageImport.imageFilesFromDataTransfer(
+      event.clipboardData,
+    );
+    if (images.length === 0) {
+      return;
+    }
+    const products = this.config.projectConfig.value().inputConfig.products;
+    if (products.length === 0) {
+      return;
+    }
+    const target =
+      products.find(p => p.id === this.activeProductId()) ?? products[0];
+    event.preventDefault();
+    this.processFiles(target.id, images);
   }
 
   removeImage(productId: number, imageIndex: number) {
@@ -452,6 +578,22 @@ export class Setup {
         products: inputConfig.products.filter(p => p.id !== id),
       },
     });
+    // Clear this product's transient UI state so a later reused id (addProduct
+    // is max(id)+1, which can repeat after deleting the highest) can't inherit
+    // its stale spinner/failures or remain the paste target.
+    this.importingLinks.update(m => {
+      const next = {...m};
+      delete next[id];
+      return next;
+    });
+    this.importFailures.update(m => {
+      const next = {...m};
+      delete next[id];
+      return next;
+    });
+    if (this.activeProductId() === id) {
+      this.activeProductId.set(null);
+    }
   }
 
   updateProductDescriptionText(productId: number, description: string) {
@@ -545,8 +687,20 @@ export class Setup {
     const dialogRef = this.dialog.open(ConfirmProjectDeleteDialog);
     dialogRef.afterClosed().subscribe(result => {
       if (result) {
-        void this.config.deleteProject(this.config.projectConfig.value().id);
-        void this.router.navigate(['/']);
+        void (async () => {
+          // Wait for the delete to land before leaving for the homepage:
+          // otherwise the homepage's project-list load races the in-flight
+          // delete and briefly shows the just-deleted project. (Mirrors the
+          // homepage delete button's own await-before-refetch.) Navigate even
+          // on failure — the project then correctly still exists in the list.
+          try {
+            await this.config.deleteProject(
+              this.config.projectConfig.value().id,
+            );
+          } finally {
+            void this.router.navigate(['/']);
+          }
+        })();
       }
     });
   }

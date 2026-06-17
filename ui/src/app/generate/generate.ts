@@ -41,6 +41,10 @@ export class Generate {
     const projectType = this.route.snapshot.paramMap.get('projectType');
     const redirectRoute = projectType === 'ai' ? 'setup' : 'storyboard';
     this.config.setNewProject(uuid);
+    // Persist the brand-new project immediately so it exists server-side and
+    // shows on the homepage right away, instead of only after the user makes an
+    // edit and the 5s autosave fires.
+    this.config.saveNow();
     void this.router.navigate([`/${uuid}/${redirectRoute}`], {
       replaceUrl: true,
     });

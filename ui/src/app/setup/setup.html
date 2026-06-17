@@ -27,6 +27,7 @@
           matInput
           [ngModel]="config.projectConfig.value().name"
           (ngModelChange)="config.updateProjectConfig({name: $event})"
+          (blur)="config.saveNow()"
         />
       </mat-form-field>
 
@@ -144,7 +145,11 @@
         <div class="section-content">
           <mat-accordion class="product-accordion" multi>
             @for (product of config.projectConfig.value().inputConfig.products; track product.id) {
-              <mat-expansion-panel [expanded]="true">
+              <mat-expansion-panel
+                [expanded]="true"
+                (pointerdown)="activeProductId.set(product.id)"
+                (focusin)="activeProductId.set(product.id)"
+              >
                 <mat-expansion-panel-header>
                   <mat-panel-title>
                     <span class="product-name">{{ product.name }}</span>
@@ -169,7 +174,9 @@
 
                     <div
                       class="upload-area"
-                      (dragover)="onDragOver($event)"
+                      [class.drag-over]="dragOverProductId() === product.id"
+                      (dragover)="onDragOver($event, product.id)"
+                      (dragleave)="onDragLeave($event, product.id)"
                       (drop)="onDrop($event, product.id)"
                       (click)="fileInput.click()"
                     >
@@ -198,7 +205,7 @@
                               (click)="$event.stopPropagation()"
                             >
                               <img
-                                [src]="image.url"
+                                [src]="image | mediaSrc"
                                 (load)="
                                   (image.heightPixels === undefined ||
                                     image.widthPixels === undefined) &&
@@ -232,6 +239,66 @@
                             <mat-icon>add</mat-icon>
                             <span>Add more</span>
                           </div>
+                        </div>
+                      }
+                    </div>
+
+                    <div class="link-import">
+                      <textarea
+                        #linkBox
+                        class="link-import-input"
+                        rows="2"
+                        placeholder="Paste image links or base64 here (one per line) and then click the button below to add..."
+                      ></textarea>
+                      <div class="link-import-actions">
+                        <button
+                          matButton="outlined"
+                          type="button"
+                          [disabled]="isImporting(product.id)"
+                          (click)="
+                            addImagesFromLinks(product.id, linkBox.value);
+                            linkBox.value = ''
+                          "
+                        >
+                          @if (isImporting(product.id)) {
+                            <mat-progress-spinner
+                              diameter="16"
+                              mode="indeterminate"
+                            ></mat-progress-spinner>
+                          } @else {
+                            <mat-icon>add_link</mat-icon>
+                          }
+                          Add from links / base64
+                        </button>
+                      </div>
+                      @if (failuresFor(product.id).length > 0) {
+                        <div class="link-import-errors">
+                          <div class="link-import-errors-header">
+                            <p class="link-import-errors-title">
+                              Couldn't add
+                              {{ failuresFor(product.id).length }} of these:
+                            </p>
+                            <button
+                              mat-icon-button
+                              type="button"
+                              class="link-import-errors-dismiss"
+                              aria-label="Dismiss"
+                              (click)="dismissImportFailures(product.id)"
+                            >
+                              <mat-icon>close</mat-icon>
+                            </button>
+                          </div>
+                          <ul>
+                            @for (
+                              failure of failuresFor(product.id);
+                              track $index
+                            ) {
+                              <li>
+                                <span class="src">{{ failure.source }}</span> —
+                                {{ failure.reason }}
+                              </li>
+                            }
+                          </ul>
                         </div>
                       }
                     </div>
@@ -383,12 +450,7 @@
           mat-flat-button
           class="delete-project-btn"
           title="Delete Project"
-          [disabled]="userEmail() !== createdByEmail()"
           (click)="deleteProject()"
-          matTooltipPosition="above"
-          [matTooltip]="
-            userEmail() !== createdByEmail() ? 'Only the project owner can delete a project' : ''
-          "
         >
           <mat-icon>delete</mat-icon>
           Delete Project

@@ -33,10 +33,14 @@ import {MatProgressSpinnerModule} from '@angular/material/progress-spinner';
 import {MatTooltipModule} from '@angular/material/tooltip';
 import {
   ConfigService,
+  GcsFile,
   GeneratedScene,
   ProvidedVideoScene,
   RenderRun,
 } from '../services/config/config';
+import {MediaSrcPipe} from '../services/media/media-src.pipe';
+import {MediaService} from '../services/media/media';
+import {EditableProjectTitle} from '../shared/editable-project-title/editable-project-title';
 
 /**
  * Component for displaying the output video.
@@ -53,6 +57,8 @@ import {
     MatMenuModule,
     MatProgressSpinnerModule,
     MatTooltipModule,
+    MediaSrcPipe,
+    EditableProjectTitle,
   ],
   templateUrl: './output-video.html',
   styleUrl: './output-video.scss',
@@ -61,11 +67,12 @@ import {
 export class OutputVideo {
   configService = inject(ConfigService);
   private httpClient = inject(HttpClient);
+  private mediaService = inject(MediaService);
 
   selectedRenderRun = signal<RenderRun | undefined>(
     this.configService.projectConfig.value().renderRuns?.[0],
   );
-  videoUrl = computed(() => this.selectedRenderRun()?.outputVideo?.url);
+  videoFile = computed(() => this.selectedRenderRun()?.outputVideo);
   previewAspectRatio = computed(() => {
     const ratio = this.configService.projectConfig.value().aspectRatio;
     return ratio ? ratio.replace(':', '/') : '16/9';
@@ -86,29 +93,42 @@ export class OutputVideo {
   }
 
   downloadVideo() {
-    const url = this.videoUrl();
-    if (!url || this.downloading()) {
+    const file = this.videoFile();
+    if (!file || this.downloading()) {
       return;
     }
     this.downloading.set(true);
     const filename = `${this.configService.projectConfig.value().name}_output.mp4`;
-    downloadBlob(this.httpClient, url, filename, () =>
-      this.downloading.set(false),
-    );
+    // Resolve the persisted reference to a fetchable URL (re-signed in
+    // mediated mode) before downloading the bytes.
+    this.mediaService
+      .resolve(file)
+      .then(url => {
+        if (!url) {
+          throw new Error('No URL for output video');
+        }
+        downloadBlob(this.httpClient, url, filename, () =>
+          this.downloading.set(false),
+        );
+      })
+      .catch(error => {
+        console.error(`Download failed for ${filename}`, error);
+        this.downloading.set(false);
+      });
   }
 
-  getSceneVideoUrl(
+  getSceneVideoFile(
     scene: GeneratedScene | ProvidedVideoScene,
-  ): string | undefined {
+  ): GcsFile | undefined {
     if (this.configService.isGeneratedScene(scene)) {
-      return scene.candidates?.[scene.selectedCandidateIndex ?? 0]?.video?.url;
+      return scene.candidates?.[scene.selectedCandidateIndex ?? 0]?.video;
     }
-    return scene.video?.url;
+    return scene.video;
   }
 
   downloadScene(scene: GeneratedScene | ProvidedVideoScene) {
-    const url = this.getSceneVideoUrl(scene);
-    if (!url || this.downloadingScenes().has(scene.id)) {
+    const file = this.getSceneVideoFile(scene);
+    if (!file || this.downloadingScenes().has(scene.id)) {
       return;
     }
 
@@ -117,15 +137,27 @@ export class OutputVideo {
       newSet.add(scene.id);
       return newSet;
     });
-
-    const filename = `${this.configService.projectConfig.value().name}_${scene.name}.mp4`;
-    downloadBlob(this.httpClient, url, filename, () => {
+    const removeFromDownloading = () => {
       this.downloadingScenes.update(set => {
         const newSet = new Set(set);
         newSet.delete(scene.id);
         return newSet;
       });
-    });
+    };
+
+    const filename = `${this.configService.projectConfig.value().name}_${scene.name}.mp4`;
+    this.mediaService
+      .resolve(file)
+      .then(url => {
+        if (!url) {
+          throw new Error('No URL for scene video');
+        }
+        downloadBlob(this.httpClient, url, filename, removeFromDownloading);
+      })
+      .catch(error => {
+        console.error(`Download failed for ${filename}`, error);
+        removeFromDownloading();
+      });
   }
 
   setRenderRunArchiveStatus(run: RenderRun, isArchived: boolean) {

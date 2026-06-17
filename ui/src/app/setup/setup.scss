@@ -409,6 +409,86 @@
   }
 }
 
+.link-import {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  .link-import-input {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    padding: 8px 10px;
+    border: 1px solid var(--mat-sys-outline);
+    border-radius: 8px;
+    background: var(--mat-sys-surface);
+    color: var(--mat-sys-on-surface);
+    font: inherit;
+
+    &:focus {
+      outline: none;
+      border-color: var(--mat-sys-primary);
+    }
+  }
+
+  .link-import-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .link-import-errors {
+    border: 1px solid var(--mat-sys-error);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: var(--mat-sys-error-container);
+    color: var(--mat-sys-on-error-container);
+    font-size: 0.85rem;
+
+    .link-import-errors-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .link-import-errors-dismiss {
+      flex: none;
+      width: 24px !important;
+      height: 24px !important;
+      min-width: unset !important;
+      padding: 0 !important;
+      line-height: 24px !important;
+      color: var(--mat-sys-on-error-container);
+
+      mat-icon {
+        font-size: 18px;
+        width: 18px;
+        height: 18px;
+        line-height: 18px;
+      }
+    }
+
+    .link-import-errors-title {
+      margin: 0 0 4px;
+      font-weight: 500;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    li {
+      word-break: break-all;
+    }
+
+    .src {
+      font-family: monospace;
+    }
+  }
+}
+
 .upload-area {
   flex: 1;
   border: 2px dashed var(--mat-sys-outline);
@@ -431,6 +511,14 @@
       animation: bounce 0.5s ease-in-out infinite;
       color: var(--mat-sys-primary);
     }
+  }
+
+  &.drag-over {
+    border-style: solid;
+    border-color: var(--mat-sys-primary);
+    background: var(--mat-sys-primary-container);
+    color: var(--mat-sys-on-primary-container);
+    transform: scale(1.01);
   }
 
   .images-grid {

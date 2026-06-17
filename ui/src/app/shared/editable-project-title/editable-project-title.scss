@@ -1,0 +1,68 @@
+/**
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// Sits in the left slot of `.project-title-header` (a space-between flex row),
+// replacing the former read-only <h1>. Stays a tight inline group so the
+// chip-set on the right keeps its position.
+:host {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding-right: 12px;
+}
+
+// While editing, let the title slot claim the available header width (up to the
+// chip-set on the right) so the input can show the full project name instead of
+// the input's default ~20-character box.
+:host:has(.title-input) {
+  flex: 1 1 auto;
+}
+
+// Mirrors the former header <h1> so the title looks identical across tabs.
+.title-text {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: var(--mat-sys-on-surface);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+// The edit input inherits the title's size/weight so committing/cancelling
+// does not change the header height.
+.title-input {
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid var(--mat-sys-primary);
+  background: transparent;
+  color: var(--mat-sys-on-surface);
+  font: inherit;
+  font-size: 1.25rem;
+  font-weight: 500;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  outline: none;
+}
+
+.edit-button {
+  flex: none;
+  color: var(--mat-sys-on-surface-variant);
+}

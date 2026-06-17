@@ -26,13 +26,15 @@
     } @else {
       <div
         class="upload-area"
+        [class.drag-over]="isDragOver()"
         (click)="fileInput.click()"
         (dragover)="onDragOver($event)"
+        (dragleave)="onDragLeave($event)"
         (drop)="onDrop($event)"
       >
         <div class="upload-content">
           <mat-icon class="upload-icon">image</mat-icon>
-          <p>Drag & drop or click to upload</p>
+          <p>Drag, drop, paste, or click to upload</p>
         </div>
         <input
           type="file"

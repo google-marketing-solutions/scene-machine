@@ -123,12 +123,6 @@
     justify-content: flex-end;
     cursor: pointer;
 
-    .thumb-wrapper {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-    }
-
     &.active {
       border-color: var(--mat-sys-primary);
 
@@ -168,6 +162,28 @@
 
       ::ng-deep circle {
         stroke: var(--mat-sys-primary) !important;
+      }
+    }
+
+    .scene-failed-badge {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      width: 20px;
+      height: 20px;
+      background: var(--mat-sys-error);
+      color: var(--mat-sys-on-error);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 3;
+
+      mat-icon {
+        font-size: 16px;
+        width: 16px;
+        height: 16px;
+        line-height: 16px;
       }
     }
 
@@ -449,6 +465,9 @@
 
 .storyboard-columns {
   display: grid;
+  // Fallback track sizing; the live left-track width is driven by an inline
+  // [style.grid-template-columns] binding (sidebarTrackWidth()) so resizing /
+  // collapsing the candidate sidebar grows or shrinks the fluid thumbnails.
   grid-template-columns: 280px 1fr 320px;
   flex: 1; // Take remaining height
   width: 100%;
@@ -470,6 +489,68 @@
 
   .left-sidebar {
     overflow-y: auto; // Allow entire column to scroll
+    position: relative; // Anchor for the absolute resize handle.
+
+    // Drag handle pinned to the RIGHT edge. A thin invisible hit-area that
+    // shows a subtle accent on hover; pointer-drag resizes the sidebar.
+    .sidebar-resize-handle {
+      position: absolute;
+      top: 0;
+      right: 0;
+      width: 8px;
+      height: 100%;
+      cursor: col-resize;
+      z-index: 5;
+      touch-action: none; // Let pointermove drive the resize on touch devices.
+
+      &::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 2px;
+        height: 100%;
+        background: transparent;
+        transition: background 0.15s ease;
+      }
+
+      &:hover::after {
+        background: var(--mat-sys-primary);
+      }
+    }
+
+    // Header row holding the collapse chevron next to "Candidates (N)".
+    .candidates-header {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+
+      .collapse-toggle {
+        flex: 0 0 auto;
+      }
+
+      .subtitle {
+        margin: 0;
+      }
+    }
+
+    // Collapsed rail: hide the resize handle and the candidate body, center the
+    // lone chevron, and drop the scroll/padding so it reads as a thin rail.
+    &.collapsed {
+      overflow: hidden;
+
+      .sidebar-resize-handle {
+        display: none;
+      }
+
+      .candidates-header {
+        justify-content: center;
+      }
+
+      .candidates-body {
+        display: none;
+      }
+    }
 
     .scene-header {
       margin-bottom: 16px;
@@ -523,8 +604,11 @@
       }
 
       .candidate-list {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+        // Single-column flat list (per Christopher): the "2A, 2B…" labels
+        // replace any Run-N grouping, so each candidate spans the full sidebar
+        // width in display order instead of wrapping into a grid.
+        display: flex;
+        flex-direction: column;
         gap: 12px;
       }
 
@@ -574,6 +658,10 @@
           justify-content: center;
           overflow: hidden;
           position: relative;
+          // FLUID width: fill the (single) column so a wider sidebar yields
+          // larger previews. Height stays proportional via the inline
+          // [style.aspect-ratio] binding.
+          width: 100%;
 
           .archive-btn {
             position: absolute;
@@ -699,6 +787,27 @@
               height: 12px;
             }
           }
+
+          // The run chip ("2A") carries a thin colored sliver on its left edge.
+          // The sliver cycles through the theme-picker colors per run (run 1 =
+          // the active theme), so different runs read apart at a glance.
+          .run-chip {
+            position: relative;
+            overflow: hidden; // clip the sliver's square corners to the radius
+            padding-left: 9px; // clear the 3px sliver
+
+            .run-slice {
+              position: absolute;
+              left: 0;
+              top: 0;
+              bottom: 0;
+              width: 3px;
+              // The sliver carries one of the theme classes (theme-azure, …),
+              // which re-points --mat-sys-primary to that theme's color for
+              // this element only — matching the picker swatches exactly.
+              background: var(--mat-sys-primary);
+            }
+          }
         }
       }
     }
@@ -742,6 +851,27 @@
 
       .placeholder-text {
         opacity: 1;
+      }
+
+      .generation-error {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        max-width: 80%;
+        text-align: center;
+
+        mat-icon {
+          color: var(--mat-sys-error);
+        }
+
+        .generation-error-message {
+          margin-top: 8px;
+          font-size: 0.85rem;
+          opacity: 0.85;
+          word-break: break-word;
+          white-space: pre-wrap;
+        }
       }
 
       .video-container {
@@ -1166,6 +1296,14 @@
         .upload-icon {
           animation: bounce 0.5s ease-in-out infinite;
         }
+      }
+
+      &.drag-over {
+        border-style: solid;
+        border-color: var(--mat-sys-primary);
+        background: var(--mat-sys-primary-container);
+        color: var(--mat-sys-on-primary-container);
+        transform: scale(1.01);
       }
 
       .upload-content {

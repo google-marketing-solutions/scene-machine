@@ -16,9 +16,7 @@
 
 <div class="output-layout">
   <div class="project-title-header">
-    <h1 [title]="configService.projectConfig.value().name">
-      {{ configService.projectConfig.value().name }}
-    </h1>
+    <app-editable-project-title />
     <mat-chip-set>
       <mat-chip class="aspect-ratio-chip">
         <mat-icon matChipAvatar>aspect_ratio</mat-icon>
@@ -44,8 +42,13 @@
     <div class="content-wrapper">
       <div class="preview-area">
         <div class="video-container" [style.aspect-ratio]="previewAspectRatio()">
-          @if (videoUrl()) {
-            <video [src]="videoUrl()" controls autoplay playsinline></video>
+          @if (videoFile()) {
+            <video [src]="videoFile() | mediaSrc" controls playsinline></video>
+          } @else if (selectedRenderRun()?.errorMessage) {
+            <div class="render-failed">
+              <mat-icon color="warn">error_outline</mat-icon>
+              <span>Render failed: {{ selectedRenderRun()?.errorMessage }}</span>
+            </div>
           }
         </div>
       </div>
@@ -62,21 +65,30 @@
                   (click)="selectedRenderRun.set(run)"
                 >
                   <div class="render-run-info">
-                    <mat-icon
-                      aria-hidden="false"
-                      matBadge="&#8203;"
-                      [matBadgeHidden]="run.wasPlayed"
-                      matBadgeSize="medium"
-                      matBadgePosition="above before"
-                      matBadgeDescription="Unwatched rendered video"
-                      >movie</mat-icon
-                    >
+                    @if (run.outputVideo) {
+                      <mat-icon
+                        aria-hidden="false"
+                        matBadge="&#8203;"
+                        [matBadgeHidden]="run.wasPlayed"
+                        matBadgeSize="medium"
+                        matBadgePosition="above before"
+                        matBadgeDescription="Unwatched rendered video"
+                        >movie</mat-icon
+                      >
+                    } @else {
+                      <mat-icon color="warn" matTooltip="Render failed"
+                        >error_outline</mat-icon
+                      >
+                    }
                     <div class="render-run-text">
                       <span class="render-run-name"
                         >{{ run.createdAt | date: 'shortTime' }} ({{
                           run.createdAt | date: 'mediumDate'
                         }})</span
                       >
+                      @if (!run.outputVideo) {
+                        <span class="render-run-failed-label">Failed</span>
+                      }
                     </div>
                   </div>
                   <button
@@ -140,7 +152,7 @@
         mat-flat-button
         color="primary"
         (click)="downloadVideo()"
-        [disabled]="!videoUrl() || downloading()"
+        [disabled]="!videoFile() || downloading()"
       >
         <mat-icon>download</mat-icon>
         <span>{{ downloading() ? 'Downloading...' : 'Download Video' }}</span>
@@ -156,7 +168,7 @@
           <button
             mat-menu-item
             (click)="downloadScene(scene)"
-            [disabled]="!getSceneVideoUrl(scene) || downloadingScenes().has(scene.id)"
+            [disabled]="!getSceneVideoFile(scene) || downloadingScenes().has(scene.id)"
           >
             @if (downloadingScenes().has(scene.id)) {
               <mat-spinner diameter="16" class="scene-download-spinner"></mat-spinner>

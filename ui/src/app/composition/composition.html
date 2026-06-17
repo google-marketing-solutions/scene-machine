@@ -22,9 +22,7 @@
 } @else {
   <div class="composition-layout">
     <div class="project-title-header">
-      <h1 [title]="configService.projectConfig.value().name">
-        {{ configService.projectConfig.value().name }}
-      </h1>
+      <app-editable-project-title />
       <mat-chip-set>
         <mat-chip class="aspect-ratio-chip">
           <mat-icon matChipAvatar>aspect_ratio</mat-icon>
@@ -55,7 +53,7 @@
               <video
                 #mainVideo
                 class="preview-video"
-                [src]="currentVideoSrc()"
+                [src]="heldVideoSrc()"
                 [muted]="isMuted()"
                 [volume]="videoVolume()"
                 (timeupdate)="onTimeUpdate()"
@@ -87,7 +85,13 @@
                   [max]="totalDuration() || 100"
                   step="0.1"
                 >
-                  <input matSliderThumb [value]="totalCurrentTime()" (input)="seek($event)" />
+                  <input
+                    matSliderThumb
+                    [value]="totalCurrentTime()"
+                    (input)="seek($event)"
+                    (dragStart)="onScrubStart()"
+                    (dragEnd)="onScrubEnd()"
+                  />
                 </mat-slider>
 
                 <div class="time-display total">{{ formatTime(totalDuration()) }}</div>
@@ -114,15 +118,25 @@
         </div>
 
         <div class="actions-panel">
-          <button
-            mat-flat-button
-            color="primary"
-            (click)="renderVideo()"
-            [disabled]="combiningScenes()"
+          <span
+            [matTooltip]="
+              canRender()
+                ? ''
+                : 'Select or upload at least one scene video before rendering.'
+            "
           >
-            <mat-icon>movie</mat-icon>
-            <span>{{ combiningScenes() ? 'Rendering...' : 'Render Video' }}</span>
-          </button>
+            <button
+              mat-flat-button
+              color="primary"
+              (click)="renderVideo()"
+              [disabled]="combiningScenes() || !canRender()"
+            >
+              <mat-icon>movie</mat-icon>
+              <span>{{
+                combiningScenes() ? 'Rendering...' : 'Render Video'
+              }}</span>
+            </button>
+          </span>
           <div class="overlays">
             <div class="header">
               <div class="subtitle">Audio Tracks</div>
@@ -263,9 +277,10 @@
               <div class="video-thumbnail">
                 <video
                   [src]="
-                    configService.isGeneratedScene(scene)
-                      ? scene.candidates![scene.selectedCandidateIndex!].video?.url
-                      : scene.video?.url
+                    (configService.isGeneratedScene(scene)
+                      ? scene.candidates![scene.selectedCandidateIndex!].video
+                      : scene.video
+                    ) | mediaSrc
                   "
                 ></video>
               </div>

@@ -38,6 +38,7 @@ import {MatIconModule} from '@angular/material/icon';
 import {MatInputModule} from '@angular/material/input';
 import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {ConfigService, GcsFile, toDecimals} from '../../services/config/config';
+import {MediaService} from '../../services/media/media';
 import {RemixEngineService} from '../../services/remix-engine/remix-engine';
 import {SceneTiming} from '../composition';
 import {SceneSelector} from '../scene-selector/scene-selector';
@@ -76,6 +77,7 @@ export class AudioUploadDialog implements OnInit, OnDestroy {
     sceneTimings: SceneTiming[];
   } | null;
   private matSnackBar = inject(MatSnackBar);
+  private mediaService = inject(MediaService);
   private remixEngineService = inject(RemixEngineService);
   private configService = inject(ConfigService);
 
@@ -103,8 +105,14 @@ export class AudioUploadDialog implements OnInit, OnDestroy {
       this.endSeconds.set(
         this.data.track.durationSeconds + this.data.track.startSeconds,
       );
-      if (this.data.track.file?.url) {
-        this.audioUrl.set(this.data.track.file.url);
+      if (this.data.track.file) {
+        // Resolves to a freshly signed URL (or the stored URL for path-less
+        // legacy refs).
+        void this.mediaService.resolve(this.data.track.file).then(url => {
+          if (url && !this.selectedFile()) {
+            this.audioUrl.set(url);
+          }
+        });
       }
     }
   }

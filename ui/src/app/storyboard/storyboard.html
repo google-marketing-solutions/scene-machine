@@ -24,7 +24,7 @@
     <div class="storyboard-layout">
       <!-- Project Title -->
       <div class="project-title-header">
-        <h1 [title]="config.projectConfig.value().name">{{ config.projectConfig.value().name }}</h1>
+        <app-editable-project-title />
         <mat-chip-set>
           <mat-chip class="aspect-ratio-chip">
             <mat-icon matChipAvatar>aspect_ratio</mat-icon>
@@ -90,7 +90,7 @@
               <!-- 2. High quality image -->
               @if (thumb.highQuality) {
                 <img
-                  [src]="thumb.highQuality"
+                  [src]="thumb.highQuality | mediaSrc"
                   class="reference-image-bg high-res-img"
                   #highResImg
                   (load)="
@@ -103,7 +103,11 @@
 
               <!-- 3. Fallback to Reference Image -->
               @if (thumb.showReference) {
-                <img [src]="thumb.reference" class="reference-image-bg" alt="Reference Image" />
+                <img
+                  [src]="thumb.reference | mediaSrc"
+                  class="reference-image-bg"
+                  alt="Reference Image"
+                />
               }
 
               <!-- 4. Fallback to Icon -->
@@ -120,6 +124,11 @@
                 </div>
               }
             </div>
+            @if (hasUnseenFailure(scene)) {
+              <div class="scene-failed-badge" title="Generation failed">
+                <mat-icon>priority_high</mat-icon>
+              </div>
+            }
             <div class="scene-label">{{ scene.name }}</div>
 
             <!-- Custom preview template -->
@@ -132,7 +141,9 @@
                     scene.candidates?.[scene.selectedCandidateIndex]?.referenceImage
                   ) {
                     <img
-                      [src]="scene.candidates?.[scene.selectedCandidateIndex]?.referenceImage?.url"
+                      [src]="
+                        scene.candidates?.[scene.selectedCandidateIndex]?.referenceImage | mediaSrc
+                      "
                       class="reference-image-bg"
                       alt="Reference Image"
                     />
@@ -155,144 +166,64 @@
         </button>
       </div>
 
-      <div class="storyboard-columns">
+      <div
+        class="storyboard-columns"
+        [style.grid-template-columns]="sidebarTrackWidth() + 'px 1fr 320px'"
+      >
         @if (selectedScene(); as scene) {
           <!-- Left Column: Scene List -->
-          <div class="column left-sidebar">
-            <div class="scene-header">
-              <div class="subtitle">SCENE NAME</div>
-              <mat-form-field appearance="outline" subscriptSizing="dynamic" class="name-field">
-                <input matInput [(ngModel)]="scene.name" (ngModelChange)="updateScenes()" />
-              </mat-form-field>
-            </div>
+          <div class="column left-sidebar" [class.collapsed]="sidebarCollapsed()">
+            <!-- Drag handle on the RIGHT edge: pointer-drag resizes the sidebar,
+                 which grows the fluid candidate thumbnails. Hidden while
+                 collapsed (handled via CSS). -->
+            <div
+              class="sidebar-resize-handle"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize candidate sidebar"
+              (pointerdown)="startSidebarResize($event)"
+            ></div>
+
+            @if (!sidebarCollapsed()) {
+              <div class="scene-header">
+                <div class="subtitle">SCENE NAME</div>
+                <mat-form-field appearance="outline" subscriptSizing="dynamic" class="name-field">
+                  <input matInput [(ngModel)]="scene.name" (ngModelChange)="updateScenes()" />
+                </mat-form-field>
+              </div>
+            }
 
             @if (this.config.isGeneratedScene(scene)) {
-              <div class="list-section">
-                <div class="subtitle">Candidates ({{ candidateCounts().active }})</div>
-                @if ((scene.candidates?.length ?? 0) > 0 || areCandidatesGenerating(scene.id)) {
-                  <div
-                    class="candidate-list"
-                    [class.has-selection]="!!scene.selectedCandidateIndex"
+              <div class="list-section" [class.collapsed]="sidebarCollapsed()">
+                <div class="candidates-header">
+                  <button
+                    mat-icon-button
+                    class="collapse-toggle"
+                    (click)="toggleSidebarCollapsed()"
+                    [attr.aria-label]="
+                      sidebarCollapsed() ? 'Expand candidate sidebar' : 'Collapse candidate sidebar'
+                    "
+                    [matTooltip]="sidebarCollapsed() ? 'Expand candidates' : 'Collapse candidates'"
                   >
-                    @if (scene.candidates) {
-                      @for (candidate of scene.candidates; track candidate.video?.url) {
-                        @if (!candidate.isArchived) {
-                          <div
-                            class="video-item"
-                            (click)="selectCandidate(scene, $index)"
-                            [class.selected]="scene.selectedCandidateIndex === $index"
-                          >
-                            <div
-                              class="video-thumbnail"
-                              #thumbContainer
-                              [style.aspect-ratio]="previewAspectRatio()"
-                            >
-                              <div class="resolution">
-                                {{ candidate.resolution === '4k' ? '4K' : candidate.resolution }}
-                              </div>
-                              <button
-                                mat-icon-button
-                                class="archive-btn"
-                                (click)="toggleArchive($event, scene, $index)"
-                                matTooltip="Archive Candidate"
-                              >
-                                <mat-icon>archive</mat-icon>
-                              </button>
-
-                              @let thumb = getThumbnailData(candidate);
-                              <!-- 1. Low quality image -->
-                              @if (thumb.lowQuality) {
-                                <img
-                                  [src]="thumb.lowQuality"
-                                  class="reference-image-bg loaded"
-                                  alt="Low Quality Thumbnail"
-                                />
-                              }
-
-                              <!-- 2. High quality image -->
-                              @if (thumb.highQuality) {
-                                <img
-                                  [src]="thumb.highQuality"
-                                  class="reference-image-bg high-res-img"
-                                  #highResImg
-                                  (load)="
-                                    highResImg.classList.add('loaded');
-                                    thumbContainer.classList.add('high-res-loaded')
-                                  "
-                                  alt="High Quality Thumbnail"
-                                />
-                              }
-
-                              <!-- 3. Fallback to Reference Image -->
-                              @if (thumb.showReference) {
-                                <img
-                                  [src]="thumb.reference"
-                                  class="reference-image-bg"
-                                  alt="Reference Image"
-                                />
-                              }
-
-                              <!-- 4. Fallback to Icon -->
-                              @if (thumb.showIcon) {
-                                <div class="scene-icon"><mat-icon>auto_awesome</mat-icon></div>
-                              }
-
-                              <video
-                                #videoPlayer
-                                [src]="candidate.video?.url"
-                                [muted]="true"
-                                alt="Candidate Preview"
-                                loop
-                                matTooltip="Preview: 2x speed"
-                                matTooltipPosition="left"
-                                (mouseenter)="videoPlayer.playbackRate = 2; videoPlayer.play()"
-                                (mouseleave)="videoPlayer.pause(); videoPlayer.currentTime = 0"
-                              ></video>
-                            </div>
-                            <div class="video-info">
-                              <div class="video-chip">Run {{ candidate.runNumber }}</div>
-                              @if (candidate.trim && candidate.trim.start !== undefined) {
-                                <div class="video-chip">
-                                  <mat-icon>content_cut</mat-icon>
-                                  {{
-                                    (candidate.trim.end ?? candidate.durationSeconds) -
-                                      candidate.trim.start | number: '1.2-2'
-                                  }}s
-                                </div>
-                              }
-                              <div class="video-chip">{{ candidate.durationSeconds }}s</div>
-                            </div>
-                          </div>
-                        }
-                      }
-                    }
-                    @if (areCandidatesGenerating(scene.id)) {
-                      @for (i of getPlaceholdersArray(); track $index) {
-                        <div
-                          class="video-item placeholder"
-                          [style.aspect-ratio]="previewAspectRatio()"
-                        >
-                          <mat-spinner diameter="32"></mat-spinner>
-                        </div>
-                      }
-                    }
-                  </div>
-                  <mat-expansion-panel class="archived-panel">
-                    <mat-expansion-panel-header>
-                      <mat-panel-title class="subtitle">
-                        Archived ({{ candidateCounts().archived }})
-                      </mat-panel-title>
-                    </mat-expansion-panel-header>
-
+                    <mat-icon>{{ sidebarCollapsed() ? 'chevron_right' : 'chevron_left' }}</mat-icon>
+                  </button>
+                  @if (!sidebarCollapsed()) {
+                    <div class="subtitle">Candidates ({{ candidateCounts().active }})</div>
+                  }
+                </div>
+                <!-- Candidate body: hidden via CSS in the collapsed rail state so
+                     only the chevron remains. -->
+                <div class="candidates-body">
+                  @if ((scene.candidates?.length ?? 0) > 0 || areCandidatesGenerating(scene.id)) {
                     <div
                       class="candidate-list"
                       [class.has-selection]="!!scene.selectedCandidateIndex"
                     >
                       @if (scene.candidates) {
                         @for (candidate of scene.candidates; track candidate.video?.url) {
-                          @if (candidate.isArchived) {
+                          @if (!candidate.isArchived) {
                             <div
-                              class="video-item archived"
+                              class="video-item"
                               (click)="selectCandidate(scene, $index)"
                               [class.selected]="scene.selectedCandidateIndex === $index"
                             >
@@ -301,13 +232,16 @@
                                 #thumbContainer
                                 [style.aspect-ratio]="previewAspectRatio()"
                               >
+                                <div class="resolution">
+                                  {{ candidate.resolution === '4k' ? '4K' : candidate.resolution }}
+                                </div>
                                 <button
                                   mat-icon-button
                                   class="archive-btn"
                                   (click)="toggleArchive($event, scene, $index)"
-                                  matTooltip="Restore Candidate"
+                                  matTooltip="Archive Candidate"
                                 >
-                                  <mat-icon>unarchive</mat-icon>
+                                  <mat-icon>archive</mat-icon>
                                 </button>
 
                                 @let thumb = getThumbnailData(candidate);
@@ -323,7 +257,7 @@
                                 <!-- 2. High quality image -->
                                 @if (thumb.highQuality) {
                                   <img
-                                    [src]="thumb.highQuality"
+                                    [src]="thumb.highQuality | mediaSrc"
                                     class="reference-image-bg high-res-img"
                                     #highResImg
                                     (load)="
@@ -337,7 +271,7 @@
                                 <!-- 3. Fallback to Reference Image -->
                                 @if (thumb.showReference) {
                                   <img
-                                    [src]="thumb.reference"
+                                    [src]="thumb.reference | mediaSrc"
                                     class="reference-image-bg"
                                     alt="Reference Image"
                                   />
@@ -349,25 +283,29 @@
                                 }
 
                                 <video
-                                  #archivedVideoPlayer
-                                  [src]="candidate.video?.url"
+                                  #videoPlayer
+                                  [src]="candidate.video | mediaSrc"
                                   [muted]="true"
-                                  alt="Archived Candidate Preview"
+                                  alt="Candidate Preview"
                                   loop
                                   matTooltip="Preview: 2x speed"
                                   matTooltipPosition="left"
-                                  (mouseenter)="
-                                    archivedVideoPlayer.playbackRate = 2; archivedVideoPlayer.play()
-                                  "
-                                  (mouseleave)="
-                                    archivedVideoPlayer.pause(); archivedVideoPlayer.currentTime = 0
-                                  "
+                                  (mouseenter)="videoPlayer.playbackRate = 2; videoPlayer.play()"
+                                  (mouseleave)="videoPlayer.pause(); videoPlayer.currentTime = 0"
                                 ></video>
                               </div>
                               <div class="video-info">
-                                <div class="video-chip">Run {{ candidate.runNumber }}</div>
+                                <div
+                                  class="video-chip run-chip"
+                                  [matTooltip]="runTooltip(candidate)"
+                                >
+                                  <span
+                                    class="run-slice {{ runSliceTheme(candidate.runNumber) }}"
+                                  ></span>
+                                  {{ runLabels().get(candidate) }}
+                                </div>
                                 @if (candidate.trim && candidate.trim.start !== undefined) {
-                                  <div class="video-chip">
+                                  <div class="video-chip" matTooltip="Trimmed Duration">
                                     <mat-icon>content_cut</mat-icon>
                                     {{
                                       (candidate.trim.end ?? candidate.durationSeconds) -
@@ -375,17 +313,147 @@
                                     }}s
                                   </div>
                                 }
-                                <div class="video-chip">{{ candidate.durationSeconds }}s</div>
+                                <div class="video-chip" matTooltip="Candidate Duration">
+                                  {{ candidate.durationSeconds }}s
+                                </div>
                               </div>
                             </div>
                           }
                         }
                       }
+                      @if (areCandidatesGenerating(scene.id)) {
+                        @for (i of getPlaceholdersArray(); track $index) {
+                          <div
+                            class="video-item placeholder"
+                            [style.aspect-ratio]="previewAspectRatio()"
+                          >
+                            <mat-spinner diameter="32"></mat-spinner>
+                          </div>
+                        }
+                      }
                     </div>
-                  </mat-expansion-panel>
-                } @else {
-                  <div class="empty-state">No videos yet</div>
-                }
+                    <mat-expansion-panel class="archived-panel">
+                      <mat-expansion-panel-header>
+                        <mat-panel-title class="subtitle">
+                          Archived ({{ candidateCounts().archived }})
+                        </mat-panel-title>
+                      </mat-expansion-panel-header>
+
+                      <div
+                        class="candidate-list"
+                        [class.has-selection]="!!scene.selectedCandidateIndex"
+                      >
+                        @if (scene.candidates) {
+                          @for (candidate of scene.candidates; track candidate.video?.url) {
+                            @if (candidate.isArchived) {
+                              <div
+                                class="video-item archived"
+                                (click)="selectCandidate(scene, $index)"
+                                [class.selected]="scene.selectedCandidateIndex === $index"
+                              >
+                                <div
+                                  class="video-thumbnail"
+                                  #thumbContainer
+                                  [style.aspect-ratio]="previewAspectRatio()"
+                                >
+                                  <button
+                                    mat-icon-button
+                                    class="archive-btn"
+                                    (click)="toggleArchive($event, scene, $index)"
+                                    matTooltip="Restore Candidate"
+                                  >
+                                    <mat-icon>unarchive</mat-icon>
+                                  </button>
+
+                                  @let thumb = getThumbnailData(candidate);
+                                  <!-- 1. Low quality image -->
+                                  @if (thumb.lowQuality) {
+                                    <img
+                                      [src]="thumb.lowQuality"
+                                      class="reference-image-bg loaded"
+                                      alt="Low Quality Thumbnail"
+                                    />
+                                  }
+
+                                  <!-- 2. High quality image -->
+                                  @if (thumb.highQuality) {
+                                    <img
+                                      [src]="thumb.highQuality | mediaSrc"
+                                      class="reference-image-bg high-res-img"
+                                      #highResImg
+                                      (load)="
+                                        highResImg.classList.add('loaded');
+                                        thumbContainer.classList.add('high-res-loaded')
+                                      "
+                                      alt="High Quality Thumbnail"
+                                    />
+                                  }
+
+                                  <!-- 3. Fallback to Reference Image -->
+                                  @if (thumb.showReference) {
+                                    <img
+                                      [src]="thumb.reference | mediaSrc"
+                                      class="reference-image-bg"
+                                      alt="Reference Image"
+                                    />
+                                  }
+
+                                  <!-- 4. Fallback to Icon -->
+                                  @if (thumb.showIcon) {
+                                    <div class="scene-icon"><mat-icon>auto_awesome</mat-icon></div>
+                                  }
+
+                                  <video
+                                    #archivedVideoPlayer
+                                    [src]="candidate.video | mediaSrc"
+                                    [muted]="true"
+                                    alt="Archived Candidate Preview"
+                                    loop
+                                    matTooltip="Preview: 2x speed"
+                                    matTooltipPosition="left"
+                                    (mouseenter)="
+                                      archivedVideoPlayer.playbackRate = 2;
+                                      archivedVideoPlayer.play()
+                                    "
+                                    (mouseleave)="
+                                      archivedVideoPlayer.pause();
+                                      archivedVideoPlayer.currentTime = 0
+                                    "
+                                  ></video>
+                                </div>
+                                <div class="video-info">
+                                  <div
+                                    class="video-chip run-chip"
+                                    [matTooltip]="runTooltip(candidate)"
+                                  >
+                                    <span
+                                      class="run-slice {{ runSliceTheme(candidate.runNumber) }}"
+                                    ></span>
+                                    {{ runLabels().get(candidate) }}
+                                  </div>
+                                  @if (candidate.trim && candidate.trim.start !== undefined) {
+                                    <div class="video-chip" matTooltip="Trimmed Duration">
+                                      <mat-icon>content_cut</mat-icon>
+                                      {{
+                                        (candidate.trim.end ?? candidate.durationSeconds) -
+                                          candidate.trim.start | number: '1.2-2'
+                                      }}s
+                                    </div>
+                                  }
+                                  <div class="video-chip" matTooltip="Candidate Duration">
+                                    {{ candidate.durationSeconds }}s
+                                  </div>
+                                </div>
+                              </div>
+                            }
+                          }
+                        }
+                      </div>
+                    </mat-expansion-panel>
+                  } @else {
+                    <div class="empty-state">No videos yet</div>
+                  }
+                </div>
               </div>
             }
           </div>
@@ -394,14 +462,20 @@
           <div class="column main-preview">
             <div class="preview-wrapper">
               <div class="preview-area">
-                @if (
+                @if (generationErrorOf(scene); as errorMsg) {
+                  <div class="generation-error">
+                    <mat-icon>error_outline</mat-icon>
+                    <div class="placeholder-text">Generation failed</div>
+                    <div class="generation-error-message">{{ errorMsg }}</div>
+                  </div>
+                } @else if (
                   this.config.isGeneratedScene(scene) && this.selectedCandidate();
                   as candidate
                 ) {
                   <div class="video-container" [style.aspect-ratio]="previewAspectRatio()">
                     <video
                       #mainVideo
-                      [src]="candidate.video?.url"
+                      [src]="candidate.video | mediaSrc"
                       (timeupdate)="onVideoTimeUpdate()"
                       (loadedmetadata)="onVideoLoadedMetadata()"
                       (ended)="onVideoEnded()"
@@ -484,7 +558,7 @@
                     <div class="video-container" [style.aspect-ratio]="previewAspectRatio()">
                       <video
                         #mainVideo
-                        [src]="scene.video.url"
+                        [src]="scene.video | mediaSrc"
                         [muted]="isMuted()"
                         [volume]="videoVolume()"
                         (timeupdate)="onVideoTimeUpdate()"
@@ -562,9 +636,14 @@
                         </div>
                       </div>
                     </div>
-                  } @else {
+                  } @else if (isUploadingScene(scene.id)) {
                     <mat-icon>upload</mat-icon>
                     <div class="placeholder-text">Video is uploading...</div>
+                  } @else {
+                    <mat-icon>error_outline</mat-icon>
+                    <div class="placeholder-text">
+                      Upload didn't finish — delete this scene and add it again.
+                    </div>
                   }
                 } @else {
                   <mat-icon>videocam</mat-icon>
@@ -673,7 +752,7 @@
                     >
                       @if (scene.referenceImage) {
                         <div class="reference-image-preview">
-                          <img [src]="scene.referenceImage.url" alt="Reference Image" />
+                          <img [src]="scene.referenceImage | mediaSrc" alt="Reference Image" />
                           <button
                             mat-icon-button
                             class="remove-image-btn"
@@ -686,13 +765,15 @@
                       } @else {
                         <div
                           class="upload-area"
+                          [class.drag-over]="isDragOver()"
                           (click)="fileInput.click()"
                           (dragover)="onDragOver($event)"
+                          (dragleave)="onDragLeave($event)"
                           (drop)="onDrop($event)"
                         >
                           <div class="upload-content">
                             <mat-icon class="upload-icon">upload</mat-icon>
-                            <p>Drag & drop or click to upload</p>
+                            <p>Drag, drop, paste, or click to upload</p>
                           </div>
                           <input
                             #fileInput
