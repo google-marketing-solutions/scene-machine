@@ -823,9 +823,16 @@ def projects_handler() -> flask_response:
   elif not isinstance(project_id, str) or not project_id or '/' in project_id:
     return _json_error('Invalid project id', 400)
   payload['id'] = project_id
+  doc_ref = collection.document(project_id)
+  # Create-only: POST must not overwrite an existing project (which would also
+  # re-stamp createdBy to the poster, reassigning the owner shown in "My
+  # projects"). Updates go through PATCH, which preserves createdBy. A repeated
+  # POST of the same id returns 409 instead of silently clobbering.
+  if doc_ref.get().exists:
+    return _json_error('Project already exists', 409)
   payload['createdBy'] = _request_email()
   _convert_project_dates(payload)
-  _write_project_doc(ui_db, collection.document(project_id), payload)
+  _write_project_doc(ui_db, doc_ref, payload)
   return _json_response({'id': project_id})
 
 

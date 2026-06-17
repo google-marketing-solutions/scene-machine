@@ -710,6 +710,45 @@ def test_projects_crud_round_trip_with_created_by_stamping(
   )
 
 
+def test_post_project_is_create_only_and_keeps_the_owner(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(
+      monkeypatch, AUTH_MODE='iap', IAP_AUDIENCE=_IAP_AUDIENCE
+  )
+  _stub_identity(
+      monkeypatch,
+      orch,
+      {'t-u1': {'email': 'u1@x'}, 't-u2': {'email': 'u2@x'}},
+  )
+  client = orch.app.test_client()
+
+  project_id = str(uuid.uuid4())
+  project = {'id': project_id, 'name': 'Original', 'storyboard': []}
+  # First POST creates the project, owned by u1.
+  assert (
+      client.post(
+          '/api/projects', json=project, headers=_iap('t-u1')
+      ).status_code
+      == 200
+  )
+  assert fake_db.collection('projects').docs[project_id]['createdBy'] == 'u1@x'
+
+  # A second POST of the SAME id (by a different user) is a 409 conflict: POST
+  # is create-only, so it must not overwrite the project nor re-stamp the owner.
+  # Updates go through PATCH (which preserves createdBy).
+  response = client.post(
+      '/api/projects',
+      json={'id': project_id, 'name': 'Hijacked', 'storyboard': []},
+      headers=_iap('t-u2'),
+  )
+  assert response.status_code == 409
+  stored = fake_db.collection('projects').docs[project_id]
+  assert stored['name'] == 'Original'
+  assert stored['createdBy'] == 'u1@x'
+
+
 def test_projects_auth_none_posture(monkeypatch, orchestrator_module):
   del orchestrator_module
   orch, fake_db, _ = _load_app(monkeypatch)  # AUTH_MODE defaults to none
