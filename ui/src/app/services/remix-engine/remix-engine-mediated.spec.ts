@@ -997,5 +997,65 @@ describe('RemixEngineService (mediated)', () => {
         {panelClass: ['error-snackbar']},
       );
     });
+
+    it('fails candidate generation with a recoverable message and does NOT flag the scene when global config is not loaded', async () => {
+      configServiceMock.globalConfig.value.mockReturnValue(undefined);
+
+      await service.generateCandidates(
+        {id: 'scene-1', type: 'generated'} as any,
+        generationParams,
+      );
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Configuration is not loaded yet. Please try again in a moment.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      // No workflow started and the scene is NOT marked failed (no
+      // generationError / "!" badge): a missing config is recoverable.
+      expect(configServiceMock.updateProjectConfig).not.toHaveBeenCalled();
+      expect(service.generatingSceneIds().has('scene-1')).toBe(false);
+    });
+  });
+
+  describe('combineScenes: signing-failure resilience', () => {
+    it('keeps the pending render and records no error when the output cannot be signed', async () => {
+      // A live render finishes, but signing its output URL fails persistently
+      // (transient /api/signUrl outage). withRetry exhausts its attempts and the
+      // completed render is kept (marker not cleared, no error run) so a reopen
+      // re-collects it, mirroring the resumed-render path. (E3)
+      configServiceMock.projectConfig.value.mockReturnValue({
+        id: 'project-1',
+        storyboard: [],
+        audioTracks: [],
+        visualOverlays: [],
+      });
+      vi.spyOn(service, 'startCombineScenesWorkflow').mockResolvedValue(
+        of({executionId: 'render-exec-id'}) as any,
+      );
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/final.mp4'}]}}},
+      } as any);
+      mediaServiceMock.signUrl.mockRejectedValue(new Error('sign failed'));
+
+      await service.combineScenes();
+
+      // Marker set at start, but NEVER cleared (kept for a reopen to retry).
+      expect(configServiceMock.setPendingRender).toHaveBeenCalledWith(
+        expect.objectContaining({executionId: 'render-exec-id'}),
+      );
+      expect(configServiceMock.setPendingRender).not.toHaveBeenCalledWith(
+        undefined,
+      );
+      // No render run recorded (neither success nor error); button resets.
+      expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+      expect(service.combiningScenes()).toBe(false);
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Your video is ready but could not be loaded right now — ' +
+          'reopen the project to retry.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
   });
 });

@@ -719,6 +719,20 @@ export class RemixEngineService {
     if (this.generatingSceneIds().has(s.id)) {
       return;
     }
+    // Fail fast and clearly if /api/config has not loaded: startVideoGeneration
+    // Workflow reads globalConfig fields. Without this guard an undefined config
+    // surfaces as a vague "Failed to start workflow" AND marks the scene
+    // permanently failed (generationError + "!" badge). Surface a recoverable
+    // "try again" and do NOT flag the scene, mirroring the storyboard and
+    // combine guards. (E1)
+    if (!this.configService.globalConfig.value()) {
+      this.matSnackBar.open(
+        'Configuration is not loaded yet. Please try again in a moment.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      return;
+    }
     const scene = structuredClone(s);
     this.generatingSceneIds.update(ids => {
       const newIds = new Set(ids);
