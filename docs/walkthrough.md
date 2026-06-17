@@ -84,6 +84,11 @@ Upload your product or service images to begin. For this demo, we use three imag
 
 ### Actions:
 - **Upload Assets**: Drag and drop your product or service images into the "Drag & drop images here" zone. **Tip:** You can find example assets in [media/example_assets](media/example_assets).
+- **Other ways to add images**: Besides drag-and-drop and the file picker, you can:
+    - **Paste a copied image** (Ctrl/Cmd-V) — copy any image (a screenshot, or "copy image" from a web page) and paste it onto the page; it's added to the product you're working on.
+    - **Paste image links** — paste one or more image URLs (one per line) into the "Paste image links or base64…" box and click **Add from links / base64**. Scene Machine fetches each one; any that can't be retrieved are listed back to you so you can fix and retry.
+    - **Paste a base64 image** — the same box also accepts a base64 / data-URI image, handy for quick tests without a file.
+  - You can also **drag an image from another browser tab** straight onto the drop zone.
 - **Add Descriptions (Optional)**: Provide additional details for your images to guide the generation process.
 - **Add Details (Optional)**: Input specific information into the Audience, Market, or Style fields to help Gemini tailor the storyboard and prompts to your requirements.
 

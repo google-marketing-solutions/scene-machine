@@ -4,6 +4,7 @@
 This repository currently comes with a single user interface, Scene Machine, which is designed to accelerate manual work on individual videos. The backend, Remix Engine, is also able to process other media, and scaled workloads. To avoid reinventing the wheel, new use cases could be added to this repository, either by "only" adding a new user interface, or by also adding functional modules should recombining the existing ones not suffice.
 
 [Local dependencies](#local-dependencies) •
+[Local Development](#local-development-and-faster-deploys) •
 [Creating Applications](#creating-applications) •
 [Modules not used by Scene Machine](#modules-not-used-by-scene-machine) •
 [When to use Remix Engine](#when-to-use-remix-engine) •
@@ -21,9 +22,85 @@ To install Python dependencies (incl. formatter):
 - `pip-compile --generate-hashes --no-emit-index-url --output-file=requirements-dev.txt requirements-dev.in`
 - `pip install -r requirements-dev.txt --upgrade`
 
+## Local Development and Faster Deploys
+
+[< Local dependencies](#local-dependencies) • [Top](#developing-top) • [Creating Applications >](#creating-applications)
+
+Scene Machine runs as Cloud Run services in production, and `deploy.sh` is the right tool to ship a release. But you should not run a full deploy every time you tweak an Angular component: a deploy renders config, builds the UI, uploads to Cloud Build, builds an image, and rolls out Cloud Run. The local loop below lets you edit the UI and see it reload in seconds while still calling the same `/api` endpoints the deployed app uses.
+
+This local path is for people **building** Scene Machine. People **using** it should use a deployed instance.
+
+### One-time dev setup
+
+Render the two files the UI needs from their templates (run again whenever the templates change):
+
+```
+./scripts/dev-setup.sh
+```
+
+This writes `ui/src/env.ts` and `ui/definitions/config.json` with `controlPlaneMode: 'none'` (the dev front-door mode: the UI treats you as already signed in and never opens a Firebase sign-in popup) and keeps the data plane mediated. Both files are gitignored. The deployed `iap` mode is untouched, and `deploy.sh` refuses to ship a `none` build, so this can never reach production.
+
+Point it at your own dev project with the overrides `SM_DEV_PROJECT`, `SM_DEV_FIRESTORE_DB`, and `SM_DEV_GCS_BUCKET`.
+
+### The local loop (two terminals)
+
+The local backend talks to a real dev GCP project through your Application Default Credentials, so run `gcloud auth application-default login` once first.
+
+**Terminal 1 - local backend (the `/api` server):**
+
+```
+ROLE=app AUTH_MODE=none LOCAL_WORKER=1 FIRESTORE_DB_UI=<your-dev-db> PORT=8080 python3 orch.py
+```
+
+- `ROLE=app` serves the `/api` front door (not the worker).
+- `AUTH_MODE=none` removes the sign-in gate. This is **dev only** (see best practices below).
+- `LOCAL_WORKER=1` runs workflow actions in-process instead of scheduling Cloud Tasks, so you do not need a separate worker service or a `WORKER_URL`. It is **dev only** (no retries/backoff) and is only honored when `AUTH_MODE=none`.
+- `FIRESTORE_DB_UI` points at a dev Firestore database, and must match the value `dev-setup.sh` used (`scene-machine-ui` by default, or your `SM_DEV_FIRESTORE_DB`).
+
+**Terminal 2 - Angular dev server with the `/api` proxy:**
+
+```
+cd ui
+npm run dev
+```
+
+`npm run dev` runs `dev-setup.sh` and then `ng serve`. The proxy (`ui/proxy.conf.json`, wired into `angular.json`) forwards every `/api` request from the browser to the local backend on `http://localhost:8080`, so the browser keeps calling **relative** `/api/...` URLs exactly as in production, with no CORS setup. Open the printed `http://localhost:4200`; edits under `ui/src` hot-reload. After the first run, plain `cd ui && npm start` works too.
+
+### Running a full workflow locally
+
+By default the backend hands work to Cloud Tasks, which cannot call back into your laptop. For an end-to-end run on your machine, add the dev-only `LOCAL_WORKER=1` to the backend command:
+
+```
+ROLE=app AUTH_MODE=none LOCAL_WORKER=1 FIRESTORE_DB_UI=<your-dev-db> PORT=8080 python3 orch.py
+```
+
+This runs each backend action in an in-process thread instead of scheduling a Cloud Task (`orchestrator.supply_node(data, None)`). It is honored only when `AUTH_MODE=none`, so it cannot turn on in a deployed service. Caveats: actions run in worker threads inside the single dev process, with no Cloud Tasks retry or backoff, so it is fine for exercising one workflow but not for load. (For a UI-free run there is also `cli.py`; see [Testing](#testing).)
+
+### Local development best practices
+
+- **Relative `/api` only.** Keep the browser calling `/api/...`; the proxy exists so the frontend never needs an absolute backend URL.
+- **Auth bypass is dev only.** `AUTH_MODE=none` and `controlPlaneMode: 'none'` remove the sign-in gate, which is fine on localhost and unacceptable in production. `deploy.sh` refuses to build or ship a `none` UI, including via `--skip-ui-build`.
+- **Stay close to production.** The local UI is the real app, not a separate local-only page, so what you see is what users get.
+- **Real project by default.** The default local path talks to a real dev project through ADC.
+
+### Faster deploys
+
+A full `./deploy.sh` stays the safe default and is what you should run for a release candidate. The options below are opt-in shortcuts for everyday iteration on an already-provisioned project. Each skipped step is logged, so a deploy stays auditable.
+
+- **Docker layer caching (automatic).** `cloudbuild.yaml` reuses unchanged layers from the previously built image, so the slow dependency install only re-runs when `requirements.txt` changes. The first build on a fresh project still works.
+- **`--app-only`** builds the image and deploys only the `app` service, reusing the live worker. Good for app or backend changes that do not touch the worker.
+- **`--skip-ui-build` / `--use-existing-ui-dist`** reuses the existing `ui/dist` instead of rebuilding the UI. Good for backend-only changes. It reuses the config already baked into that build, so use it when redeploying the **same** project. The deploy refuses a `ui/dist` that was built for local dev (sign-in disabled).
+- **`--no-build-cache`** forces a clean cold image build, for a release or a dependency refresh.
+
+### Future considerations: splitting the app and worker images
+
+Today `deploy.sh` builds **one** image and runs it as two Cloud Run services via the `ROLE` env var (`app` serves the UI and `/api`; `worker` runs background jobs). One image keeps deployment simple, but it means the lightweight `app` service still ships inside an image that also carries ffmpeg and the heavier generation dependencies only the `worker` needs, so a UI change rebuilds the large image.
+
+If deploy speed ever becomes the main bottleneck, the two services could be built as separate images: a small `app` image (Flask, `/api`, static UI) and a heavier `worker` image (action execution, ffmpeg, generation libraries). The services already differ only by `ROLE`, so this is mostly a packaging change. It is deferred because it raises operational complexity: two images to build, tag, version, and keep in sync, and more branches in the deploy path. Do it only after the local UI loop and the layer cache, which capture most of the day-to-day speed win at far lower risk.
+
 ## Creating Applications
 
-[< Local dependencies](#local-dependencies) • [Top](#developing-top) • [Modules not used by Scene Machine >](#modules-not-used-by-scene-machine)
+[< Local Development](#local-development-and-faster-deploys) • [Top](#developing-top) • [Modules not used by Scene Machine >](#modules-not-used-by-scene-machine)
 
 In the absence of a generic user interface to define workflows, each actual tool built on Remix Engine can be limited to having a fixed workflow plus a user interface that
 
@@ -494,7 +571,7 @@ If not, the action gets executed and its output stored in said file. For this, t
 
 [< Remix Engine Architecture](#remix-engine-architecture) • [Top](#developing-top)
 
-The folder `workflow_examples` contains numerous JSON files that can be used to check if the tool works. They rely on files that get uploaded to the configured GCS bucket as part of the deployment process. There are two ways of executing the examples:
+The folder `workflow_examples` contains numerous JSON files that can be used to check if the tool works. They rely on the input files in `workflow_examples/input`, which you upload to the configured GCS bucket's `examples/` prefix yourself before running them (the deploy no longer uploads them). There are two ways of executing the examples:
 
 ### Running workflows with endpoint calls
 
