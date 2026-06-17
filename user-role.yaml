@@ -12,29 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# The single role a person needs to use Scene Machine. Granting it admits the
+# user through the Identity-Aware Proxy (IAP) front door, and that is all they
+# need: the app runs every storage and Firestore action on its own runtime
+# service account and hands the browser short-lived signed links, so users never
+# touch Cloud Storage directly. That is why this role carries just the one
+# IAP-access permission below — it stays one clear thing: "may use Scene Machine."
 title: "Scene Machine User"
-description: "Role needed to use an application based on Remix Engine."
+description: "Admits a person through IAP to use Scene Machine."
 stage: "BETA"
 includedPermissions:
   - iap.webServiceVersions.accessViaIAP
-  - resourcemanager.projects.get
-  - storage.folders.create
-  - storage.folders.delete
-  - storage.folders.get
-  - storage.folders.list
-  - storage.folders.rename
-  - storage.managedFolders.create
-  - storage.managedFolders.delete
-  - storage.managedFolders.get
-  - storage.managedFolders.list
-  - storage.multipartUploads.abort
-  - storage.multipartUploads.create
-  - storage.multipartUploads.list
-  - storage.multipartUploads.listParts
-  - storage.objects.create
-  - storage.objects.delete
-  - storage.objects.get
-  - storage.objects.list
-  - storage.objects.move
-  - storage.objects.restore
-  - storage.objects.update

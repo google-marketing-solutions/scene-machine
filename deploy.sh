@@ -14,66 +14,206 @@
 # limitations under the License.
 
 # ---------------------------------------------------------------------------
+# deploy.sh — single-image, two-service ("app" + "worker") Scene
+# Machine deployment with NO API Gateway and NO App Engine.
+#
+# Usage:
+#   ./deploy.sh [--auth-mode=iap] [--yes] [--non-interactive]
+#
+#   Configuration comes from ./config.txt. (Any leftover API_GATEWAY* or
+#   APP_ENGINE_REGION entries from older config files are ignored — there is no
+#   API Gateway or App Engine in this topology.) AUTH_MODE may be set via the
+#   environment or the --auth-mode flag (flag wins). Default and only value:
+#   iap (the firebase public sign-in mode was removed).
+#     AUTH_MODE=iap       app service is IAP-gated (--no-allow-unauthenticated
+#                         --iap); UI mode 'iap'.
+#   --yes skips the interactive deployment-target confirmation.
+#   --non-interactive is for headless/agent runs: it implies --yes and makes any
+#   step that needs a human in the console FAIL FAST (printing what to do and to
+#   re-run) instead of waiting. It does NOT short-circuit the automatic
+#   GCP-provisioning waits (default-SA / bucket-link), which resolve on their
+#   own. The IAP arm's post-deploy console steps are printed in the final
+#   summary either way; an agent runs the provisioning, a human finishes those.
+#
+# Topology deployed:
+#   worker  private Cloud Run service (Cloud-Tasks-invoked): ROLE=worker,
+#           cpu=8 / 16G / timeout 1800, runtime SA only invoker.
+#   app     Cloud Run service serving the SPA + same-origin /api control
+#           plane: ROLE=app, AUTH_MODE, WORKER_URL (Cloud Tasks callback
+#           override), cpu=2 / 2Gi / timeout 300.
+#   Both services run the SAME image, built once with `gcloud builds submit`.
+#
+# STATE-SAFETY GUARANTEES (hard requirements for this script):
+#   * never calls `gcloud config set` (no gcloud config mutation);
+#   * REST calls authenticate with an Application Default Credentials (ADC)
+#     token (`gcloud auth application-default print-access-token`). This is
+#     deliberate: under corporate Certificate-Based Access (CBA) the plain
+#     `gcloud auth print-access-token` token is bound to the gcloud CLI client
+#     and is rejected by these REST endpoints with HTTP 401. The ADC token is
+#     read-only here — we only mint it for the Authorization header and never
+#     write/mutate ADC state (`gcloud auth application-default login` is never
+#     run);
+#   * passes --project=$PROJECT on every gcloud/firebase call and
+#     `x-goog-user-project: $PROJECT` on every curl, so it is runnable under
+#     CLOUDSDK_ACTIVE_CONFIG_NAME=<any config> with zero writes to the
+#     user's global gcloud/ADC state.
+#
+# Idempotency: every resource is describe-before-create (or create||update),
+# so re-runs are safe.
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
 # Console output convention
 # ---------------------------------------------------------------------------
 # Lines beginning with "[>]" mark the start of a major deployment phase.
-# If something fails, copy the "[>]" prefix (or the full prefix + echo message)
-# from the terminal and Ctrl+F in this file to jump straight to the matching
-# section in the script.
+# Lines beginning with "[t]" close a phase: the "[t]" line names the phase that
+# just finished, and the indented line below it reports the time of day, how
+# long that phase took, and the total elapsed since the deploy started (h/m/s)
+# — this script's runtime is itself a measured deliverable, so every phase is
+# timed and totals are printed at the end.
+# If something fails, copy the "[>]" prefix (or the full prefix + echo
+# message) from the terminal and Ctrl+F in this file to jump straight to the
+# matching section in the script.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+# Shared, reusable helpers — the IAM-binding retry wrapper, config-file
+# generation, and the tool pre-flight check — live in deploy/libs.sh so they
+# can be reused without copy-paste. Source them before anything below calls
+# add_iam_binding / generate_config / require_tool.
 source "$(dirname "$0")/deploy/libs.sh"
+
+# --- Phase timing ------------------------------------------------------------
+# phase "message": closes the previous phase and opens a new "[>]" banner.
+# close_phase: closes the current phase without opening a new one (used right
+# before totals / manual gates). Each closing "[t]" line names the phase, with
+# the time of day, how long that phase took, and the total elapsed since the
+# deploy started (formatted h/m/s) on the indented line below it.
+CURRENT_PHASE=""
+CURRENT_PHASE_START=0
+
+# Formats a count of seconds as "..h..m..s" (e.g. 754 -> "0h 12m 34s").
+fmt_hms() {
+  local total=$1
+  printf '%dh %02dm %02ds' $((total / 3600)) $(((total % 3600) / 60)) $((total % 60))
+}
+
+# Runs a long, quiet command while printing a heartbeat line every HEARTBEAT_SECS
+# seconds, so the deploy never looks frozen. `gcloud builds submit` goes silent
+# under CLOUD_LOGGING_ONLY (it can't stream the GCS log), so without this the
+# terminal shows nothing for minutes during the image build. Returns the wrapped
+# command's own exit code, so `set -e` still aborts the deploy if the build fails.
+run_with_heartbeat() {
+  local label=$1; shift
+  local hb_secs=${HEARTBEAT_SECS:-20}
+  local start rc=0
+  start=$(date +%s)
+  "$@" &
+  local cmd_pid=$!
+  # Heartbeat in a background subshell: it watches the command's PID and exits
+  # when the command does. cmd_pid/start are inherited from this function scope.
+  (
+    while kill -0 "$cmd_pid" 2>/dev/null; do
+      sleep "$hb_secs"
+      kill -0 "$cmd_pid" 2>/dev/null || break
+      echo "    … ${label} still running ($(fmt_hms $(( $(date +%s) - start ))) elapsed)"
+    done
+  ) &
+  local hb_pid=$!
+  wait "$cmd_pid" || rc=$?
+  kill "$hb_pid" 2>/dev/null || true
+  wait "$hb_pid" 2>/dev/null || true
+  return $rc
+}
+
+# Emits the closing timing line for the current phase: wall-clock time of day,
+# this phase's duration, and the running total since SCRIPT_START (h/m/s).
+_emit_phase_time() {
+  local now total
+  now=$(date +%s)
+  total=$((now - ${SCRIPT_START:-$now}))
+  # Lead with the phase name so the reader sees WHAT just finished before the
+  # numbers; the timing sits on the indented line below it. "[t]" stays the
+  # flush-left grep anchor (like "[>]"). Blank lines float the block clear of
+  # the phase output above and the next "[>]" banner below.
+  echo
+  echo "[t] ${CURRENT_PHASE}"
+  echo "       $(date +%H:%M:%S)  ·  +$((now - CURRENT_PHASE_START))s this phase  ·  $(fmt_hms "$total") total"
+  echo
+}
+
+phase() {
+  [ -n "$CURRENT_PHASE" ] && _emit_phase_time
+  CURRENT_PHASE="$1"
+  CURRENT_PHASE_START=$(date +%s)
+  echo "[>] $1"
+}
+close_phase() {
+  if [ -n "$CURRENT_PHASE" ]; then
+    _emit_phase_time
+    CURRENT_PHASE=""
+  fi
+}
+
+usage() {
+  echo "Usage: $0 [--auth-mode=iap] [--yes] [--non-interactive]"
+  echo "  --auth-mode        front-door auth arm (also via AUTH_MODE env; flag wins)."
+  echo "                     only 'iap' is supported (default: iap)"
+  echo "  --yes, -y          skip the interactive deployment-target confirmation"
+  echo "  --non-interactive  headless/agent run: implies --yes, and fails fast"
+  echo "                     (instead of waiting) on any step needing a human in"
+  echo "                     the console — printing what to do and to re-run."
+  echo
+  echo "  Faster-deploy flags (opt-in; a plain run does the full, safe deploy):"
+  echo "  --app-only         build the image and deploy only the 'app' service,"
+  echo "                     reusing the already-deployed worker. Errors if no"
+  echo "                     worker exists yet."
+  echo "  --skip-ui-build,   reuse the existing ui/dist instead of running npm ci +"
+  echo "  --use-existing-ui-dist   ng build. Errors if ui/dist is missing or was"
+  echo "                     built for local dev (sign-in disabled)."
+  echo "  --no-build-cache   force a clean cold image build (ignore the Docker"
+  echo "                     layer cache); use for a release or dependency refresh."
+}
 
 # ---------------------------------------------------------------------------
 # Main script
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-# Parse arguments
-AUTO_CONFIRM=false
-DEPLOY_BACKEND=false
-DEPLOY_UI=false
-TARGETED=false
-DEPLOY_MODE=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    # Recommended for automated/agentic runs (runs without user interaction)
-    --non-interactive)
-      AUTO_CONFIRM=true
-      shift
-      ;;
-    --backend-only)
-      DEPLOY_BACKEND=true
-      TARGETED=true
-      shift
-      ;;
-    --ui-only)
-      DEPLOY_UI=true
-      TARGETED=true
-      shift
-      ;;
-    local|--local)
-      DEPLOY_MODE="local"
-      shift
-      ;;
-    *)
-      echo "Unknown argument: $1" >&2
-      echo "Usage: $0 [options]" >&2
-      exit 1
-      ;;
+# --- Argument parsing --------------------------------------------------------
+AUTH_MODE="${AUTH_MODE:-iap}"
+ASSUME_YES=0
+NONINTERACTIVE=0
+# Faster-deploy flags. All default OFF: a plain `./deploy.sh` is the full,
+# safe, end-to-end deploy. Each flag only shortcuts work that is safe to skip
+# when the project is already provisioned, and each logs what it skipped.
+APP_ONLY=0
+SKIP_UI_BUILD=0
+NO_BUILD_CACHE=0
+for arg in "$@"; do
+  case "$arg" in
+    --auth-mode=*) AUTH_MODE="${arg#--auth-mode=}" ;;
+    --yes|-y) ASSUME_YES=1 ;;
+    # Headless/agent runs: auto-confirm the target prompt AND fail fast on the
+    # human-in-the-console gates instead of waiting (see the header comment).
+    --non-interactive) NONINTERACTIVE=1; ASSUME_YES=1 ;;
+    --app-only) APP_ONLY=1 ;;
+    --skip-ui-build|--use-existing-ui-dist) SKIP_UI_BUILD=1 ;;
+    --no-build-cache) NO_BUILD_CACHE=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "ERROR: unknown argument '$arg'" >&2; usage >&2; exit 1 ;;
   esac
 done
-
-# If no targeting flags were specified, deploy both backend and UI by default
-if [ "$TARGETED" = "false" ]; then
-  DEPLOY_BACKEND=true
-  DEPLOY_UI=true
+if [ "$AUTH_MODE" != "iap" ]; then
+  echo "ERROR: AUTH_MODE must be 'iap' (the firebase sign-in mode was removed; got '$AUTH_MODE')." >&2
+  exit 1
 fi
 
 echo
 echo "================================================================================"
-echo "  Scene Machine backend deploy — running pre-flight checks first..."
+echo "  Scene Machine FRONT-DOOR deploy (AUTH_MODE=${AUTH_MODE}) — pre-flight checks..."
 echo "================================================================================"
 # --- Pre-flight: required tools and gcloud auth -----------------------------
 # Fail fast if a required command is missing or gcloud isn't authenticated,
@@ -81,13 +221,10 @@ echo "==========================================================================
 echo "[>] Checking required tools..."
 require_tool gcloud   "Install: https://cloud.google.com/sdk/docs/install"
 require_tool firebase "Install: npm i -g firebase-tools"
+require_tool node     "Install Node.js ≥ v22: https://nodejs.org/en/download"
+require_tool npm      "Install Node.js (includes npm): https://nodejs.org/en/download"
 require_tool envsubst "Install gettext (macOS: 'brew install gettext'; Debian/Ubuntu: 'apt-get install gettext')"
-
-if [ "$DEPLOY_UI" = "true" ]; then
-  require_tool node     "Install Node.js ≥ v22: https://nodejs.org/en/download"
-  require_tool npm      "Install Node.js (includes npm): https://nodejs.org/en/download"
-fi
-
+require_tool curl     "Install curl (it ships with macOS and most Linux distributions)"
 if [ $MISSING_TOOLS -gt 0 ]; then
   echo "Please install the missing tools above, then re-run $0."
   exit 1
@@ -95,25 +232,33 @@ fi
 ACTIVE_ACCOUNT=$(gcloud auth list --filter=status:ACTIVE --format="value(account)" 2>/dev/null || true)
 if [ -z "$ACTIVE_ACCOUNT" ]; then
   echo "ERROR: gcloud has no active authenticated account." >&2
-  echo "Run: gcloud auth login && gcloud auth application-default login" >&2
+  echo "Run: gcloud auth login" >&2
   exit 1
 fi
-if ! firebase login:list &>/dev/null; then
-  echo "ERROR: firebase has no active authenticated session." >&2
-  echo "Run: firebase login" >&2
-  exit 1
-fi
-echo "✓ All required tools found."
+echo "✓ All required tools found (gcloud, firebase, node, npm, envsubst, curl)."
 echo "✓ gcloud authenticated as: $ACTIVE_ACCOUNT"
-echo "✓ firebase authenticated."
+
+# Application Default Credentials (ADC) are a SEPARATE login from `gcloud auth
+# login` above. The REST calls later in the deploy (Firebase Storage, Firestore
+# seeding, GCS bucket CORS) authenticate with an ADC token,
+# so verify it now — otherwise the deploy would do much of its provisioning and
+# then abort at the first REST call on a machine that has the CLI login but not
+# ADC. (The original deploy's auth instructions named both logins.)
+if ! gcloud auth application-default print-access-token >/dev/null 2>&1; then
+  echo "ERROR: Application Default Credentials (ADC) are not set up." >&2
+  echo "Run: gcloud auth application-default login" >&2
+  echo "(This is separate from 'gcloud auth login'; the deploy's REST calls need it.)" >&2
+  exit 1
+fi
+echo "✓ Application Default Credentials present."
 
 # --- Check config.txt -------------------------------------------------------
+# Any leftover API_GATEWAY* / APP_ENGINE_REGION entries from older config files
+# are ignored (there is no API Gateway or App Engine in this topology) and NOT
+# required.
 echo
 echo "[>] Checking config.txt..."
 REQUIRED_VARS=(
-  "API_GATEWAY"
-  "API_GATEWAY_REGION"
-  "APP_ENGINE_REGION"
   "ARTIFACT_REPO"
   "BACKEND_SERVICE_NAME"
   "FIRESTORE_DB"
@@ -141,15 +286,29 @@ if [ $MISSING -gt 0 ]; then
   exit 1
 fi
 source ./config.txt
+# Single image name for both Cloud Run services (overridable via env).
+IMAGE_NAME="${IMAGE_NAME:-scene-machine}"
+# App service minimum instances: 0 (default) scales to zero; 1 keeps one
+# instance warm to avoid cold starts. Validate it's an integer (mirrors the
+# config-validation style above) since it goes straight into a gcloud flag.
+APP_MIN_INSTANCES="${APP_MIN_INSTANCES:-0}"
+if ! [[ "$APP_MIN_INSTANCES" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: APP_MIN_INSTANCES must be a non-negative integer (got '$APP_MIN_INSTANCES')." >&2
+  echo "Validation failed. Please fix config.txt and try again." >&2
+  exit 1
+fi
+# Data plane: the backend brokers all project data and media through the app
+# service's /api endpoints (signed URLs), and the deny-all client rules
+# (firestore.rules / storage.rules) are deployed, so the browser never touches
+# Firestore/Storage directly. This is always the case — there is no data-plane
+# mode to choose.
 echo "✓ config.txt is valid. Target project: $PROJECT"
 
 # --- Confirm deployment target ----------------------------------------------
-# Final pre-flight gate. Always shows gcloud's current state alongside
-# config.txt's intended target and prompts the user to confirm. Catches the
-# footgun of forgetting to update either side when switching between
-# deployments. The script proceeds to overwrite gcloud's active project
-# immediately after this, so this is the last point at which a wrong target
-# can be aborted without any GCP mutation having occurred.
+# Final pre-flight gate. Shows gcloud's current state alongside config.txt's
+# intended target. This script NEVER changes gcloud's
+# active project — the display is informational only; every subsequent call
+# carries an explicit --project=$PROJECT.
 CURRENT_GCLOUD_PROJECT=$(gcloud config get-value project 2>/dev/null || true)
 [ -z "$CURRENT_GCLOUD_PROJECT" ] && CURRENT_GCLOUD_PROJECT="(none set)"
 echo
@@ -157,219 +316,153 @@ echo "[>] Confirming deployment target..."
 echo "════════════════════════════════════════════════════════════════════════"
 echo "  DEPLOYMENT TARGET — please confirm"
 echo "════════════════════════════════════════════════════════════════════════"
-echo "  gcloud is currently configured for:"
+echo "  gcloud is currently configured for (informational — NOT modified):"
 echo "    Account:    $ACTIVE_ACCOUNT"
 echo "    Project:    $CURRENT_GCLOUD_PROJECT"
 echo
 echo "  config.txt says deploy to:"
 echo "    Project:    $PROJECT"
 echo "    Region:     $REGION"
-if [ "$CURRENT_GCLOUD_PROJECT" != "$PROJECT" ]; then
-  echo
-  echo "  ⚠ Project mismatch — this script will switch gcloud's active project"
-  echo "    to '$PROJECT' before deploying."
-fi
+echo "    Auth mode:  $AUTH_MODE"
 echo "════════════════════════════════════════════════════════════════════════"
-if [ "$AUTO_CONFIRM" = "true" ]; then
-  echo "Auto-confirming deployment to target project: $PROJECT"
-  confirm="y"
+if [ "$ASSUME_YES" = "1" ]; then
+  echo "✓ Auto-confirming the deployment target (--non-interactive/--yes)."
 else
   if [ ! -t 0 ]; then
-    echo "ERROR: stdin is not a TTY. Run interactively or pass --non-interactive." >&2
+    echo "ERROR: stdin is not a TTY — cannot confirm. Re-run interactively or pass --yes." >&2
     exit 1
   fi
   read -r -p "Proceed and deploy to '$PROJECT'? (y/N) " confirm
   confirm=$(echo "$confirm" | tr '[:upper:]' '[:lower:]')
-fi
-if [ "$confirm" != "y" ] && [ "$confirm" != "yes" ]; then
-  echo "Aborted. To align gcloud with config.txt:" >&2
-  echo "  gcloud config set project $PROJECT" >&2
-  echo "Or update PROJECT in config.txt to match your intended target." >&2
-  exit 1
+  if [ "$confirm" != "y" ] && [ "$confirm" != "yes" ]; then
+    echo "Aborted. Update PROJECT in config.txt to match your intended target." >&2
+    exit 1
+  fi
 fi
 echo "✓ Continuing with project $PROJECT."
 
+# Fail fast if the Firebase CLI isn't ready. The project-link and
+# security-rules steps below use it, and it authenticates SEPARATELY from
+# gcloud (its own `firebase login`). Checking here — before any provisioning —
+# avoids minutes of work that would otherwise abort at the Firebase-link step.
+if ! command -v firebase > /dev/null 2>&1; then
+  echo "ERROR: the Firebase CLI (firebase-tools) is not installed." >&2
+  echo "  Install it, then sign in:" >&2
+  echo "    npm install -g firebase-tools && firebase login" >&2
+  exit 1
+fi
+if [ -z "${FIREBASE_TOKEN:-}" ] && ! firebase login:list 2>/dev/null | grep -q '@'; then
+  echo "ERROR: the Firebase CLI is not logged in." >&2
+  echo "  Run 'firebase login' (or 'firebase login --reauth' if your session" >&2
+  echo "  expired), then re-run $0. The deploy uses the Firebase CLI to link the" >&2
+  echo "  project and deploy the security rules; it signs in separately from gcloud." >&2
+  exit 1
+fi
+echo "✓ Firebase CLI is installed and signed in."
+
 echo
 echo "════════════════════════════════════════════════════════════════════════"
-echo "  Starting Scene Machine backend deployment (estimated runtime ≈15 minutes)..."
+echo "  Starting Scene Machine front-door deployment (AUTH_MODE=${AUTH_MODE})..."
 echo "════════════════════════════════════════════════════════════════════════"
 
-echo "[>] Setting active project to $PROJECT"
-gcloud config set project $PROJECT > /dev/null
-echo
-echo "[>] Setting ADC quota project to $PROJECT"
-gcloud auth application-default set-quota-project $PROJECT > /dev/null || echo "  WARNING: Failed to set ADC quota project. This is usually non-fatal. Continuing..."
+# The wall-clock measurement starts AFTER the interactive confirmation, so
+# human think-time at the prompt doesn't pollute the timing deliverable.
+SCRIPT_START=$(date +%s)
 
-# Initialize enabled services cache
-echo "[>] Fetching list of enabled Google Cloud APIs..."
-ENABLED_APIS=$(gcloud services list --enabled --project="$PROJECT" --format="value(config.name)" 2>/dev/null || true)
-
-is_service_enabled() {
-  local service="$1"
-  if [ -n "$ENABLED_APIS" ]; then
-    echo "$ENABLED_APIS" | grep -q "^${service}$"
-  else
-    return 1
-  fi
-}
-
-if [ "$DEPLOY_BACKEND" = "true" ]; then
-  echo
-  echo "════════════════════════════════════════════════════════════════════════"
-  echo "  Starting Scene Machine backend deployment (estimated runtime ≈15 minutes)..."
-  echo "════════════════════════════════════════════════════════════════════════"
-
-# Enable services
+# --- Enable services ---------------------------------------------------------
 # Note: compute.googleapis.com is enabled here so the default Compute Engine
-# service account (used for role bindings below) is guaranteed to exist. Most
-# projects already have it enabled transitively; this handles fresh projects.
-echo
-echo "[>] Checking required Google Cloud APIs..."
-REQUIRED_APIS=(
-  "aiplatform.googleapis.com"
-  "apigateway.googleapis.com"
-  "appengine.googleapis.com"
-  "artifactregistry.googleapis.com"
-  "cloudbuild.googleapis.com"
-  "cloudtasks.googleapis.com"
-  "compute.googleapis.com"
-  "firestore.googleapis.com"
-  "iap.googleapis.com"
-  "run.googleapis.com"
-  "servicecontrol.googleapis.com"
-)
-APIS_TO_ENABLE=()
-for api in "${REQUIRED_APIS[@]}"; do
-  if ! is_service_enabled "$api"; then
-    APIS_TO_ENABLE+=("$api")
+# service account (used for role bindings below) is guaranteed to exist.
+# firebase.googleapis.com is enabled up front; linking the project to Firebase
+# (firebase projects:addfirebase) is handled idempotently later, just before the
+# Firebase Web App setup. NO apigateway / servicecontrol (no API Gateway in this
+# topology); iap.googleapis.com for the IAP front door.
+phase "Enabling required Google Cloud APIs..."
+REQUIRED_APIS="aiplatform.googleapis.com artifactregistry.googleapis.com \
+cloudbuild.googleapis.com cloudtasks.googleapis.com compute.googleapis.com \
+firestore.googleapis.com run.googleapis.com firebase.googleapis.com \
+firebasestorage.googleapis.com firebaserules.googleapis.com \
+iap.googleapis.com"
+
+# Only enable the APIs that aren't on yet, so a re-run on an already-provisioned
+# project skips the slow `services enable` round-trips. If the enabled-list read
+# fails for any reason, ENABLED_APIS is empty and every required API falls into
+# TO_ENABLE, i.e. we enable all of them (the original behavior). We never want to
+# under-enable, so an unreadable list errs toward enabling everything.
+ENABLED_APIS=$(gcloud services list --enabled --project=$PROJECT \
+  --format="value(config.name)" 2>/dev/null || true)
+TO_ENABLE=""
+total=0
+already=0
+for api in $REQUIRED_APIS; do
+  total=$((total + 1))
+  if printf '%s\n' "$ENABLED_APIS" | grep -Fxq "$api"; then
+    already=$((already + 1))
+  else
+    TO_ENABLE="$TO_ENABLE $api"
   fi
 done
-
-if [ ${#APIS_TO_ENABLE[@]} -gt 0 ]; then
-  echo "Enabling missing APIs: ${APIS_TO_ENABLE[*]} (may take 30-60s)..."
-  gcloud services enable "${APIS_TO_ENABLE[@]}" --project="$PROJECT" > /dev/null
-  # Refresh cache
-  ENABLED_APIS=$(gcloud services list --enabled --project="$PROJECT" --format="value(config.name)" 2>/dev/null || true)
+echo "  ${already} of ${total} required APIs already enabled."
+if [ -n "${TO_ENABLE// /}" ]; then
+  # List each API being enabled so the run can be followed in the console.
+  count=0
+  for api in $TO_ENABLE; do
+    echo "  - enabling ${api}"
+    count=$((count + 1))
+  done
+  gcloud services enable $TO_ENABLE --project=$PROJECT > /dev/null
+  echo "  ✓ Enabled ${count} API(s)."
 else
-  echo "✓ All required Google Cloud APIs are already enabled."
+  echo "  ✓ All required APIs already enabled, nothing to do."
 fi
 
 # Warm up Vertex AI service agent. On a fresh project, the agent
 # (service-<PROJECT_NUMBER>@gcp-sa-aiplatform.iam.gserviceaccount.com) is
 # created lazily on first API use, and its auto-granted Storage Object access
-# takes ~5-15 min to propagate. Without this, the user's first Veo generation
+# needs time to propagate. Without this, the user's first Veo generation
 # fails with "Service agents are being provisioned." Triggering identity
 # creation now starts the propagation window during the rest of the deploy.
 #
 # `services identity create` is still on the `beta` surface today; try the GA
 # path first so we survive its eventual promotion (the beta command will be
 # removed at some point and would silently fail on a future toolchain).
-echo
-echo "[>] Provisioning Vertex AI service agent..."
+phase "Provisioning service agents (Vertex AI + IAP)..."
 gcloud services identity create --service=aiplatform.googleapis.com --project=$PROJECT 2>/dev/null \
   || gcloud beta services identity create --service=aiplatform.googleapis.com --project=$PROJECT
+# The IAP service agent (service-<PROJECT_NUMBER>@gcp-sa-iap.iam.
+# gserviceaccount.com) must exist so we can grant it run.invoker on the app
+# service after deploy (Cloud Run built-in IAP requirement).
+gcloud services identity create --service=iap.googleapis.com --project=$PROJECT 2>/dev/null \
+  || gcloud beta services identity create --service=iap.googleapis.com --project=$PROJECT
 
-# Create databases
-echo
-echo "[>] Setting up GCS bucket and Firestore databases..."
-if ! gcloud storage buckets describe "gs://$GCS_BUCKET" &> /dev/null; then
-    gcloud storage buckets create "gs://$GCS_BUCKET" --project=$PROJECT --location="$REGION"
-else
-    echo "Bucket gs://$GCS_BUCKET already exists in the following location:"
-    gcloud storage buckets describe "gs://$GCS_BUCKET" --format="value(location)"
-fi
-if ! gcloud firestore databases describe --database="$FIRESTORE_DB" --project=$PROJECT &> /dev/null; then
-    echo "Creating Firestore database: $FIRESTORE_DB"
-    gcloud firestore databases create --database="$FIRESTORE_DB" --project=$PROJECT --location="$REGION"
-else
-    echo "Firestore database $FIRESTORE_DB already exists in the following location:"
-    gcloud firestore databases describe --database="$FIRESTORE_DB" --project=$PROJECT --format="value(locationId)"
-fi
-if ! gcloud firestore databases describe --database="$FIRESTORE_DB_UI" --project=$PROJECT &> /dev/null; then
-    echo "Creating Firestore database: $FIRESTORE_DB_UI"
-    gcloud firestore databases create --database="$FIRESTORE_DB_UI" --project=$PROJECT --location="$REGION"
-else
-    echo "Firestore database $FIRESTORE_DB_UI already exists in the following location:"
-    gcloud firestore databases describe --database="$FIRESTORE_DB_UI" --project=$PROJECT --format="value(locationId)"
-fi
-
-echo
-echo "[>] Setting up Firebase project and Web App..."
-if ! is_service_enabled "firebase.googleapis.com"; then
-  echo "Enabling Firebase Management API..."
-  gcloud services enable firebase.googleapis.com --project=$PROJECT
-  # Refresh cache
-  ENABLED_APIS=$(gcloud services list --enabled --project="$PROJECT" --format="value(config.name)" 2>/dev/null || true)
-fi
-
-if firebase apps:list --project "$PROJECT" &>/dev/null; then
-  echo "Firebase is already linked/enabled for project $PROJECT."
-else
-  echo "Linking Firebase to GCP project $PROJECT..."
-  firebase projects:addfirebase $PROJECT
-fi
-
-if firebase apps:list --project $PROJECT | grep "$PROJECT" | grep -q "WEB"; then
-  echo "Firebase App already exists. Skipping."
-else
-  echo "Firebase App doesn't exist. Creating it (Estimated time: ≈1 minute)..."
-  firebase --project $PROJECT apps:create WEB $PROJECT
-fi
-
-# Deploy rules for Backend Firestore DB
-export CURRENT_FIRESTORE_DB=$FIRESTORE_DB
-envsubst < ./firebase/firebase.template.json > ./firebase/firebase.json
-envsubst < ./firebase/.firebaserc.template > ./firebase/.firebaserc
-firebase target:apply --config firebase/firebase.json storage bucket_target $GCS_BUCKET --project $PROJECT
-
-echo
-echo "[>] Deploying rules for Backend Firestore DB..."
-firebase deploy --config firebase/firebase.json --only firestore --project $PROJECT
-
-rm firebase/firebase.json
-rm firebase/.firebaserc
-
-FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
-if [ -z "$FIREBASE_API_KEY" ]; then
-  echo "ERROR: Failed to extract Firebase API key from 'firebase apps:sdkconfig WEB'. Check that the Firebase Web app exists in project $PROJECT." >&2
-  exit 1
-fi
-export FIREBASE_API_KEY
-
-echo
-echo "[>] Setting up App Engine app..."
-if ! gcloud app describe --project=$PROJECT &> /dev/null; then
-  echo "App Engine app doesn't exist. Creating it (Estimated time: ≈3 minutes)..."
-  gcloud app create --region $APP_ENGINE_REGION --project $PROJECT
-else
-  echo "App Engine app already exists. Skipping."
-fi
-
-if [ -n "${CUSTOM_DOMAIN:-}" ]; then
-  export UI_HOST="${CUSTOM_DOMAIN}"
-  echo "✓ Using custom domain: ${UI_HOST}"
-else
-  export UI_HOST=$(gcloud app describe --project=$PROJECT --format="value(defaultHostname)")
-fi
-
-# Identify service account and assign required permissions BEFORE deployment
+# --- Derived values ----------------------------------------------------------
+phase "Resolving project number and runtime service account..."
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT --format="value(projectNumber)")
-SERVICE_ACCOUNT="$PROJECT_NUMBER-compute@developer.gserviceaccount.com"
+# Keep the proven default-compute-SA choice — it is also the default Cloud
+# Build SA on fresh projects, so one SA covers build + runtime with the
+# existing role list.
+RUNTIME_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${ARTIFACT_REPO}/${IMAGE_NAME}:latest"
+# The IAP audience is the app service's RESOURCE path (project number + region +
+# service name) — deterministic and known before the service exists. We do NOT
+# predict the Cloud Run URL/host: it's only assigned at deploy time, its form
+# isn't predictable, and nothing needs it at build time (the front door is
+# same-origin). The real host is read from status.url after the app deploy for
+# the one thing that genuinely needs it: the GCS bucket CORS list. The deploy
+# does NOT touch the Firebase authorized-domains list (IAP gates the app, so
+# that list is irrelevant) - see issue #102, which the old deploy-ui.sh wiped.
+IAP_AUDIENCE="/projects/${PROJECT_NUMBER}/locations/${REGION}/services/app"
+echo "  Project number: ${PROJECT_NUMBER}"
+echo "  Runtime SA:     ${RUNTIME_SA}"
+echo "  Image:          ${IMAGE}"
+
 # The default Compute Engine SA is created when compute.googleapis.com is
-# enabled (above), but its propagation can take 30-60s on fresh projects.
+# enabled (above), but its propagation isn't instant on fresh projects.
 # Wait for it to exist before attempting role bindings below, rather than
 # failing inside the loop with a confusing "service account not found" error.
-echo
-echo "[>] Waiting for default Compute Engine service account to exist..."
+phase "Waiting for default Compute Engine service account to exist..."
 SA_WAIT_ATTEMPTS=0
 SA_WAIT_MAX=120   # 120 × 5s = 10 min total
-until gcloud iam service-accounts describe "${SERVICE_ACCOUNT}" --project=$PROJECT &> /dev/null; do
-  if [ "$AUTO_CONFIRM" = "true" ]; then
-    echo "ERROR: default Compute Engine SA does not exist. Polling is disabled in non-interactive mode." >&2
-    echo "Try enabling Compute Engine API manually, then re-run $0:" >&2
-    echo "  gcloud services enable compute.googleapis.com --project=$PROJECT" >&2
-    exit 1
-  fi
+until gcloud iam service-accounts describe "${RUNTIME_SA}" --project=$PROJECT &> /dev/null; do
   SA_WAIT_ATTEMPTS=$((SA_WAIT_ATTEMPTS + 1))
   if [ $SA_WAIT_ATTEMPTS -ge $SA_WAIT_MAX ]; then
     echo "ERROR: default Compute Engine SA did not appear after 10 minutes." >&2
@@ -379,59 +472,81 @@ until gcloud iam service-accounts describe "${SERVICE_ACCOUNT}" --project=$PROJE
   fi
   sleep 5
 done
-echo "✓ Service account ${SERVICE_ACCOUNT} ready."
+echo "✓ Service account ${RUNTIME_SA} ready."
 
+# --- IAM: runtime SA roles + service agents ----------------------------------
+# Least privilege: only project-wide roles the runtime genuinely needs at
+# project scope are listed here. The SA's self-impersonation rights
+# (serviceAccountTokenCreator for signing GCS URLs, serviceAccountUser for
+# setting itself as the Cloud Tasks OIDC SA) are granted on the SA's OWN
+# resource below, NOT project-wide, so a compromised app can only act as
+# itself. run.invoker is granted service-scoped on the worker only (later),
+# not project-wide. artifactregistry.writer is build-time: the image build runs
+# as this same compute-default SA (gcloud builds submit), so it stays for now;
+# a dedicated build SA would let it move off the runtime identity entirely.
 ROLES=(
   "roles/datastore.user"
   "roles/aiplatform.user"
-  "roles/iam.serviceAccountTokenCreator"
-  "roles/run.invoker"
   "roles/cloudtasks.enqueuer"
   "roles/storage.objectUser"
   "roles/artifactregistry.writer"
   "roles/logging.logWriter"
-  "roles/iam.serviceAccountUser"
 )
-echo
-echo "[>] Granting ${#ROLES[@]} roles to $SERVICE_ACCOUNT..."
+phase "Granting ${#ROLES[@]} roles to ${RUNTIME_SA}..."
 for ROLE in "${ROLES[@]}"; do
   echo "  - $ROLE"
-  add_iam_binding $PROJECT --member="serviceAccount:${SERVICE_ACCOUNT}" --role="$ROLE" --condition=None
+  add_iam_binding $PROJECT --member="serviceAccount:${RUNTIME_SA}" --role="$ROLE" --condition=None
 done
 echo "✓ Roles granted."
 
 # Explicitly grant the Vertex AI service agent storage access. The agent is
-# auto-granted this on first use but propagation lags by ~5-15 min; binding it
+# auto-granted this on first use but propagation lags; binding it
 # now eliminates the first-Veo-generation "Service agents are being
-# provisioned" failure (see DEPLOY_NOTES.md issue #6).
+# provisioned" failure.
 AIPLATFORM_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com"
 echo
-echo "[>] Granting roles/storage.objectUser to Vertex AI service agent..."
+echo "Granting roles/storage.objectUser to Vertex AI service agent..."
 add_iam_binding $PROJECT --member="serviceAccount:${AIPLATFORM_SA}" --role="roles/storage.objectUser" --condition=None
 
-# Deploy backend (Cloud Run)
-COMMIT_DATE=$(git log -1 --format=%cI)
-GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-echo "${GIT_BRANCH}/${COMMIT_DATE}" > deployed_version.txt
-sync
-if ! gcloud artifacts repositories describe "${ARTIFACT_REPO}" --project=$PROJECT --location="$REGION" &> /dev/null; then
-  echo "Creating artifact repository: $ARTIFACT_REPO"
-  gcloud artifacts repositories create "${ARTIFACT_REPO}" --repository-format=docker --project=$PROJECT --location="$REGION"
-fi
-
-# Write config.json since backend needs part of it
-generate_config
-
+# Cloud Build runs as the Compute Engine default service account; the image
+# build's CLOUD_LOGGING_ONLY mode (cloudbuild.yaml) needs it to hold
+# logging.logWriter to write build logs to Cloud Logging. Grant it HERE, early —
+# the binding then has minutes to propagate before the build runs (after the UI
+# build); granting it right before the build risks the build starting first.
+CLOUD_BUILD_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 echo
-echo "[>] Deploying backend to Cloud Run (Estimated time: ~5 minutes)..."
-gcloud run deploy "$BACKEND_SERVICE_NAME" --source . --image $REGION-docker.pkg.dev/$PROJECT/$ARTIFACT_REPO/$BACKEND_SERVICE_NAME:latest --region $REGION --project $PROJECT --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated
-if [ -z "${CLOUD_RUN_URL:-}" ]; then
-  export CLOUD_RUN_URL=$(gcloud run services describe "$BACKEND_SERVICE_NAME" --region=$REGION --project=$PROJECT --format='value(status.url)')
-fi
+echo "Granting roles/logging.logWriter to the Cloud Build service account..."
+add_iam_binding $PROJECT --member="serviceAccount:${CLOUD_BUILD_SA}" --role="roles/logging.logWriter" --condition=None
 
-# Ensure queues
+# Cloud Tasks service agent: project-level serviceAgent role, plus the
+# SA-resource-level tokenCreator binding that lets the Tasks agent mint OIDC
+# tokens AS the runtime SA (required for the private worker invocations).
+CLOUD_TASKS_ACCOUNT="service-${PROJECT_NUMBER}@gcp-sa-cloudtasks.iam.gserviceaccount.com"
 echo
-echo "[>] Setting up Cloud Tasks queues..."
+echo "Granting Cloud Tasks service agent permissions..."
+add_iam_binding "${PROJECT}" --member="serviceAccount:${CLOUD_TASKS_ACCOUNT}" --role="roles/cloudtasks.serviceAgent" --condition=None
+gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
+  --member="serviceAccount:${CLOUD_TASKS_ACCOUNT}" \
+  --role="roles/iam.serviceAccountTokenCreator" --project=$PROJECT --quiet > /dev/null
+
+# Runtime SA self-impersonation, scoped to its OWN resource (not project-wide):
+#   - serviceAccountTokenCreator (self): lets the app sign GCS URLs as itself
+#     (the IAM signBlob path, no exported key).
+#   - serviceAccountUser (self): lets the app set itself as the OIDC service
+#     account on the Cloud Tasks it creates for the worker.
+# Scoping to the SA means a compromised app can only act as itself, never mint
+# tokens for or impersonate other service accounts in the project.
+echo
+echo "Granting the runtime SA self-impersonation (signBlob + Cloud Tasks OIDC)..."
+gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
+  --member="serviceAccount:${RUNTIME_SA}" \
+  --role="roles/iam.serviceAccountTokenCreator" --project=$PROJECT --quiet > /dev/null
+gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
+  --member="serviceAccount:${RUNTIME_SA}" \
+  --role="roles/iam.serviceAccountUser" --project=$PROJECT --quiet > /dev/null
+
+# --- Cloud Tasks queues -------------------------------------------------------
+phase "Setting up Cloud Tasks queues..."
 QUEUES=("Other" "Gemini" "Veo")
 for QUEUE_SUFFIX in "${QUEUES[@]}"; do
   QUEUE_NAME="${TASKS_QUEUE_PREFIX}${QUEUE_SUFFIX}"
@@ -465,406 +580,542 @@ for QUEUE_SUFFIX in "${QUEUES[@]}"; do
     --max-doublings=3 \
     --project="$PROJECT"
 done
+echo "  ✓ ${#QUEUES[@]} Cloud Tasks queues ready (${QUEUES[*]/#/${TASKS_QUEUE_PREFIX}})."
 
-# Apply IAM bindings for the Cloud Tasks service agent.
-CLOUD_TASKS_ACCOUNT="service-${PROJECT_NUMBER}@gcp-sa-cloudtasks.iam.gserviceaccount.com"
-echo
-echo "[>] Granting Cloud Tasks service agent permissions..."
-add_iam_binding "${PROJECT}" --member="serviceAccount:${CLOUD_TASKS_ACCOUNT}" --role="roles/cloudtasks.serviceAgent" --condition=None
-gcloud iam service-accounts add-iam-policy-binding "${SERVICE_ACCOUNT}" --member="serviceAccount:${CLOUD_TASKS_ACCOUNT}" --role="roles/iam.serviceAccountTokenCreator" --quiet > /dev/null
-
-echo
-echo "[>] Provisioning API Gateway and routing infrastructure (Estimated time: ≈10 minutes)..."
-if ! gcloud api-gateway apis describe scenemachine-api --project=$PROJECT --format="value(managed_service)" &> /dev/null; then
-  echo "API doesn't exist. Creating it..."
-  gcloud api-gateway apis create scenemachine-api --project=$PROJECT
+# --- GCS bucket ---------------------------------------------------------------
+phase "Setting up GCS bucket..."
+if ! gcloud storage buckets describe "gs://$GCS_BUCKET" --project=$PROJECT &> /dev/null; then
+    echo "Creating GCS bucket gs://$GCS_BUCKET in ${REGION}..."
+    gcloud storage buckets create "gs://$GCS_BUCKET" --project=$PROJECT --location="$REGION"
+    echo "  ✓ Bucket gs://$GCS_BUCKET created."
 else
-  echo "API already exists. Skipping."
+    echo "Bucket gs://$GCS_BUCKET already exists in the following location:"
+    gcloud storage buckets describe "gs://$GCS_BUCKET" --project=$PROJECT --format="value(location)"
 fi
 
-export API_MANAGED_SERVICE_HOST=$(gcloud api-gateway apis describe scenemachine-api --project=$PROJECT --format="value(managed_service)")
-envsubst < ./apispec.template.yaml > ./apispec.yaml
-
-if ! gcloud api-gateway api-configs describe scenemachine-api-config --api=scenemachine-api --project=$PROJECT &> /dev/null; then
-  echo "API Configuration doesn't exist. Creating it..."
-  gcloud api-gateway api-configs create scenemachine-api-config --api=scenemachine-api --openapi-spec=./apispec.yaml --project=$PROJECT
+# --- Firestore databases (two) -------------------------------------------------
+phase "Setting up Firestore databases..."
+if ! gcloud firestore databases describe --database="$FIRESTORE_DB" --project=$PROJECT &> /dev/null; then
+    echo "Creating Firestore database: $FIRESTORE_DB"
+    gcloud firestore databases create --database="$FIRESTORE_DB" --project=$PROJECT --location="$REGION"
 else
-  echo "API Configuration already exists. Skipping."
+    echo "Firestore database $FIRESTORE_DB already exists in the following location:"
+    gcloud firestore databases describe --database="$FIRESTORE_DB" --project=$PROJECT --format="value(locationId)"
+fi
+if ! gcloud firestore databases describe --database="$FIRESTORE_DB_UI" --project=$PROJECT &> /dev/null; then
+    echo "Creating Firestore database: $FIRESTORE_DB_UI"
+    gcloud firestore databases create --database="$FIRESTORE_DB_UI" --project=$PROJECT --location="$REGION"
+else
+    echo "Firestore database $FIRESTORE_DB_UI already exists in the following location:"
+    gcloud firestore databases describe --database="$FIRESTORE_DB_UI" --project=$PROJECT --format="value(locationId)"
 fi
 
-if ! gcloud api-gateway gateways describe scenemachine-api-gateway --project=$PROJECT --location=$API_GATEWAY_REGION --format="value(defaultHostname)" &> /dev/null; then
-  echo "API Gateway doesn't exist. Creating it..."
-  gcloud api-gateway gateways create scenemachine-api-gateway --api=scenemachine-api --api-config=scenemachine-api-config --location=$API_GATEWAY_REGION --project=$PROJECT
+# --- Ensure the project is linked to Firebase --------------------------------
+# A fresh Google Cloud project is NOT automatically a Firebase project, so the
+# Firebase Web App step below would fail with "Firebase project <num> not
+# found. (HTTP 404)". The app needs the Firebase Web config so the browser can
+# initialize the Firebase SDK and hold a backend-minted custom-token session
+# (the data plane itself is mediated through the app backend). Decide whether
+# the project is ALREADY linked
+# WITHOUT parsing addfirebase's output: the Firebase CLI only prints a generic
+# error and buries the detail in firebase-debug.log (DEPLOYMENT-ISSUES.md issue
+# G), so a string match on its message is unreliable. Two independent positive
+# signals — either one means "already linked, skip addfirebase":
+#   1. firebase projects:list (CLI, already authenticated)
+#   2. the Firebase Management API GET (ADC token, CBA-safe)
+firebase_project_linked() {
+  # Match the Project ID column EXACTLY, not as a loose substring. The CLI prints
+  # a bordered table whose columns are split by '│'; `grep -w` is wrong because a
+  # hyphen counts as a word boundary, so id "my-proj" would also match a row for
+  # an unrelated "my-proj-staging" the account can see — skipping the link, after
+  # which a later step 404s. awk over the '│'-delimited fields, trimming spaces,
+  # and compare each field for an exact equality with $PROJECT instead.
+  if firebase projects:list 2>/dev/null \
+       | awk -F '│' -v p="$PROJECT" '
+           { for (i=1; i<=NF; i++) { f=$i; gsub(/^[[:space:]]+|[[:space:]]+$/, "", f); if (f==p) { found=1; exit } } }
+           END { exit found ? 0 : 1 }'; then
+    return 0
+  fi
+  local status
+  status=$(curl -s -o /dev/null -w '%{http_code}' \
+    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+    -H "x-goog-user-project: ${PROJECT}" \
+    "https://firebase.googleapis.com/v1beta1/projects/${PROJECT}" 2>/dev/null || echo "000")
+  [ "$status" = "200" ]
+}
+phase "Ensuring project ${PROJECT} is linked to Firebase..."
+if firebase_project_linked; then
+  echo "✓ Project ${PROJECT} is already a Firebase project — skipping link."
+elif firebase projects:addfirebase "$PROJECT"; then
+  echo "✓ Project ${PROJECT} linked to Firebase."
+elif firebase_project_linked; then
+  # addfirebase exited non-zero but the project IS linked now — a benign
+  # already-linked/race, not a real failure (its on-screen error is generic).
+  echo "✓ Project ${PROJECT} is already a Firebase project."
 else
-  echo "API Gateway already exists. Skipping."
-fi
-
-if is_service_enabled "$API_MANAGED_SERVICE_HOST"; then
-  echo "API Managed Service Host $API_MANAGED_SERVICE_HOST is already enabled."
-else
-  echo "Enabling API Managed Service Host..."
-  gcloud services enable $API_MANAGED_SERVICE_HOST --project=$PROJECT
-  ENABLED_APIS=$(gcloud services list --enabled --project="$PROJECT" --format="value(config.name)" 2>/dev/null || true)
-fi
-
-#TODO: add --allowed-referrers
-API_UID=$(gcloud services api-keys list --filter="displayName='Scene Machine API Key'" --format="value(uid)" --project=$PROJECT)
-if [ -z "$API_UID" ]; then
-  echo "API Key doesn't exist. Creating it..."
-  gcloud services api-keys create --display-name="Scene Machine API Key" --api-target=service=$API_MANAGED_SERVICE_HOST --project=$PROJECT
-  # Fetch the UID again after creation
-  API_UID=$(gcloud services api-keys list --filter="displayName='Scene Machine API Key'" --format="value(uid)" --project=$PROJECT)
-else
-  echo "API Key already exists. Skipping."
-fi
-
-if [ -n "$API_UID" ]; then
-  export API_KEY=$(gcloud services api-keys get-key-string $API_UID --project=$PROJECT --format="value(keyString)")
-else
-  echo "ERROR: Failed to retrieve API Key UID." >&2
+  echo "ERROR: linking ${PROJECT} to Firebase failed (see firebase-debug.log)." >&2
   exit 1
 fi
-export API_GATEWAY_HOST=$(gcloud api-gateway gateways describe scenemachine-api-gateway --project=$PROJECT --location=$API_GATEWAY_REGION --format="value(defaultHostname)")
 
-# Write config.json again, now with all values needed for UI
+# --- Firebase Storage: initialize + link the project bucket via API ---------
+# Replaces what used to be TWO manual Firebase-console steps (the "Get
+# Started" wizard and "Import existing GCS buckets") with their public-API
+# equivalents; both are idempotent (re-running on an already-set-up project
+# is a clean no-op):
+#   (a) POST projects/{p}/defaultBucket — creates the project's *default*
+#       Firebase Storage bucket (<project>.firebasestorage.app). Required by
+#       `firebase deploy --only storage` further below; without it that
+#       command fails with "Firebase Storage has not been set up on project".
+#   (b) POST buckets/{b}:addFirebase — registers ${GCS_BUCKET} with Firebase
+#       Storage so it can be the deploy target.
+# The `firebase` CLI has no equivalent commands, so we hit the REST API
+# directly. A short verify loop at the end absorbs propagation delay.
+# NOTE: this authenticates with an Application Default Credentials (ADC) token
+# (`gcloud auth application-default print-access-token`) because under
+# corporate Certificate-Based Access (CBA) the plain `gcloud auth
+# print-access-token` token is bound to the gcloud client and is rejected by
+# these REST endpoints with HTTP 401. Every call still carries
+# `x-goog-user-project: $PROJECT`, so the project (not ADC quota state) is
+# billed for the request.
+phase "Ensuring Firebase Storage is initialized and ${GCS_BUCKET} is linked..."
+DEFAULT_BUCKET_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  "https://firebasestorage.googleapis.com/v1beta/projects/${PROJECT}/defaultBucket")
+if [ "$DEFAULT_BUCKET_STATUS" = "200" ]; then
+  echo "✓ Firebase Storage default bucket already exists."
+else
+  echo "Creating Firebase Storage default bucket in ${REGION} (replaces the console 'Get Started' wizard)..."
+  CREATE_BODY=$(curl -s -X POST \
+    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+    -H "x-goog-user-project: ${PROJECT}" \
+    -H "Content-Type: application/json" \
+    -d "{\"location\": \"${REGION}\"}" \
+    "https://firebasestorage.googleapis.com/v1beta/projects/${PROJECT}/defaultBucket")
+  if echo "$CREATE_BODY" | grep -q '"error"'; then
+    echo "ERROR: creating the Firebase Storage default bucket failed:" >&2
+    echo "$CREATE_BODY" >&2
+    echo "Create it manually (console 'Get Started' wizard), then re-run $0:" >&2
+    echo "  https://console.firebase.google.com/project/${PROJECT}/storage" >&2
+    exit 1
+  fi
+  echo "✓ Default bucket created."
+fi
+
+LINK_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  "https://firebasestorage.googleapis.com/v1beta/projects/${PROJECT}/buckets/${GCS_BUCKET}")
+if [ "$LINK_STATUS" = "200" ]; then
+  echo "✓ Bucket ${GCS_BUCKET} is already linked to Firebase Storage."
+else
+  echo "Linking ${GCS_BUCKET} to Firebase Storage (replaces the console 'Import existing GCS buckets' step)..."
+  LINK_BODY=$(curl -s -X POST \
+    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+    -H "x-goog-user-project: ${PROJECT}" \
+    -H "Content-Type: application/json" \
+    -d '{}' \
+    "https://firebasestorage.googleapis.com/v1beta/projects/${PROJECT}/buckets/${GCS_BUCKET}:addFirebase")
+  if echo "$LINK_BODY" | grep -q '"error"'; then
+    echo "ERROR: linking ${GCS_BUCKET} to Firebase Storage failed:" >&2
+    echo "$LINK_BODY" >&2
+    echo "Link it manually (console '+ Add bucket' → 'Import existing Google" >&2
+    echo "Cloud Storage buckets'), then re-run $0:" >&2
+    echo "  https://console.firebase.google.com/project/${PROJECT}/storage" >&2
+    exit 1
+  fi
+fi
+
+# Verify the link is visible before the storage rules deploy relies on it.
+BUCKET_WAIT_ATTEMPTS=0
+BUCKET_WAIT_MAX=20   # 20 × 3s = 60s total
+while true; do
+  HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+    -H "x-goog-user-project: ${PROJECT}" \
+    "https://firebasestorage.googleapis.com/v1beta/projects/${PROJECT}/buckets/${GCS_BUCKET}")
+  if [ "$HTTP_STATUS" = "200" ]; then
+    echo "✓ Bucket ${GCS_BUCKET} is linked to Firebase Storage."
+    break
+  fi
+  BUCKET_WAIT_ATTEMPTS=$((BUCKET_WAIT_ATTEMPTS + 1))
+  if [ $BUCKET_WAIT_ATTEMPTS -ge $BUCKET_WAIT_MAX ]; then
+    echo "ERROR: bucket ${GCS_BUCKET} still not linked after 60s — aborting." >&2
+    echo "Check the Firebase Storage page, then re-run $0:" >&2
+    echo "  https://console.firebase.google.com/project/${PROJECT}/storage" >&2
+    exit 1
+  fi
+  echo "Waiting for bucket link to propagate (attempt ${BUCKET_WAIT_ATTEMPTS}/${BUCKET_WAIT_MAX})..."
+  sleep 3
+done
+
+# --- Firestore + Storage rules for BOTH databases ------------------------------
+# Render mechanics: envsubst the firebase templates with CURRENT_FIRESTORE_DB,
+# target-apply the storage bucket, deploy, then remove the generated files. The
+# deployed rules (firestore.rules / storage.rules) are the deny-all client
+# variants: under the mediated data plane the browser never reads or writes
+# Firestore/Storage directly.
+phase "Deploying Firestore rules for Backend DB (${FIRESTORE_DB})..."
+(
+  cd firebase
+  export CURRENT_FIRESTORE_DB=$FIRESTORE_DB
+  envsubst < ./firebase.template.json > ./firebase.json
+  envsubst < ./.firebaserc.template > ./.firebaserc
+  firebase target:apply storage bucket_target $GCS_BUCKET --project $PROJECT
+  firebase deploy --config ./firebase.json --only firestore --project $PROJECT
+)
+rm firebase/firebase.json
+rm firebase/.firebaserc
+
+phase "Deploying Firestore + Storage rules for UI DB (${FIRESTORE_DB_UI})..."
+(
+  cd firebase
+  export CURRENT_FIRESTORE_DB=$FIRESTORE_DB_UI
+  envsubst < ./firebase.template.json > ./firebase.json
+  envsubst < ./.firebaserc.template > ./.firebaserc
+  firebase target:apply storage bucket_target $GCS_BUCKET --project $PROJECT
+
+  echo "Deploying rules for UI Firestore DB..."
+  firebase deploy --config ./firebase.json --only firestore --project $PROJECT
+
+  echo "Deploying Storage rules..."
+  firebase deploy --config ./firebase.json --only storage:bucket_target --project $PROJECT
+)
+rm firebase/firebase.json
+rm firebase/.firebaserc
+
+# --- Render UI env + config (must precede the single image build) -------------
+# Order matters: these artifacts are baked into the image (Dockerfile
+# `COPY . .`), so they must exist before `gcloud builds submit`.
+phase "Rendering ui/src/env.ts and ui/definitions/config.json..."
+# IAP is the only deployable front-door mode (controlPlaneMode 'none' is local
+# dev only), and the data plane is always mediated, so there is nothing to
+# choose here — the UI is always built for IAP.
+export UI_CONTROL_PLANE_MODE="iap"
+echo "  Front-door auth: IAP (the only deployable mode)"
+# env.ts: UI_CONTROL_PLANE_MODE
+# is additionally exported for the front-door env.template.txt field
+# (controlPlaneMode) — a no-op against templates that don't reference it.
+envsubst < ./ui/src/env.template.txt > ./ui/src/env.ts
+# config.json: rendered for the front door. backendApi.baseUrl is a literal
+# "/api" in the template — same-origin. The app serves the SPA, /api and the
+# status viewer from one Cloud Run service, so the browser always calls the
+# backend RELATIVE to wherever the page loaded, never an absolute host. Cloud
+# Run's host form isn't predictable (app-<hash>-uc.a.run.app vs
+# app-<num>.<region>.run.app) and is not needed at build time. Only $API_KEY /
+# $FIRESTORE_DB / $GCS_BUCKET are substituted; no app host is baked in.
+export API_KEY="none"
 generate_config
 
-# Set permissions and create user role
+# Safety: never build or ship a UI rendered for LOCAL DEV (controlPlaneMode
+# 'none' turns the sign-in gate off). The line above always sets 'iap', so this
+# only trips on a stray UI_CONTROL_PLANE_MODE override; fail loudly rather than
+# deploy an app with authentication disabled.
+if grep -q "controlPlaneMode: 'none'" ./ui/src/env.ts; then
+  echo "ERROR: ui/src/env.ts rendered with controlPlaneMode 'none' (sign-in disabled)." >&2
+  echo "       Refusing to build a deploy with the front-door auth gate off." >&2
+  echo "       This should not happen on a normal deploy; check for a stray" >&2
+  echo "       UI_CONTROL_PLANE_MODE in your environment, then re-run $0." >&2
+  exit 1
+fi
+
+# --- UI build ------------------------------------------------------------------
+if [ "$SKIP_UI_BUILD" = "1" ]; then
+  if [ ! -d ui/dist ]; then
+    echo "ERROR: --skip-ui-build given but ui/dist does not exist." >&2
+    echo "       Run a normal deploy once (or 'cd ui && npx ng build') first." >&2
+    exit 1
+  fi
+  # The render above rewrote env.ts/config.json, but a skipped build leaves the
+  # OLD env baked into ui/dist. Refuse if that prior build was a local-dev,
+  # sign-in-disabled build, so --skip-ui-build can never ship one to production.
+  if grep -rqs 'controlPlaneMode:"none"' ui/dist || grep -rqs "controlPlaneMode:'none'" ui/dist; then
+    echo "ERROR: the existing ui/dist was built for local dev (controlPlaneMode 'none'," >&2
+    echo "       sign-in disabled). Refusing to deploy it. Drop --skip-ui-build and run a" >&2
+    echo "       normal deploy to rebuild the UI first." >&2
+    exit 1
+  fi
+  phase "Reusing existing ui/dist (--skip-ui-build)..."
+  echo "[skip] Building the Angular UI — skipped (--skip-ui-build); reusing ui/dist."
+else
+  phase "Building the Angular UI (npm ci + ng build)..."
+  export NG_CLI_ANALYTICS=ci
+  (
+    cd ui \
+      && npm ci --legacy-peer-deps \
+      && npx ng build --configuration production
+  )
+fi
+
+# --- Version stamp + Artifact Registry + ONE image build -----------------------
+phase "Building the single container image (Cloud Build)..."
+# Version stamp (with a fallback so a missing/
+# detached git checkout doesn't abort the whole deploy under set -e).
+COMMIT_DATE=$(git log -1 --format=%cI 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+echo "${GIT_BRANCH}/${COMMIT_DATE}" > deployed_version.txt
+sync
+if ! gcloud artifacts repositories describe "${ARTIFACT_REPO}" --project=$PROJECT --location="$REGION" &> /dev/null; then
+  echo "Creating artifact repository: $ARTIFACT_REPO"
+  gcloud artifacts repositories create "${ARTIFACT_REPO}" --repository-format=docker --project=$PROJECT --location="$REGION"
+fi
+# NOTE: the repo's .gcloudignore excludes ui/* but re-includes ui/dist/ and
+# ui/remix-engine-status-viewer/ — both are LOAD-BEARING for this build: the
+# front-door app service serves the built SPA (ui/dist/ui/browser) and the
+# status viewer from inside this single image. Verify they made it into the
+# upload if static serving 404s.
+# Build logs go to Cloud Logging, NOT a GCS bucket (cloudbuild.yaml sets
+# logging: CLOUD_LOGGING_ONLY) — the same thing the original `gcloud run deploy
+# --source` flow did, and the fix for VPC Service Controls (issue H): the default
+# GCS logs bucket is always OUTSIDE the perimeter so its logs can't be streamed,
+# but Cloud Logging is unaffected, so the build runs and its logs are viewable in
+# the console. The build SA's logging.logWriter was granted earlier (IAM section)
+# so it has already propagated by now.
+echo "  Build logs → Cloud Logging (console):"
+echo "    https://console.cloud.google.com/cloud-build/builds?project=${PROJECT}"
+echo "  (this step is quiet — the build runs remotely; a heartbeat prints below)"
+# cloudbuild.yaml reuses cached layers by default; --no-build-cache forces a
+# cold rebuild (passes _USE_CACHE=0). IMAGE has no commas, so comma-joining the
+# substitutions is safe.
+BUILD_SUBS="_IMAGE=${IMAGE}"
+if [ "$NO_BUILD_CACHE" = "1" ]; then
+  BUILD_SUBS="${BUILD_SUBS},_USE_CACHE=0"
+  echo "  Docker layer cache: OFF (--no-build-cache; forcing a cold rebuild)."
+else
+  echo "  Docker layer cache: ON (reuses unchanged layers from the previous image)."
+fi
+run_with_heartbeat "Cloud Build" \
+  gcloud builds submit . --config=cloudbuild.yaml --substitutions="$BUILD_SUBS" \
+    --project=$PROJECT --region=$REGION
+
+# --- Cloud Run: worker (private, Cloud-Tasks-invoked) --------------------------
+if [ "$APP_ONLY" = "1" ]; then
+  phase "Reusing existing 'worker' Cloud Run service (--app-only)..."
+  echo "[skip] Deploying 'worker' — skipped (--app-only); reusing the live service."
+  # The app deploy below needs WORKER_URL; read it from the live worker.
+  WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)' 2>/dev/null || true)
+  if [ -z "$WORKER_URL" ]; then
+    echo "ERROR: --app-only given but no existing 'worker' service in ${PROJECT}/${REGION}." >&2
+    echo "       Deploy once without --app-only, then re-run with --app-only." >&2
+    exit 1
+  fi
+  echo "  Reusing worker: ${WORKER_URL}"
+else
+  phase "Deploying 'worker' Cloud Run service (private)..."
+  gcloud run deploy worker --image "$IMAGE" --region $REGION --project $PROJECT \
+    --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated \
+    --service-account="$RUNTIME_SA" \
+    --set-env-vars=ROLE=worker
+  WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)')
+  echo "✓ Worker deployed: ${WORKER_URL}"
+
+  # The only run.invoker grant the runtime SA gets: service-scoped to the
+  # worker, exactly what the Cloud-Tasks-minted OIDC tokens need to invoke it.
+  # (There is no project-wide run.invoker, so the app cannot invoke other
+  # Cloud Run services.)
+  echo "Granting service-scoped run.invoker on 'worker' to ${RUNTIME_SA}..."
+  gcloud run services add-iam-policy-binding worker --region=$REGION --project=$PROJECT \
+    --member="serviceAccount:${RUNTIME_SA}" --role="roles/run.invoker" > /dev/null
+fi
+
+# --- Cloud Run: app (UI + same-origin /api control plane) -----------------------
+phase "Deploying 'app' Cloud Run service (AUTH_MODE=${AUTH_MODE})..."
+IAP_FLAG_AVAILABLE=true
+# IAP front door. The --iap flag (built-in IAP for Cloud Run, GA March 2026) may
+# not exist on older gcloud installs — gate it behind a CLI capability check and
+# fall back to a private deploy + manual enable instruction.
+if ! gcloud run deploy --help 2>/dev/null | grep -q -- '--iap'; then
+  IAP_FLAG_AVAILABLE=false
+fi
+if [ "$IAP_FLAG_AVAILABLE" = "true" ]; then
+  gcloud run deploy app --image "$IMAGE" --region $REGION --project $PROJECT \
+    --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated --iap \
+    --service-account="$RUNTIME_SA" \
+    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI}
+else
+  echo "⚠ This gcloud has no 'gcloud run deploy --iap' flag — deploying the app"
+  echo "  service private (--no-allow-unauthenticated) WITHOUT IAP. Enable IAP"
+  echo "  manually after updating the gcloud CLI:"
+  echo "    gcloud run services update app --iap --region=$REGION --project=$PROJECT"
+  gcloud run deploy app --image "$IMAGE" --region $REGION --project $PROJECT \
+    --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated \
+    --service-account="$RUNTIME_SA" \
+    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI}
+fi
+# The IAP service agent must hold run.invoker on the app service so IAP can
+# forward authenticated traffic to it (Cloud Run built-in IAP requirement).
+IAP_SA="service-${PROJECT_NUMBER}@gcp-sa-iap.iam.gserviceaccount.com"
+echo "Granting service-scoped run.invoker on 'app' to the IAP service agent..."
+gcloud run services add-iam-policy-binding app --region=$REGION --project=$PROJECT \
+  --member="serviceAccount:${IAP_SA}" --role="roles/run.invoker" > /dev/null
+APP_URL=$(gcloud run services describe app --region=$REGION --project=$PROJECT --format='value(status.url)')
+ACTUAL_APP_HOST="${APP_URL#https://}"
+echo "✓ App deployed: ${APP_URL}"
+# Nothing was predicted: the image carries only same-origin URLs, so the app and
+# its status viewer work on this first deploy. ACTUAL_APP_HOST (the real Cloud
+# Run host, known only now) feeds the GCS bucket CORS list below, so the browser
+# can fetch signed media URLs cross-origin from the deployed app host.
+
+# --- Bucket CORS (needs the real app host) --------------------------------------
+phase "Applying GCS bucket CORS for ${ACTUAL_APP_HOST}..."
+export UI_HOST="$ACTUAL_APP_HOST"
 envsubst < ./gcs-cors-config.template.json > ./gcs-cors-config.json
 gcloud storage buckets update gs://$GCS_BUCKET --cors-file=./gcs-cors-config.json --project=$PROJECT
 
+# --- SceneMachineUser custom role -----------------------------------------------
+phase "Ensuring SceneMachineUser custom role matches user-role.yaml..."
 if ! gcloud iam roles describe SceneMachineUser --project=$PROJECT &> /dev/null; then
   echo "SceneMachineUser role doesn't exist. Creating it..."
   gcloud iam roles create SceneMachineUser --project=$PROJECT --file=./user-role.yaml
 else
-  echo "SceneMachineUser role already exists. Skipping."
+  # Update (not skip) so an edited user-role.yaml — e.g. the slimmed
+  # IAP-access-only permission set — actually takes effect on a project where the
+  # role already exists, instead of being silently ignored. '|| true' tolerates
+  # the benign "no changes to apply" case on a re-deploy; the role keeps its
+  # IAP-access permission regardless, so user admission is never at risk here.
+  echo "SceneMachineUser role exists. Syncing it to user-role.yaml..."
+  gcloud iam roles update SceneMachineUser --project=$PROJECT --file=./user-role.yaml --quiet || true
 fi
 
-# Upload example files
-gcloud storage cp workflow_examples/input/* gs://${GCS_BUCKET}/examples/
-
-echo
-echo "════════════════════════════════════════════════════════════════════════"
-echo "  ✓  Scene Machine backend deployment complete."
-echo "════════════════════════════════════════════════════════════════════════"
-echo
-if [ "$DEPLOY_UI" = "true" ]; then
-  echo "  Next: UI deployment is starting. If this is a fresh project, the script"
-  echo "  will shortly block and poll on the manual console steps below."
-  echo "  You can complete them now in your browser while the script initializes:"
-else
-  echo "  Next: To deploy the UI later, run './deploy.sh --ui-only'."
-  echo "  Before doing that, the following manual console steps are required:"
+# --- Seed Firestore config (front-door topology) --------------------------------
+# Uses firestore_config_frontdoor.template.json: the UI Firestore config doc with
+# the backend base fixed to the same-origin '/api' and no API key. Owner-
+# credential REST writes bypass the (deliberately read-only) config rules — by
+# design.
+phase "Adding default Scene Machine configurations to Firestore..."
+# Capture the HTTP status (as the other REST calls in this script do): a non-200
+# here means the UI's same-origin '/api' wiring was NOT written, so fail loudly
+# instead of reporting a successful deploy with a broken app config.
+CONFIG_SEED_STATUS=$(curl -s -X PATCH \
+"https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/global" \
+  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  -H "Content-Type: application/json" \
+  -o /dev/null -w '%{http_code}' \
+  -d @<(envsubst < ./firestore_config_frontdoor.template.json))
+if [ "$CONFIG_SEED_STATUS" != "200" ]; then
+  echo "ERROR: seeding the UI config (config/global) failed (HTTP ${CONFIG_SEED_STATUS:-no response})." >&2
+  echo "       The app's backend wiring was not written; aborting." >&2
+  exit 1
 fi
-echo
-echo "    1. Configure OAuth consent screen"
-echo "       https://console.cloud.google.com/auth/branding?project=${PROJECT}"
-echo "       First time on this project: click 'Get started' and walk through"
-echo "       the setup dialog. Set User Type to 'Internal' if you only want "
-echo "       users within your own Google Workspace organization to access the app "
-echo "       (recommended for security purposes when possible), or 'External' if "
-echo "       you want anyone to be able to log in."
-echo "       IMPORTANT: After configuring the consent screen, navigate to"
-echo "       'Credentials' and create a new 'OAuth client ID'."
-echo
-echo "    2. Enable Google as a Firebase sign-in provider"
-echo "       https://console.firebase.google.com/project/${PROJECT}/authentication/providers"
-echo "       If the providers list isn't visible yet, click 'Get started' first."
-echo "       Then: 'Add new provider' → 'Google' → enable → save."
-echo
-echo "    3. Set up Firebase Storage (wizard + GCS bucket import):"
-echo "       https://console.firebase.google.com/project/${PROJECT}/storage"
-echo "       (a) Click 'Get started' and complete the wizard."
-echo "       (b) AFTER (a) finishes (the bucket dropdown only appears once the"
-echo "           wizard creates the bucket), on the same page, click the bucket"
-echo "           dropdown → '+ Add bucket' → 'Import existing GCS buckets' →"
-echo "           select ${GCS_BUCKET} → confirm."
-echo
-echo "    4. Enable Identity-Aware Proxy (IAP) for App Engine"
-echo "       https://console.cloud.google.com/security/iap?project=${PROJECT}&serviceId=default"
-echo "       Turn IAP ON for 'App Engine app', then click the ⋮ (three-dot menu)"
-echo "       → 'Settings' → 'Custom OAuth' → 'Auto-generate credentials'."
-echo "════════════════════════════════════════════════════════════════════════"
-fi
-echo
 
-if [ "$DEPLOY_UI" = "true" ]; then
-  echo
-  echo "════════════════════════════════════════════════════════════════════════"
-  echo "  Starting Scene Machine UI deployment..."
-  echo "════════════════════════════════════════════════════════════════════════"
+for template in creative_templates/*.json; do
+  # Skip cleanly if the directory is empty/absent: without 'nullglob' the glob
+  # would otherwise stay literal and run the body once on a non-existent file.
+  [ -e "$template" ] || continue
+  template_name=$(basename "$template" .json)
 
-  # If backend was not deployed in this run, fetch parameters from GCP
-  if [ "$DEPLOY_BACKEND" = "false" ]; then
-    echo "[>] Resolving backend configuration parameters from GCP..."
-    API_UID=$(gcloud services api-keys list --filter="displayName='Scene Machine API Key'" --format="value(uid)" --project=$PROJECT)
-    if [ -z "$API_UID" ]; then
-      echo "ERROR: Could not find Scene Machine API Key in project $PROJECT. Is the backend deployed?" >&2
-      exit 1
-    fi
-    export API_KEY=$(gcloud services api-keys get-key-string $API_UID --project=$PROJECT --format="value(keyString)")
-
-    if ! export API_GATEWAY_HOST=$(gcloud api-gateway gateways describe scenemachine-api-gateway --project=$PROJECT --location=$API_GATEWAY_REGION --format="value(defaultHostname)" 2>/dev/null); then
-      echo "ERROR: Could not retrieve API Gateway host. Is the backend API Gateway deployed?" >&2
-      exit 1
-    fi
-  fi
-
-  # Resolve Firebase configs
-  FIREBASE_API_KEY=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"apiKey":' | awk -F '"' '{print $4}')
-  if [ -z "$FIREBASE_API_KEY" ]; then
-    echo "ERROR: Failed to extract Firebase API key from 'firebase apps:sdkconfig WEB'. Check that the Firebase Web app exists." >&2
+  TEMPLATE_SEED_STATUS=$(curl -s -X PATCH \
+  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/creativeTemplates/${template_name}" \
+    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+    -H "x-goog-user-project: ${PROJECT}" \
+    -H "Content-Type: application/json" \
+    -o /dev/null -w '%{http_code}' \
+    -d @"$template")
+  if [ "$TEMPLATE_SEED_STATUS" != "200" ]; then
+    echo "ERROR: seeding creative template '${template_name}' failed (HTTP ${TEMPLATE_SEED_STATUS:-no response})." >&2
     exit 1
   fi
-  export FIREBASE_API_KEY
+done
 
-  FIREBASE_AUTH_DOMAIN=$(firebase --non-interactive --project $PROJECT apps:sdkconfig WEB | grep '"authDomain":' | awk -F '"' '{print $4}')
-  if [ -z "$FIREBASE_AUTH_DOMAIN" ]; then
-     echo "ERROR: Failed to extract Firebase auth domain. Check that the Firebase Web app exists." >&2
-     exit 1
+# --- Automated provisioning complete: timing checkpoint ----------------------------
+close_phase
+PROVISIONING_END=$(date +%s)
+echo
+echo "[t] ════════════════════════════════════════════════════════════════════"
+echo "[t]  AUTOMATED PROVISIONING TOTAL: $((PROVISIONING_END - SCRIPT_START))s ($(fmt_hms $((PROVISIONING_END - SCRIPT_START))))"
+echo "[t]  (manual sign-in gates below are human-paced and timed separately)"
+echo "[t] ════════════════════════════════════════════════════════════════════"
+
+# --- Final summary: success banner + remaining manual steps -------------------
+TOTAL_END=$(date +%s)
+echo
+echo "════════════════════════════════════════════════════════════════════════"
+echo "  ✓  Scene Machine front-door deployment complete (AUTH_MODE=${AUTH_MODE})."
+echo "════════════════════════════════════════════════════════════════════════"
+echo
+
+step=1
+if [ "$AUTH_MODE" = "iap" ]; then
+  echo "  Remaining manual steps for the IAP arm (the app is unreachable for"
+  echo "  users until these are done):"
+  echo
+  # Only when an agent ran this (--non-interactive): nudge it to relay the
+  # human-only console steps verbatim. Best-effort — a careful agent may treat
+  # text in command output as data, not an instruction; the wording is framed so
+  # the user benefits even if the agent just echoes this block unchanged.
+  if [ "$NONINTERACTIVE" = "1" ]; then
+    echo "  ──────────────────────────────────────────────────────────────────"
+    echo "   NOTE FOR THE AI ASSISTANT THAT RAN THIS DEPLOY: the steps below are"
+    echo "   console-only — a person must do them, you cannot. Show them to the"
+    echo "   user exactly as written (same URLs and button names), in order —"
+    echo "   don't summarize or reorder."
+    echo "  ──────────────────────────────────────────────────────────────────"
+    echo
   fi
-  export FIREBASE_AUTH_DOMAIN
-
-  if [ -n "${CUSTOM_DOMAIN:-}" ]; then
-    export UI_HOST="${CUSTOM_DOMAIN}"
-    echo "✓ Using custom domain: ${UI_HOST}"
-  else
-    export UI_HOST=$(gcloud app describe --project=$PROJECT --format="value(defaultHostname)")
+  if [ "$IAP_FLAG_AVAILABLE" != "true" ]; then
+    echo "    ${step}. Enable IAP on the app service (this gcloud lacked --iap):"
+    echo "       gcloud run services update app --iap --region=${REGION} --project=${PROJECT}"
+    echo
+    step=$((step + 1))
   fi
-
-  generate_config
-  envsubst < ./ui/src/env.template.txt > ./ui/src/env.ts
-
-  if is_service_enabled "identitytoolkit.googleapis.com"; then
-    echo "Identity Toolkit API is already enabled."
-  else
-    echo "Enabling Identity Toolkit API (needed for Auth config)..."
-    gcloud services enable identitytoolkit.googleapis.com --project=$PROJECT
-    ENABLED_APIS=$(gcloud services list --enabled --project="$PROJECT" --format="value(config.name)" 2>/dev/null || true)
-  fi
-
-  # --- Bucket linked to Firebase Storage: poll until satisfied ----------------
+  echo "    ${step}. Configure the OAuth consent screen (one-time, prerequisite for"
+  echo "       the IAP OAuth client):"
+  echo "       https://console.cloud.google.com/auth/branding?project=${PROJECT}"
+  echo "       First time on this project: click 'Get started' and walk through"
+  echo "       the setup dialog. User Type is set under 'Audience'."
   echo
-  echo "[>] Checking if bucket ${GCS_BUCKET} is linked to Firebase Storage..."
-  BUCKET_WAIT_ATTEMPTS=0
-  BUCKET_WAIT_MAX=120   # 120 × 15s = 30 min total
-  while true; do
-    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-      -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-      -H "x-goog-user-project: ${PROJECT}" \
-      "https://firebasestorage.googleapis.com/v1beta/projects/${PROJECT}/buckets/${GCS_BUCKET}")
-    if [ "$HTTP_STATUS" = "200" ]; then
-      echo "✓ Bucket ${GCS_BUCKET} is linked to Firebase Storage."
-      break
-    fi
-    BUCKET_WAIT_ATTEMPTS=$((BUCKET_WAIT_ATTEMPTS + 1))
-    if [ $BUCKET_WAIT_ATTEMPTS -ge $BUCKET_WAIT_MAX ]; then
-      echo "ERROR: bucket ${GCS_BUCKET} still not linked after 30 minutes — aborting." >&2
-      exit 1
-    fi
-    echo "============================================================"
-    echo "WAITING: bucket ${GCS_BUCKET} is not yet linked to Firebase Storage."
-    echo "Two sequential steps in the Firebase Console are required:"
-    echo "  Open: https://console.firebase.google.com/project/${PROJECT}/storage"
-    echo
-    echo "  Step 1 — Initialize Firebase Storage (only needed once per project):"
-    echo "    Click 'Get started' and walk through the wizard."
-    echo "    This creates a default <project>.firebasestorage.app bucket."
-    echo "    Production mode is fine."
-    echo
-    echo "  Step 2 — Register ${GCS_BUCKET} with Firebase Storage:"
-    echo "    On the same page (after Step 1 — the bucket dropdown only"
-    echo "    appears once a bucket exists), click the dropdown →"
-    echo "    '+ Add bucket' → 'Import existing Google Cloud Storage"
-    echo "    buckets' → select ${GCS_BUCKET} → confirm."
-    echo
-    if [ "$AUTO_CONFIRM" = "true" ]; then
-      echo "ERROR: Headless deployment cannot wait for manual steps. Please complete the setup above and re-run." >&2
-      echo "============================================================" >&2
-      exit 1
-    fi
-    echo "Re-checking in 15 seconds (attempt ${BUCKET_WAIT_ATTEMPTS}/${BUCKET_WAIT_MAX}; Ctrl-C to abort)..."
-    echo "============================================================"
-    sleep 15
-  done
-
-  # Deploy rules for UI Firestore DB and Storage
-  export CURRENT_FIRESTORE_DB=$FIRESTORE_DB_UI
-  envsubst < ./firebase/firebase.template.json > ./firebase/firebase.json
-  envsubst < ./firebase/.firebaserc.template > ./firebase/.firebaserc
-  firebase target:apply --config firebase/firebase.json storage bucket_target $GCS_BUCKET --project $PROJECT
-
-  echo "Deploying rules for UI Firestore DB..."
-  firebase deploy --config firebase/firebase.json --only firestore --project $PROJECT
-
-  echo "Deploying Storage rules..."
-  firebase deploy --config firebase/firebase.json --only storage --project $PROJECT
-
-  rm firebase/firebase.json
-  rm firebase/.firebaserc
-
+  step=$((step + 1))
+  echo "    ${step}. On a project WITHOUT an organization, configure a custom OAuth"
+  echo "       client for IAP (the Google-managed client only admits"
+  echo "       in-organization identities). One-time console step:"
+  echo "       https://console.cloud.google.com/security/iap?project=${PROJECT}"
+  echo "       Select the 'app' Cloud Run service → ⋮ Settings → Custom OAuth →"
+  echo "       'Auto-generate credentials'. (No need to download them.)"
   echo
-  echo "[>] Adding default Scene Machine configurations to Firestore..."
-  curl -X PATCH \
-  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/global" \
-    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-    -H "Content-Type: application/json" \
-    -o /dev/null \
-    -d @<(envsubst < ./firestore_config_ui.template.json)
-
-  for template in creative_templates/*.json; do
-    template_name=$(basename "$template" .json)
-
-    curl -X PATCH \
-    "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/creativeTemplates/${template_name}" \
-      -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-      -H "Content-Type: application/json" \
-      -o /dev/null \
-      -d @"$template"
-  done
-
+  step=$((step + 1))
+  echo "    ${step}. Grant each user access to the app (least privilege — this one"
+  echo "       role admits them through the IAP front door; the app does every"
+  echo "       storage/Firestore action on its own service account). Easiest — run"
+  echo "       the helper from this directory (it checks first, then grants):"
+  echo "       ./deploy/grant-access.sh ${PROJECT} user@example.com"
+  echo "       (re-run per user; --check-only just reports; needs IAP Policy Admin"
+  echo "        or Owner to run — may be a different person than the deployer.)"
   echo
-  echo "[>] Granting Storage Admin role to App Engine default service account..."
-  add_iam_binding $PROJECT --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" --role="roles/storage.admin" --condition=None
-
-  echo "[>] Granting Artifact Registry Writer role to App Engine default service account..."
-  add_iam_binding $PROJECT --member="serviceAccount:${PROJECT}@appspot.gserviceaccount.com" --role="roles/artifactregistry.writer" --condition=None
-
-  # --- Google sign-in provider enabled: poll until satisfied ------------------
-  # The Identity Toolkit API used here actually verifies that the Google sign-in
-  # provider is enabled in Firebase. This implicitly requires the OAuth consent
-  # screen to be configured first. We poll for both steps in this single loop.
-  echo
-  echo "[>] Checking if Google sign-in provider is enabled..."
-  SIGNIN_WAIT_ATTEMPTS=0
-  SIGNIN_WAIT_MAX=120   # 120 × 15s = 30 min total
-  while true; do
-    CONFIG=$(curl -s -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-      -H "x-goog-user-project: ${PROJECT}" \
-      "https://identitytoolkit.googleapis.com/admin/v2/projects/${PROJECT}/defaultSupportedIdpConfigs/google.com")
-    if [[ "$CONFIG" == *'"enabled": true'* ]]; then
-      echo "✓ Google sign-in provider is enabled."
-      break
-    fi
-    SIGNIN_WAIT_ATTEMPTS=$((SIGNIN_WAIT_ATTEMPTS + 1))
-    if [ $SIGNIN_WAIT_ATTEMPTS -ge $SIGNIN_WAIT_MAX ]; then
-      echo "ERROR: Google sign-in provider still not enabled after 30 minutes — aborting." >&2
-      echo "Enable it in the Firebase Console, then re-run $0:" >&2
-      echo "  https://console.firebase.google.com/project/${PROJECT}/authentication/providers" >&2
-      exit 1
-    fi
-    echo "============================================================"
-    echo "WAITING: Google sign-in provider is not yet enabled."
-    echo "Please ensure you have completed the following steps (script will keep checking):"
-    echo "  1. Configure OAuth consent screen & Client ID:"
-    echo "     https://console.cloud.google.com/auth/branding?project=${PROJECT}"
-    echo "     (First time: click 'Get started'. Set User Type to 'Internal' or 'External'."
-    echo "     Then navigate to 'Credentials' and create a new 'OAuth client ID')"
-    echo
-    echo "  2. Enable Google as a Firebase sign-in provider:"
-    echo "     https://console.firebase.google.com/project/${PROJECT}/authentication/providers"
-    echo "     (Click 'Get started' if list isn't visible -> 'Add new provider' -> 'Google' -> enable -> save)"
-    if [ "$AUTO_CONFIRM" = "true" ]; then
-      echo "ERROR: Headless deployment cannot wait for manual steps. Please complete the setup above and re-run." >&2
-      echo "============================================================" >&2
-      exit 1
-    fi
-    echo "Re-checking in 15 seconds (attempt ${SIGNIN_WAIT_ATTEMPTS}/${SIGNIN_WAIT_MAX}; Ctrl-C to abort)..."
-    echo "============================================================"
-    sleep 15
-  done
-
-  # For a local development environment, cloud deployment is not needed
-  if [[ "${DEPLOY_MODE}" != "local" ]]; then
-    export NG_CLI_ANALYTICS=ci
-    echo
-    echo "[>] Deploying UI to App Engine (Estimated time: ≈5 minutes)..."
-    (
-      cd ui \
-        && npm ci --legacy-peer-deps \
-        && npx ng build --configuration production
-    ) \
-      && (
-        cd ui \
-          && gcloud app deploy --quiet --project "${PROJECT}"
-      )
-  fi
-
-  echo
-  echo "[>] Configuring Firebase authorized domains..."
-  curl -X PATCH "https://identitytoolkit.googleapis.com/v2/projects/${PROJECT}/config?updateMask=authorizedDomains" \
-    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-    -H "Content-Type: application/json" \
-    -H "x-goog-user-project: ${PROJECT}" \
-    -o /dev/null \
-    -d "{\"authorizedDomains\": [\"localhost\", \"$(gcloud app describe --format='value(defaultHostname)')\"]}"
-
-  # --- Identity-Aware Proxy (IAP) enabled: poll until satisfied ----------------
-  echo
-  echo "[>] Checking if Identity-Aware Proxy (IAP) is enabled..."
-  IAP_WAIT_ATTEMPTS=0
-  IAP_WAIT_MAX=120   # 120 × 15s = 30 min total
-  while true; do
-    IAP_ENABLED=$(gcloud app describe --project=$PROJECT --format="value(iap.enabled)" 2>/dev/null || echo "false")
-    if [[ "$IAP_ENABLED" =~ [tT]rue ]]; then
-      echo "✓ Identity-Aware Proxy (IAP) is enabled."
-      break
-    fi
-    IAP_WAIT_ATTEMPTS=$((IAP_WAIT_ATTEMPTS + 1))
-    if [ $IAP_WAIT_ATTEMPTS -ge $IAP_WAIT_MAX ]; then
-      echo "ERROR: Identity-Aware Proxy (IAP) still not enabled after 30 minutes — aborting." >&2
-      exit 1
-    fi
-    echo "============================================================"
-    echo "WAITING: Identity-Aware Proxy (IAP) is not yet enabled."
-    echo "Please enable IAP in the Cloud Console (script will keep checking):"
-    echo "  https://console.cloud.google.com/security/iap?project=${PROJECT}&serviceId=default"
-    echo
-    echo "  1. Turn IAP ON for 'App Engine app'."
-    echo "  2. Click the three-dot menu (⋮) on the far right of the row → 'Settings'"
-    echo "     → 'Custom OAuth' → 'Auto-generate credentials'."
-    if [ "$AUTO_CONFIRM" = "true" ]; then
-      echo "ERROR: Headless deployment cannot wait for manual steps. Please complete the setup above and re-run." >&2
-      echo "============================================================" >&2
-      exit 1
-    fi
-    echo "Re-checking in 15 seconds (attempt ${IAP_WAIT_ATTEMPTS}/${IAP_WAIT_MAX}; Ctrl-C to abort)..."
-    echo "============================================================"
-    sleep 15
-  done
-
-  # --- Final summary: success banner + remaining manual steps ----------------
-  if [[ "${DEPLOY_MODE}" == "local" ]]; then
-    APP_URL="http://localhost:4200/"
-  else
-    APP_URL="https://$(gcloud app describe --project=$PROJECT --format='value(defaultHostname)')"
-  fi
-
-  echo
-  echo "════════════════════════════════════════════════════════════════════════"
-  echo "  ✓  Scene Machine UI deployment complete."
-  echo "════════════════════════════════════════════════════════════════════════"
-  echo
-  echo "  ──────────────────────────────────────────────────────────────────"
-  echo "   OPEN YOUR APP:"
-  echo
-  echo "       ►  ${APP_URL}"
-  echo
-  echo "  ──────────────────────────────────────────────────────────────────"
-  echo
-  echo "  REQUIRED MANUAL STEP: Grant access to users"
-  echo "  (Since the app is secured by IAP, any user wishing to access it must"
-  echo "  be granted the custom 'Scene Machine User' role. Without this binding,"
-  echo "  authenticated users will hit a 403 Forbidden error.)"
-  echo
-  echo "  Fastest via command-line:"
-  echo "    gcloud projects add-iam-policy-binding ${PROJECT} \\"
-  echo "      --member=\"user:YOUR_EMAIL@example.com\" \\"
-  echo "      --role=\"projects/${PROJECT}/roles/SceneMachineUser\""
-  echo
-  echo "  Or via the Cloud IAM console:"
-  echo "    https://console.cloud.google.com/iam-admin/iam?project=${PROJECT}"
-  echo "════════════════════════════════════════════════════════════════════════"
+  echo "       The helper just wraps this gcloud command, which you can run by hand"
+  echo "       instead:"
+  echo "       gcloud iap web add-iam-policy-binding \\"
+  echo "         --resource-type=cloud-run --service=app --region=${REGION} \\"
+  echo "         --member=\"user:user@example.com\" \\"
+  echo "         --role=\"projects/${PROJECT}/roles/SceneMachineUser\" \\"
+  echo "         --project=${PROJECT}"
+  echo "       (If gcloud rejects the custom role, use built-in"
+  echo "       'roles/iap.httpsResourceAccessor' — same access; deploy/grant-access.sh"
+  echo "       falls back to it automatically.)"
   echo
 fi
-
+echo "════════════════════════════════════════════════════════════════════════"
+echo "[t]  Automated provisioning:     $((PROVISIONING_END - SCRIPT_START))s ($(fmt_hms $((PROVISIONING_END - SCRIPT_START))))"
+echo "[t]  Manual gates (human-paced): $((TOTAL_END - PROVISIONING_END))s ($(fmt_hms $((TOTAL_END - PROVISIONING_END))))"
+echo "[t]  TOTAL wall-clock:           $((TOTAL_END - SCRIPT_START))s ($(fmt_hms $((TOTAL_END - SCRIPT_START))))"
+echo "════════════════════════════════════════════════════════════════════════"
+echo
+# The app URL is printed dead-last, after the (long) manual-steps list and the
+# timing block, so the user can't miss it without scrolling. Plain bullets.
+echo "  ──────────────────────────────────────────────────────────────────"
+echo "   OPEN YOUR APP:"
+echo
+echo "    ►  app:     ${APP_URL}"
+echo "    •  worker:  ${WORKER_URL}  (internal; not for the browser)"
+if [ "$AUTH_MODE" = "iap" ]; then
+  # IAP grants and console settings take a short while to propagate, so a first
+  # visit can land on an "access denied"/permission screen before the grant is
+  # live. Tell the user to wait and refresh so they don't give up too early.
+  echo
+  echo "   Once the manual steps above are done: if your first visit shows an"
+  echo "   \"access denied\" or permission screen, that's expected for a moment —"
+  echo "   the IAP grant and console settings take a little time to propagate."
+  echo "   Wait a bit and refresh the page."
+fi
+echo "  ──────────────────────────────────────────────────────────────────"
+echo

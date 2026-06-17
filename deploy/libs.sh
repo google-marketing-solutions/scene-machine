@@ -1,21 +1,65 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# shellcheck shell=bash
 # ---------------------------------------------------------------------------
-# Helper functions
+# deploy/libs.sh — shared helper functions for the Scene Machine deploy scripts.
+#
+# This file is meant to be SOURCED, not run directly:
+#     source "$(dirname "$0")/deploy/libs.sh"
+#
+# It defines the IAM-binding retry wrapper, config-file generation, and the tool
+# pre-flight check so deploy.sh (and any future deploy helper) can reuse them
+# without copy-paste.
 # ---------------------------------------------------------------------------
+
 # Wrapper for `gcloud projects add-iam-policy-binding` that (a) suppresses the
 # verbose updated-policy YAML on success, and (b) retries with exponential
-# backoff on concurrent-modification etag conflicts. Background GCP work (App
-# Engine setup, Firebase, service-agent provisioning) modifies the project
-# policy in parallel with our sequential read-modify-writes, occasionally
-# racing our etag. The gcloud error itself recommends "retry with exponential
-# backoff" — this helper does that automatically.
+# backoff on concurrent-modification etag conflicts. Background GCP work
+# (Firebase, service-agent provisioning) modifies the project policy in
+# parallel with our sequential read-modify-writes, occasionally racing our
+# etag. The gcloud error itself recommends "retry with exponential backoff" —
+# this helper does that automatically.
 add_iam_binding() {
   # Pull the role out of the args so retry/success messages identify which
   # binding hit the conflict (otherwise the log just says "an IAM binding").
   local role=""
+  local member=""
   for arg in "$@"; do
-    case "$arg" in --role=*) role="${arg#--role=}" ;; esac
+    case "$arg" in
+      --role=*) role="${arg#--role=}" ;;
+      --member=*) member="${arg#--member=}" ;;
+    esac
   done
   local label="${role:+ (for $role)}"
+  local project="$1"  # first positional arg, e.g. add_iam_binding "$PROJECT" ...
+
+  # Skip if the binding already exists. add-iam-policy-binding is idempotent
+  # server-side (re-adding is a no-op), but it is a read-modify-write that
+  # costs a round-trip and can lose the etag race against background policy
+  # edits. A cheap read first means a re-run on an already-provisioned project
+  # touches nothing — no write, no race. (A fresh project has no bindings yet,
+  # so first deploys still grant everything, just one extra read per role.)
+  if [ -n "$role" ] && [ -n "$member" ] && [ -n "$project" ]; then
+    if gcloud projects get-iam-policy "$project" \
+        --flatten="bindings[].members" \
+        --filter="bindings.role=${role} AND bindings.members=${member}" \
+        --format="value(bindings.role)" 2>/dev/null | grep -q .; then
+      echo "  ✓ ${member} already has ${role} — skipping."
+      return 0
+    fi
+  fi
 
   local stderr_file
   stderr_file=$(mktemp)
@@ -58,7 +102,7 @@ add_iam_binding() {
   done
 }
 
-# Generate ui/definitions/config.json for backend and frontend
+# Generate ui/definitions/config.json for backend and frontend.
 generate_config() {
   envsubst < ui/definitions/config.template.json > ui/definitions/config.json
 }
