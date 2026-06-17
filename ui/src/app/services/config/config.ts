@@ -467,7 +467,16 @@ export class ConfigService {
    * debounced autosave skip a config that `flushPendingSave()` already
    * persisted, keeping request counts identical to the pre-flush behavior.
    */
+  // The last config whose save the SERVER confirmed. Used to dedupe the
+  // trailing autosave emission against an explicit flush/saveNow of the same
+  // object. Only advanced on a successful response (see saveProjectMediated),
+  // never optimistically, so a failed save is not mistaken for a saved one.
   private lastSavedConfig: ProjectConfig | null = null;
+  // The config whose POST/PATCH is currently in flight. Dedupes concurrent
+  // saves of the same object without claiming it is saved; cleared on success
+  // (it becomes lastSavedConfig) and on failure (so a later flush/saveNow or
+  // the next autosave emission re-attempts the unsaved work).
+  private inFlightConfig: ProjectConfig | null = null;
 
   constructor() {
     toObservable(this.projectConfig.value)
@@ -476,8 +485,9 @@ export class ConfigService {
         if (!config.id) {
           return;
         }
-        if (config === this.lastSavedConfig) {
-          // Already persisted by flushPendingSave(); avoid a duplicate save.
+        if (config === this.lastSavedConfig || config === this.inFlightConfig) {
+          // Already persisted (or a save of this exact object is in flight);
+          // avoid a duplicate save.
           return;
         }
         if (this.shouldSave) {
@@ -500,9 +510,9 @@ export class ConfigService {
     this.initFaviconListener();
   }
 
-  /** Saves one config object, recording it for dedupe. */
+  /** Saves one config object, marking it in-flight for dedupe. */
   private persistNow(config: ProjectConfig) {
-    this.lastSavedConfig = config;
+    this.inFlightConfig = config;
     this.saveProjectMediated(config);
   }
 
@@ -515,7 +525,12 @@ export class ConfigService {
    */
   flushPendingSave() {
     const config = this.projectConfig.value();
-    if (!this.shouldSave || !config.id || config === this.lastSavedConfig) {
+    if (
+      !this.shouldSave ||
+      !config.id ||
+      config === this.lastSavedConfig ||
+      config === this.inFlightConfig
+    ) {
       return;
     }
     config.lastEdited = new Date();
@@ -535,7 +550,11 @@ export class ConfigService {
    */
   saveNow() {
     const config = this.projectConfig.value();
-    if (!config.id || config === this.lastSavedConfig) {
+    if (
+      !config.id ||
+      config === this.lastSavedConfig ||
+      config === this.inFlightConfig
+    ) {
       return;
     }
     config.lastEdited = new Date();
@@ -557,8 +576,20 @@ export class ConfigService {
     request.subscribe({
       next: () => {
         this.persistedProjectIds.add(config.id);
+        // Confirmed saved: now it is safe to dedupe future saves of this exact
+        // object, and it is no longer in flight.
+        this.lastSavedConfig = config;
+        if (this.inFlightConfig === config) {
+          this.inFlightConfig = null;
+        }
       },
       error: error => {
+        // The save did NOT happen: clear the in-flight marker (without ever
+        // setting lastSavedConfig) so a later flush/saveNow or the next
+        // autosave emission re-attempts this work instead of skipping it.
+        if (this.inFlightConfig === config) {
+          this.inFlightConfig = null;
+        }
         console.error('Error saving project config:', error);
         const snackBarRef = this.matSnackBar.open(
           'Unsaved changes — failed to save the project.',

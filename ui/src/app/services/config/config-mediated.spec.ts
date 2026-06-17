@@ -205,6 +205,37 @@ describe('ConfigService (mediated data plane)', () => {
         expect.objectContaining({id: 'proj-1', name: 'dirty'}),
       );
     });
+
+    it('retries on a later flush when the save FAILED (does not mark unsaved work as saved)', () => {
+      markPersisted('proj-1');
+      // First PATCH fails; the Retry snackbar is offered but the user does not
+      // click it. A later flush of the SAME unsaved object must re-attempt the
+      // save instead of skipping it as already-saved (the regression: advancing
+      // lastSavedConfig before the server confirmed).
+      httpClientMock.patch
+        .mockReturnValueOnce(throwError(() => new Error('save failed')))
+        .mockReturnValue(of({}));
+
+      service.updateProjectConfig({id: 'proj-1', name: 'dirty'});
+      service.flushPendingSave();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+
+      // No edit in between: the same object is still current and still unsaved.
+      service.flushPendingSave();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not re-save the same object after a SUCCESSFUL save', () => {
+      markPersisted('proj-1');
+      service.updateProjectConfig({id: 'proj-1', name: 'dirty'});
+
+      service.flushPendingSave();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+
+      // Same object, already confirmed saved: a second flush is a no-op.
+      service.flushPendingSave();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('saveNow (meaningful-action immediate persist)', () => {
