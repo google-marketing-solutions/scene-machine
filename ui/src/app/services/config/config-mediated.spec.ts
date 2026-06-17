@@ -16,7 +16,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import '@angular/compiler';
-import {HttpClient} from '@angular/common/http';
+import {HttpClient, HttpErrorResponse} from '@angular/common/http';
 import {DOCUMENT} from '@angular/common';
 import {EnvironmentInjector, signal} from '@angular/core';
 import {MatSnackBar} from '@angular/material/snack-bar';
@@ -235,6 +235,27 @@ describe('ConfigService (mediated data plane)', () => {
       // Same object, already confirmed saved: a second flush is a no-op.
       service.flushPendingSave();
       expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+    });
+
+    it('recovers from a create-only 409 by switching to PATCH', () => {
+      // The client thinks the project is new (not persisted) so it POSTs, but
+      // the server already has it and POST is create-only, returning 409. The
+      // client marks it persisted and retries once via PATCH (updating the
+      // existing project) instead of looping on POST.
+      httpClientMock.post.mockReturnValue(
+        throwError(() => new HttpErrorResponse({status: 409})),
+      );
+      httpClientMock.patch.mockReturnValue(of({}));
+
+      service.updateProjectConfig({id: 'dupe-proj', name: 'dirty'});
+      service.flushPendingSave();
+
+      expect(httpClientMock.post).toHaveBeenCalledTimes(1);
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      expect(httpClientMock.patch).toHaveBeenCalledWith(
+        '/api/projects/dupe-proj',
+        expect.objectContaining({id: 'dupe-proj'}),
+      );
     });
   });
 

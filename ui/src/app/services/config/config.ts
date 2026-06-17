@@ -590,6 +590,24 @@ export class ConfigService {
         if (this.inFlightConfig === config) {
           this.inFlightConfig = null;
         }
+        // POST is create-only server-side, so a 409 means the project already
+        // exists (e.g. an earlier POST landed but its response was lost, leaving
+        // this client thinking the project is still new). Recover by marking it
+        // persisted and re-saving once via PATCH instead of looping on POST. Go
+        // through persistNow with the LATEST state (the user may have edited
+        // since the failed POST) so the retry sends current data and is tracked
+        // in inFlightConfig; the persisted-id guard makes this a single switch
+        // to PATCH, not a loop.
+        if (
+          error instanceof HttpErrorResponse &&
+          error.status === 409 &&
+          !this.persistedProjectIds.has(config.id)
+        ) {
+          this.persistedProjectIds.add(config.id);
+          const latest = this.projectConfig.value();
+          this.persistNow(latest.id === config.id ? latest : config);
+          return;
+        }
         console.error('Error saving project config:', error);
         const snackBarRef = this.matSnackBar.open(
           'Unsaved changes — failed to save the project.',
@@ -597,10 +615,12 @@ export class ConfigService {
           {panelClass: ['error-snackbar']},
         );
         snackBarRef.onAction().subscribe(() => {
-          // Retry with the latest state if the user is still on this
-          // project, otherwise with the state captured at failure time.
+          // Retry with the latest state if the user is still on this project,
+          // otherwise with the state captured at failure time. Go through
+          // persistNow so the retry is tracked in inFlightConfig and a
+          // concurrent save is still deduped.
           const latest = this.projectConfig.value();
-          this.saveProjectMediated(latest.id === config.id ? latest : config);
+          this.persistNow(latest.id === config.id ? latest : config);
         });
       },
     });
