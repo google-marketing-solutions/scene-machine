@@ -94,6 +94,20 @@ def trigger_action_handler() -> tuple[str, int]:
   retry_count = int(flask_request.headers.get('X-CloudTasks-TaskRetryCount', 0))
   if retry_count > 0:
     logger.info('Retried %s %s times', data[Key.ACTION.value], retry_count)
+  execution_id = data[Key.EXECUTION_ID.value]
+  node_id = data[Key.NODE_ID.value]
+  group_id = data[Key.GROUP_ID.value]
+  node = data[Key.WORKFLOW_DEF.value][node_id]
+  if not orchestrator.db.acquire_task_lock(execution_id, node_id, group_id):
+    logger.warning(
+        '[%s] Node %s (group %s) was already triggered. Skipping execution.'
+        ' (%s)',
+        execution_id,
+        node_id,
+        group_id,
+        node,
+    )
+    return 'Already Triggered', 200
   try:
     orchestrator.trigger_action(
         copy.deepcopy(data),
@@ -103,6 +117,8 @@ def trigger_action_handler() -> tuple[str, int]:
   except Exception as e:  # pylint: disable=broad-exception-caught
     if util_errors.is_retryable(e):
       logger.error('Retrying action %s: %s', data[Key.ACTION.value], e)
+      # Release the lock so that the retry can proceed
+      orchestrator.db.release_task_lock(execution_id, node_id, group_id)
       return 'Quota Exceeded', 429  # Cloud Tasks may retry this
     else:
       logger.error('Fatal error for action %s: %s', data[Key.ACTION.value], e)

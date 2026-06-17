@@ -294,6 +294,15 @@ else
 fi
 
 echo
+echo "[>] Configuring TTL on cloudTasks collection..."
+if gcloud firestore fields ttls list --collection-group=cloudTasks --database="$FIRESTORE_DB" --project=$PROJECT 2>/dev/null | grep -q "expiresAt"; then
+    echo "✓ TTL is already enabled on cloudTasks collection."
+else
+    echo "Enabling TTL on cloudTasks collection..."
+    gcloud firestore fields ttls update expiresAt --collection-group=cloudTasks --enable-ttl --database="$FIRESTORE_DB" --project=$PROJECT --async || echo "  ⚠ Could not enable TTL (it might already be enabled or provisioning)."
+fi
+
+echo
 echo "[>] Setting up Firebase project and Web App..."
 if ! is_service_enabled "firebase.googleapis.com"; then
   echo "Enabling Firebase Management API..."
