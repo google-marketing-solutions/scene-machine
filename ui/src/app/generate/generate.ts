@@ -15,6 +15,7 @@
  */
 
 import {ChangeDetectionStrategy, Component, inject} from '@angular/core';
+import {MatSnackBar} from '@angular/material/snack-bar';
 import {ActivatedRoute, Router} from '@angular/router';
 import {ConfigService} from '../services/config/config';
 
@@ -31,12 +32,26 @@ export class Generate {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private config = inject(ConfigService);
+  private snackBar = inject(MatSnackBar);
 
   generateUUID(): string {
     return crypto.randomUUID();
   }
 
   constructor() {
+    // A new project is built from the global config defaults (aspect ratio,
+    // resolution, model). If /api/config has not loaded yet (or failed), those
+    // defaults are empty, so creating now would persist a project with missing
+    // settings. Bounce back home with a recoverable message instead. (E1)
+    if (!this.config.globalConfig.value()) {
+      this.snackBar.open(
+        'Configuration is not loaded yet. Please try again in a moment.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      void this.router.navigate(['/'], {replaceUrl: true});
+      return;
+    }
     const uuid = this.generateUUID();
     const projectType = this.route.snapshot.paramMap.get('projectType');
     const redirectRoute = projectType === 'ai' ? 'setup' : 'storyboard';
