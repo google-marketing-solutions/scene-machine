@@ -19,19 +19,8 @@ import '@angular/compiler';
 import {HttpClient} from '@angular/common/http';
 import {EnvironmentInjector} from '@angular/core';
 import {of, Subject, throwError} from 'rxjs';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {env} from '../../../env';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {MediaService} from './media';
-
-// Pin env so this spec does not depend on the rendered (gitignored)
-// src/env.ts. signUrl/signUrls are mode-agnostic; the resolve() specs below
-// mutate this plain object per mode and restore it in afterEach.
-vi.mock('../../../env', async importOriginal => {
-  const actual = (await importOriginal()) as any;
-  return {
-    env: {...actual.env, mediaMode: 'mediated'},
-  };
-});
 
 const mockGet = vi.fn();
 
@@ -77,11 +66,6 @@ describe('MediaService', () => {
       return null;
     });
     service = new MediaService();
-  });
-
-  afterEach(() => {
-    // The resolve() specs mutate the mocked (plain-object) env per mode.
-    (env as {mediaMode: string}).mediaMode = 'mediated';
   });
 
   describe('signUrls', () => {
@@ -294,7 +278,6 @@ describe('MediaService', () => {
   // back to the stored URL for path-less legacy refs.
   describe('resolve', () => {
     it('mediated: signs the path via /api/signUrl', async () => {
-      (env as {mediaMode: string}).mediaMode = 'mediated';
       httpClientMock.get.mockReturnValue(of(signUrlResponse(['videos/a.mp4'])));
 
       const url = await service.resolve({
@@ -309,8 +292,6 @@ describe('MediaService', () => {
     });
 
     it('mediated: falls back to the stored URL for path-less legacy refs without any fetch', async () => {
-      (env as {mediaMode: string}).mediaMode = 'mediated';
-
       const url = await service.resolve({url: 'http://stored/legacy'});
 
       expect(url).toBe('http://stored/legacy');

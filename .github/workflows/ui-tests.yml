@@ -48,6 +48,13 @@ jobs:
     - name: Lint
       run: npm run lint
 
+    - name: Type-check specs
+      # The bare-vitest harness (vitest.config.mts) emits each spec with
+      # prog.emit() and never surfaces semantic diagnostics, so `npx vitest run`
+      # passes even when the specs have type errors. tsc -p tsconfig.spec.json
+      # --noEmit is the gate that actually fails the build on those errors.
+      run: npm run typecheck:spec
+
     - name: Unit tests
       run: npx vitest run
 

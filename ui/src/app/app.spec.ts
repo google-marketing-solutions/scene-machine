@@ -22,12 +22,12 @@ import {App} from './app';
 import {RemixEngineService} from './services/remix-engine/remix-engine';
 import './testing/mocks/match-media.mock';
 
-// Pin the data plane so these specs do not depend on the rendered
-// (gitignored) src/env.ts.
+// Provide an isolated copy of env so the controlPlaneMode mutations in these
+// specs do not leak into the rendered (gitignored) src/env.ts or other specs.
 vi.mock('../env', async importOriginal => {
   const actual = await importOriginal<typeof import('../env')>();
   return {
-    env: {...actual.env, dataPlaneMode: 'mediated'},
+    env: {...actual.env},
   };
 });
 
@@ -56,7 +56,6 @@ describe('App', () => {
   });
 
   afterEach(() => {
-    env.dataPlaneMode = 'mediated';
     env.controlPlaneMode = initialControlPlaneMode;
   });
 

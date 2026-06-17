@@ -114,7 +114,7 @@ describe('Setup image upload', () => {
     // The uploaded image was recorded on the product...
     expect(configMock.updateProjectConfig).toHaveBeenCalledTimes(1);
     expect(
-      configMock.projectConfig.value().inputConfig.products[0].images,
+      configMock.projectConfig.value().inputConfig?.products[0].images,
     ).toEqual([{path: 'remix-input/x', url: 'https://x', name: 'pic.jpeg'}]);
     // ...and persisted right away exactly once (the discrete upload event).
     expect(configMock.saveNow).toHaveBeenCalledTimes(1);

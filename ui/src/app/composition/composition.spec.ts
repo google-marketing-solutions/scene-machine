@@ -17,8 +17,7 @@
 import {signal, WritableSignal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {MatSnackBarModule} from '@angular/material/snack-bar';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
-import {env} from '../../env';
+import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   ConfigService,
   GeneratedScene,
@@ -28,16 +27,6 @@ import {
 import {MediaService} from '../services/media/media';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {Composition} from './composition';
-
-// Pin the media plane so these specs do not depend on the rendered
-// (gitignored) src/env.ts. The held-src player tests below assume the
-// mediated plane.
-vi.mock('../../env', async importOriginal => {
-  const actual = await importOriginal<typeof import('../../env')>();
-  return {
-    env: {...actual.env, mediaMode: 'mediated'},
-  };
-});
 
 describe('CompositionComponent', () => {
   let component: Composition;
@@ -115,11 +104,6 @@ describe('CompositionComponent', () => {
     fixture = TestBed.createComponent(Composition);
     component = fixture.componentInstance;
     fixture.detectChanges();
-  });
-
-  afterEach(() => {
-    // Reset the mocked (plain-object) env between tests.
-    (env as {mediaMode: string}).mediaMode = 'mediated';
   });
 
   it('should create', () => {
@@ -389,8 +373,13 @@ describe('CompositionComponent', () => {
       prompt: 'test prompt',
       candidates: [
         {
-          video: {url: 'http://video.url', path: 'path/to/video'},
+          runNumber: 1,
+          durationSeconds: 5,
+          model: 'veo-3.0-generate-001',
+          prompt: 'test prompt',
+          generateAudio: false,
           resolution: '1080p',
+          video: {url: 'http://video.url', path: 'path/to/video'},
         },
       ],
       selectedCandidateIndex: 0,
