@@ -1,0 +1,46 @@
+# Builds the single Scene Machine container image, deployed to BOTH the app and
+# worker Cloud Run services. The key option is `logging: CLOUD_LOGGING_ONLY`: it
+# keeps build logs in Cloud Logging (the console) instead of a GCS bucket, which
+# is what the original `gcloud run deploy --source` flow did and what makes the
+# build work under VPC Service Controls — VPC-SC blocks streaming build logs from
+# a GCS bucket, but Cloud Logging is unaffected. _IMAGE is supplied by deploy.sh
+# via --substitutions.
+#
+# Layer caching (faster repeat deploys): by default the build pulls the
+# previously pushed :latest image and passes it to `docker build --cache-from`,
+# so unchanged layers are reused instead of rebuilt. The slow builder-stage
+# `pip install` only re-runs when requirements.txt changes. Two details make
+# this actually work:
+#   * the pull is best-effort (`|| true`): the first build on a fresh project has
+#     nothing to pull and must not fail;
+#   * BuildKit is on (DOCKER_BUILDKIT=1) and the build bakes an inline cache
+#     manifest (BUILDKIT_INLINE_CACHE=1) into the pushed image, so the NEXT
+#     build can read these layers back. Without the inline-cache arg,
+#     --cache-from finds the image but gets zero cache hits.
+# Set _USE_CACHE=0 (deploy.sh --no-build-cache) to force a clean cold rebuild,
+# e.g. a release or a dependency/CVE refresh.
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        if [ "${_USE_CACHE}" = "1" ]; then
+          echo "Layer cache ON: pulling previous ${_IMAGE} (best-effort)..."
+          docker pull "${_IMAGE}" || true
+          DOCKER_BUILDKIT=1 docker build \
+            -t "${_IMAGE}" \
+            --cache-from "${_IMAGE}" \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            .
+        else
+          echo "Layer cache OFF: forced cold rebuild (--no-build-cache)."
+          DOCKER_BUILDKIT=1 docker build -t "${_IMAGE}" .
+        fi
+substitutions:
+  _USE_CACHE: '1'
+images:
+  - '${_IMAGE}'
+options:
+  logging: CLOUD_LOGGING_ONLY

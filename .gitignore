@@ -1,5 +1,6 @@
 config.txt
 config-*.txt
+config*.bak
 ui/definitions/config.json
 *.pyc
 __pycache__
@@ -9,7 +10,6 @@ venv*
 ui/app/.vscode/
 ui/app/src/app/services/config/config.service.ts
 gcs-cors-config.json
-apispec.yaml
 deployed_version.txt
 firebase/firebase.json
 firebase/.firebaserc
