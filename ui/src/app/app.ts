@@ -22,12 +22,13 @@ import {
   signal,
   ViewChild,
 } from '@angular/core';
-import {Auth, GoogleAuthProvider, signInWithPopup} from '@angular/fire/auth';
 import {MatButtonModule} from '@angular/material/button';
 import {MatSidenavContainer, MatSidenavModule} from '@angular/material/sidenav';
 import {NavigationEnd, Router, RouterOutlet} from '@angular/router';
 import {filter} from 'rxjs/operators';
+import {env} from '../env';
 import {ConfigService} from './services/config/config';
+import {RemixEngineService} from './services/remix-engine/remix-engine';
 import {Sidebar} from './sidebar/sidebar';
 
 /**
@@ -42,9 +43,11 @@ import {Sidebar} from './sidebar/sidebar';
 })
 export class App implements OnInit {
   protected configService = inject(ConfigService);
+  // Eagerly instantiated so persisted in-flight generations resume on every
+  // route (the service's constructor effect watches the loaded project);
+  // otherwise it would only be created lazily by storyboard/setup/composition.
+  protected remixEngineService = inject(RemixEngineService);
   protected router = inject(Router);
-
-  private auth = inject(Auth);
 
   collapsed = signal(false);
   protected loggedIn = signal(false);
@@ -53,14 +56,12 @@ export class App implements OnInit {
   @ViewChild(MatSidenavContainer) sidenavContainer!: MatSidenavContainer;
 
   login() {
-    signInWithPopup(this.auth, new GoogleAuthProvider())
-      .then(() => {
-        this.loggedIn.set(true);
-        window.location.reload();
-      })
-      .catch(error => {
-        console.log(error);
-      });
+    // The only deployed front door is IAP, behind which the user is already
+    // authenticated. The data plane is fully mediated through /api, which the
+    // backend filters and stamps by the verified IAP identity, so the client
+    // holds no session of its own. There is nothing to sign in to here, so just
+    // mark the app as logged in.
+    this.loggedIn.set(true);
   }
 
   async ngOnInit() {
@@ -88,13 +89,17 @@ export class App implements OnInit {
           }
         }
       });
-    await this.auth.authStateReady();
-    if (this.auth.currentUser) {
+
+    // Local dev (controlPlaneMode 'none'): there is no front-door auth, so treat
+    // the developer as already signed in so the UI renders and calls /api. The
+    // local backend runs AUTH_MODE=none and derives no identity.
+    if (env.controlPlaneMode === 'none') {
       this.loggedIn.set(true);
-    } else {
-      this.loggedIn.set(false);
-      this.showLoginMessage.set(true);
-      this.login();
+      return;
     }
+
+    // Deployed (controlPlaneMode 'iap'): IAP already authenticated the user, so
+    // there is nothing to sign in to; just mark the app logged in.
+    this.login();
   }
 }

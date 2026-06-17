@@ -14,20 +14,17 @@
  * limitations under the License.
  */
 
+import {provideHttpClient, withInterceptors} from '@angular/common/http';
 import {
   ApplicationConfig,
   LOCALE_ID,
   provideBrowserGlobalErrorListeners,
 } from '@angular/core';
-import {initializeApp, provideFirebaseApp} from '@angular/fire/app';
-import {getAuth, provideAuth} from '@angular/fire/auth';
-import {getFirestore, provideFirestore} from '@angular/fire/firestore';
-import {getStorage, provideStorage} from '@angular/fire/storage';
 import {provideRouter} from '@angular/router';
 
 import {registerLocaleData} from '@angular/common';
-import {env} from '../env';
 import {routes} from './app.routes';
+import {authTokenInterceptor} from './auth/auth-token.interceptor';
 
 import locale from '@angular/common/locales/en-GB';
 import {MAT_FORM_FIELD_DEFAULT_OPTIONS} from '@angular/material/form-field';
@@ -40,18 +37,8 @@ registerLocaleData(locale, 'en-GB');
 export const appConfig: ApplicationConfig = {
   providers: [
     provideBrowserGlobalErrorListeners(),
+    provideHttpClient(withInterceptors([authTokenInterceptor])),
     provideRouter(routes),
-    provideFirebaseApp(() =>
-      initializeApp({
-        apiKey: env.apiKey,
-        authDomain: env.authDomain,
-        projectId: env.projectId,
-        storageBucket: env.storageBucket,
-      }),
-    ),
-    provideAuth(() => getAuth()),
-    provideStorage(() => getStorage()),
-    provideFirestore(() => getFirestore(env.firestoreDatabase)),
     {provide: LOCALE_ID, useValue: 'en-GB'},
     {
       provide: MAT_FORM_FIELD_DEFAULT_OPTIONS,
