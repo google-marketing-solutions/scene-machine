@@ -382,6 +382,10 @@ def get_status_handler() -> flask_response:
 
 _SIGNED_GET_TTL = datetime.timedelta(hours=24)
 _SIGNED_PUT_TTL = datetime.timedelta(hours=1)
+# Cap the batch size of sign_url_handler: each path costs one IAM signBlob RPC,
+# and MAX_CONTENT_LENGTH does not bound query-string params, so an uncapped list
+# lets one admitted user exhaust the project's signBlob quota for everyone.
+_MAX_SIGN_URL_PATHS = 100
 _UPLOAD_PREFIXES = ('remix-input', 'thumbnail')
 
 # Per-prefix maximum declared upload size (bytes). The client sends sizeBytes on
@@ -619,6 +623,10 @@ def sign_url_handler() -> flask_response:
   paths = flask_request.args.getlist('path')
   if not paths:
     return _json_error('Missing path parameter', 400)
+  if len(paths) > _MAX_SIGN_URL_PATHS:
+    return _json_error(
+        f'Too many paths: {len(paths)} (max {_MAX_SIGN_URL_PATHS})', 400
+    )
   for path in paths:
     if not _valid_object_path(path):
       return _json_error(f'Invalid path: {path}', 400)
@@ -727,21 +735,28 @@ def _write_project_doc(ui_db, doc_ref, payload: dict) -> None:
   _commit_in_batches(ui_db, ops)
 
 
-def _read_project_doc(doc_ref, snapshot=None):
+def _read_project_doc(doc_ref, snapshot=None, *, first_scene_only=False):
   """Reassembles a project dict, restoring storyboard from the subcollection.
 
   Returns None when the project document does not exist. The optional
   snapshot lets callers that already fetched the root doc skip a re-read.
+
+  first_scene_only fetches just the first scene instead of streaming the whole
+  subcollection. The project list only needs storyboard[0] (for each card's
+  thumbnail), so listing N projects costs N+N reads rather than
+  N + total-scene-count, and returns far less data over the wire.
   """
   if snapshot is None:
     snapshot = doc_ref.get()
   if not snapshot.exists:
     return None
   data = snapshot.to_dict()
-  data['storyboard'] = [
-      scene.to_dict()
-      for scene in doc_ref.collection(_SCENES_SUBCOLLECTION).stream()
-  ]
+  scenes_ref = doc_ref.collection(_SCENES_SUBCOLLECTION)
+  if first_scene_only:
+    first = scenes_ref.document(_scene_doc_id(0)).get()
+    data['storyboard'] = [first.to_dict()] if first.exists else []
+  else:
+    data['storyboard'] = [scene.to_dict() for scene in scenes_ref.stream()]
   return data
 
 
@@ -782,7 +797,11 @@ def projects_handler() -> flask_response:
       )
     projects = [
         util_database.firestore_to_json_serialisable(
-            _read_project_doc(collection.document(snapshot.id), snapshot)
+            _read_project_doc(
+                collection.document(snapshot.id),
+                snapshot,
+                first_scene_only=True,
+            )
         )
         for snapshot in query.stream()
     ]
