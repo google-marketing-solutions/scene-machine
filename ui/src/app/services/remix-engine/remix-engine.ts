@@ -104,6 +104,20 @@ class CandidateSigningError extends Error {
 }
 
 /**
+ * Thrown when a COMPLETED combine-scenes render's output URL cannot be signed
+ * right now (transient /api/signUrl failure). The render-path analogue of
+ * CandidateSigningError: callers keep the pendingRender marker so reopening the
+ * project re-collects the finished video, rather than recording a definitive
+ * failure that would discard a successful — and expensive — render. (E3)
+ */
+class RenderSigningError extends Error {
+  constructor(readonly reason: unknown) {
+    super('Failed to sign rendered video URL');
+    this.name = 'RenderSigningError';
+  }
+}
+
+/**
  * Service for interacting with the Remix Engine.
  */
 @Injectable({
@@ -1367,6 +1381,22 @@ export class RemixEngineService {
           {panelClass: ['error-snackbar']},
         );
         return;
+      } else if (error instanceof RenderSigningError) {
+        // The render finished but its output URL could not be signed right now.
+        // Keep pendingRender so a reopen re-collects the finished video; release
+        // the per-execution claim so that reopen can re-resume it. Do NOT record
+        // an error run or clear the marker, which would discard the render. (E3)
+        if (executionId) {
+          this.resumedRenderExecutionIds.delete(executionId);
+        }
+        this.combiningScenes.set(false);
+        this.matSnackBar.open(
+          'Your video is ready but could not be loaded right now — ' +
+            'reopen the project to retry.',
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
+        return;
       } else if (error instanceof Error) {
         console.error('Combine scenes error:', error);
         if (executionId) {
@@ -1411,7 +1441,17 @@ export class RemixEngineService {
       throw new Error('Workflow completed without output');
     }
     const videoPath = workflowStatus.sink.output['0']['video'][0]['file'];
-    const videoUrl = await this.mediaService.signUrl(videoPath!);
+    let videoUrl: string;
+    try {
+      // Retry transient signing failures, then signal an all-fail as a
+      // RenderSigningError so the caller keeps pendingRender instead of
+      // discarding this completed render (mirrors collectCandidates). (E3)
+      videoUrl = await this.withRetry(() =>
+        this.mediaService.signUrl(videoPath!),
+      );
+    } catch (error) {
+      throw new RenderSigningError(error);
+    }
     this.configService.addRenderRun({
       createdAt: new Date(),
       outputVideo: {
@@ -1459,6 +1499,20 @@ export class RemixEngineService {
         this.matSnackBar.open(
           'Rendering is taking longer than expected. It may still finish — ' +
             'reopen the project to check.',
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
+        return;
+      } else if (error instanceof RenderSigningError) {
+        // The render finished but its output URL could not be signed right now.
+        // Keep pendingRender so a later reopen re-collects the finished video;
+        // release the per-execution claim so the reopen can re-resume it. Do NOT
+        // record an error run or clear the marker. (E3)
+        this.resumedRenderExecutionIds.delete(pending.executionId);
+        this.combiningScenes.set(false);
+        this.matSnackBar.open(
+          'Your video is ready but could not be loaded right now — ' +
+            'reopen the project to retry.',
           'Dismiss',
           {panelClass: ['error-snackbar']},
         );

@@ -901,5 +901,30 @@ describe('RemixEngineService (mediated)', () => {
         {panelClass: ['error-snackbar']},
       );
     });
+
+    it('keeps the marker and records no error when the resumed render cannot be signed', async () => {
+      mockProjectWithRender();
+      // The render finished, but signing its output URL fails persistently
+      // (transient /api/signUrl outage). withRetry exhausts its attempts and the
+      // path is treated like a stalled render — not a failure — so the finished
+      // video is not discarded: the marker is kept for a later reopen. (E3)
+      mediaServiceMock.signUrl.mockRejectedValue(new Error('sign failed'));
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/final.mp4'}]}}},
+      } as any);
+
+      runResumeScan();
+      await vi.waitFor(() => expect(service.combiningScenes()).toBe(false));
+
+      // No error run recorded and the marker is never cleared (kept for retry).
+      expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+      expect(configServiceMock.setPendingRender).not.toHaveBeenCalled();
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Your video is ready but could not be loaded right now — ' +
+          'reopen the project to retry.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
   });
 });
