@@ -25,6 +25,7 @@ from google.cloud.firestore import DocumentSnapshot
 
 
 MAX_ATTEMPTS = 75
+TASK_LOCK_EXPIRATION_HOURS = 12
 
 
 def firestore_to_json_serialisable(data: Any) -> Any:
@@ -400,7 +401,7 @@ class Database:
     doc_ref = self._get_task_lock_ref(execution_id, node_id, group_id)
     expires_at = datetime.datetime.now(
         datetime.timezone.utc
-    ) + datetime.timedelta(hours=12)
+    ) + datetime.timedelta(hours=TASK_LOCK_EXPIRATION_HOURS)
 
     @firestore.transactional
     def create_if_not_exists(
