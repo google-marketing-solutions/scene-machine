@@ -361,6 +361,25 @@ class Database:
         merge=True,
     )
 
+  def _get_task_lock_ref(
+      self,
+      execution_id: str,
+      node_id: str,
+      group_id: typing.Union[str, int],
+  ) -> firestore.DocumentReference:
+    """Gets the document reference for a task lock.
+
+    Args:
+      execution_id: The workflow's execution ID.
+      node_id: The node ID.
+      group_id: The group ID.
+
+    Returns:
+      The document reference.
+    """
+    doc_id = f'{execution_id}_{node_id}_{group_id}'
+    return self.db.collection('cloudTasks').document(doc_id)
+
   def acquire_task_lock(
       self,
       execution_id: str,
@@ -378,8 +397,7 @@ class Database:
       True if the lock was successfully acquired (first to trigger),
       False otherwise.
     """
-    doc_id = f'{execution_id}_{node_id}_{group_id}'
-    doc_ref = self.db.collection('cloudTasks').document(doc_id)
+    doc_ref = self._get_task_lock_ref(execution_id, node_id, group_id)
     expires_at = datetime.datetime.now(
         datetime.timezone.utc
     ) + datetime.timedelta(hours=12)
@@ -415,8 +433,7 @@ class Database:
       node_id: The node ID.
       group_id: The group ID.
     """
-    doc_id = f'{execution_id}_{node_id}_{group_id}'
-    self.db.collection('cloudTasks').document(doc_id).delete()
+    self._get_task_lock_ref(execution_id, node_id, group_id).delete()
 
   def get_documents(self, execution_id: str) -> typing.Iterable[typing.Any]:
     """Gets all node state documents within the specified workflow execution.
