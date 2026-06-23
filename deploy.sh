@@ -591,7 +591,10 @@ phase "Setting up GCS bucket..."
 DEFAULT_BUCKET="${PROJECT}-scene-machine"
 if ! gcloud storage buckets describe "gs://$GCS_BUCKET" --project=$PROJECT &> /dev/null; then
     echo "Creating dedicated GCS bucket gs://$GCS_BUCKET in ${REGION}..."
-    gcloud storage buckets create "gs://$GCS_BUCKET" --project=$PROJECT --location="$REGION" --labels=app=scene-machine
+    gcloud storage buckets create "gs://$GCS_BUCKET" --project=$PROJECT --location="$REGION"
+    # 'gcloud storage buckets create' has no --labels flag, so label the bucket
+    # in a second step with --update-labels (the same flag the adopt path uses).
+    gcloud storage buckets update "gs://$GCS_BUCKET" --project=$PROJECT --update-labels=app=scene-machine
     echo "  ✓ Bucket gs://$GCS_BUCKET created (labeled app=scene-machine)."
 else
     EXISTING_APP_LABEL=$(gcloud storage buckets describe "gs://$GCS_BUCKET" --project=$PROJECT --format="value(labels.app)" 2>/dev/null || true)
