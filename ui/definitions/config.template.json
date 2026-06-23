@@ -3,9 +3,5 @@
   "gcpProject": "$PROJECT",
   "gcpLocation": "$REGION",
   "gcsBucket": "$GCS_BUCKET",
-  "tasksQueuePrefix": "$TASKS_QUEUE_PREFIX",
-  "backendApi": {
-    "baseUrl": "/api",
-    "apiKey": "$API_KEY"
-  }
+  "tasksQueuePrefix": "$TASKS_QUEUE_PREFIX"
 }

@@ -58,9 +58,6 @@ export GCS_BUCKET="${SM_DEV_GCS_BUCKET:-${PROJECT}-scene-machine}"
 export REGION="${SM_DEV_REGION:-us-central1}"
 export TASKS_QUEUE_PREFIX="${SM_DEV_TASKS_QUEUE_PREFIX:-scene-machine-}"
 
-# No API key in local 'none' mode.
-export API_KEY="none"
-
 # The whole point of local dev: the 'none' control-plane arm.
 export UI_CONTROL_PLANE_MODE="none"
 

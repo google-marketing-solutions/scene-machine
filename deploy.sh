@@ -663,14 +663,12 @@ echo "  Front-door auth: IAP (the only deployable mode)"
 # is additionally exported for the front-door env.template.txt field
 # (controlPlaneMode) — a no-op against templates that don't reference it.
 envsubst < ./ui/src/env.template.txt > ./ui/src/env.ts
-# config.json: rendered for the front door. backendApi.baseUrl is a literal
-# "/api" in the template — same-origin. The app serves the SPA, /api and the
-# status viewer from one Cloud Run service, so the browser always calls the
-# backend RELATIVE to wherever the page loaded, never an absolute host. Cloud
-# Run's host form isn't predictable (app-<hash>-uc.a.run.app vs
-# app-<num>.<region>.run.app) and is not needed at build time. Only $API_KEY /
-# $FIRESTORE_DB / $GCS_BUCKET are substituted; no app host is baked in.
-export API_KEY="none"
+# config.json: read by the backend (orch.py) for the project/bucket/database
+# params and rendered into the deploy. The app serves the SPA, /api and the
+# status viewer from one Cloud Run service, so the browser always calls /api
+# RELATIVE to wherever the page loaded; no app host is baked in. Only
+# $FIRESTORE_DB / $GCS_BUCKET / $PROJECT / $REGION / $TASKS_QUEUE_PREFIX are
+# substituted.
 generate_config
 
 # Safety: never build or ship a UI rendered for LOCAL DEV (controlPlaneMode
