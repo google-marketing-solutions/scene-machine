@@ -14,17 +14,15 @@
 # limitations under the License.
 
 # ---------------------------------------------------------------------------
-# deploy.sh — single-image, two-service ("app" + "worker") Scene
-# Machine deployment with NO API Gateway and NO App Engine.
+# deploy.sh — single-image, two-service ("app" + "worker") Scene Machine
+# deployment.
 #
 # Usage:
 #   ./deploy.sh [--non-interactive]
 #
-#   Configuration comes from ./config.txt. (Any leftover API_GATEWAY* or
-#   APP_ENGINE_REGION entries from older config files are ignored — there is no
-#   API Gateway or App Engine in this topology.) The app service is always
-#   IAP-gated (deployed --no-allow-unauthenticated --iap); the firebase public
-#   sign-in mode was removed, so there is no auth-mode choice to make.
+#   Configuration comes from ./config.txt. The app service is always IAP-gated
+#   (deployed --no-allow-unauthenticated --iap), so there is no auth-mode
+#   choice to make.
 #   --non-interactive is for headless/agent runs: it auto-confirms the
 #   deployment-target prompt and makes any step that needs a human in the
 #   console FAIL FAST (printing what to do and to
@@ -179,10 +177,10 @@ usage() {
 set -euo pipefail
 
 # --- Argument parsing --------------------------------------------------------
-# The app service is always IAP-gated; the firebase public sign-in mode was
-# removed, so there is no auth-mode to choose. This fixed value only labels the
-# banners below and gates the IAP post-deploy steps; the deployed Cloud Run
-# services get AUTH_MODE=iap set explicitly where they are created.
+# The app service is always IAP-gated, so there is no auth-mode to choose. This
+# fixed value only labels the banners below and gates the IAP post-deploy steps;
+# the deployed Cloud Run services get AUTH_MODE=iap set explicitly where they
+# are created.
 AUTH_MODE="iap"
 NONINTERACTIVE=0
 # Faster-deploy flags. All default OFF: a plain `./deploy.sh` is the full,
@@ -245,9 +243,6 @@ fi
 echo "✓ Application Default Credentials present."
 
 # --- Check config.txt -------------------------------------------------------
-# Any leftover API_GATEWAY* / APP_ENGINE_REGION entries from older config files
-# are ignored (there is no API Gateway or App Engine in this topology) and NOT
-# required.
 echo
 echo "[>] Checking config.txt..."
 REQUIRED_VARS=(
@@ -427,8 +422,8 @@ IMAGE="${REGION}-docker.pkg.dev/${PROJECT}/${ARTIFACT_REPO}/${IMAGE_NAME}:latest
 # isn't predictable, and nothing needs it at build time (the front door is
 # same-origin). The real host is read from status.url after the app deploy for
 # the one thing that genuinely needs it: the GCS bucket CORS list. The deploy
-# does NOT touch the Firebase authorized-domains list (IAP gates the app, so
-# that list is irrelevant) - see issue #102, which the old deploy-ui.sh wiped.
+# does NOT touch the authorized-domains list (IAP gates the app, so that list
+# is irrelevant).
 IAP_AUDIENCE="/projects/${PROJECT_NUMBER}/locations/${REGION}/services/app"
 echo "  Project number: ${PROJECT_NUMBER}"
 echo "  Build SA:       ${BUILD_SA}"
