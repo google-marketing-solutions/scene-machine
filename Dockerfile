@@ -70,6 +70,15 @@ COPY ui/dist/ ui/dist/
 COPY ui/definitions/ ui/definitions/
 COPY ui/remix-engine-status-viewer/ ui/remix-engine-status-viewer/
 
+# COPY preserves the source files' permission bits, so a build host with a
+# restrictive umask (e.g. 027/077, common on corporate machines) copies the code
+# in non-world-readable. The non-root appuser would then be unable to read
+# /app/orch.py and gunicorn would fail to import it (PermissionError: [Errno 13]).
+# Normalize to readable-by-all (capital X adds +x to directories only, not to the
+# .py files), independent of the build host's umask. Files stay root-owned, so
+# appuser can read but not modify its own code.
+RUN chmod -R a+rX /app
+
 # Drop privileges last, after every step that needs root (apt, the COPYs).
 USER appuser
 
