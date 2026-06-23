@@ -26,7 +26,7 @@ This walkthrough demonstrates how to use **Scene Machine** to leverage generativ
 The Homepage serves as your central dashboard for managing all Scene Machine projects. From here, you can view existing projects and initiate new ones.
 
 > [!NOTE]
-> Scene Machine projects are stored in Firebase and assets on Google Cloud Storage, scoped to your specific Google Cloud project.
+> Scene Machine projects are stored in Firestore and assets on Google Cloud Storage, scoped to your specific Google Cloud project.
 > - **Permissions:** Users with access to the SM deployment can manage (create, edit, delete) all projects within that instance, including those created by others.
 > - **Data Isolation:** All project data remains strictly within the hosting Google Cloud project and is not shared externally.
 

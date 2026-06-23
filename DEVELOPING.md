@@ -599,8 +599,10 @@ It is possible to call a workflow `demo.json` without relying on the user interf
 
 ```
 source config.txt
-export CLOUD_RUN_URL=$(gcloud run services describe orch --region=$REGION --project=$PROJECT --format='value(status.url)')
+export CLOUD_RUN_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)')
 ```
+
+The `worker` service serves `/supplyNode` and `/triggerAction`. It is private, so the identity token below authenticates a caller that holds the Cloud Run Invoker role on it.
 
 Then we can call the actual workflow, here `demo.json`, while substituting some of the values defined in `config.txt`:
 
@@ -608,11 +610,7 @@ Then we can call the actual workflow, here `demo.json`, while substituting some 
 curl -X POST $CLOUD_RUN_URL/supplyNode -H "Authorization: bearer $(gcloud auth print-identity-token)" -H "Content-Type: application/json" -d @<(envsubst < workflow_examples/demo.json)
 ```
 
-Among the first lines of the (quite verbose) textual output, you will find an execution ID that can be used to check the execution status, either by entering it on the `/status` page of Scene Machine mentioned [here](README.md#technical-problems), or with the following command, albeit with a complex output:
-
-```
-curl -H "Authorization: bearer $(gcloud auth print-identity-token)" -X GET $CLOUD_RUN_URL/getStatus?executionId=<EXECUTION ID>
-```
+Among the first lines of the (quite verbose) textual output, you will find an execution ID. Check its status from the graphical view of the generation process described [here](README.md#technical-problems), or with `python3 cli.py --s <EXECUTION ID>` (see [Running workflows with CLI calls](#running-workflows-with-cli-calls) below). The `worker` service has no status endpoint; `/getStatus` is served only by the IAP-gated `app` service as `/api/getStatus`.
 
 ### Running workflows with CLI calls
 
@@ -621,12 +619,18 @@ It is also possible to achieve the same as above, but without relying on Cloud R
 ```
 source config.txt
 python3 cli.py --e <(envsubst < workflow_examples/image2video.json)
-python3 cli.py --bucket remix-engine-bucket --s <EXECUTION ID>
+python3 cli.py --bucket $GCS_BUCKET --s <EXECUTION ID>
 ```
 
 ### Other means of testing
 
-There are various unit tests in the folders `test`, `actions/test` and `actions_lib/test`.
+There are various Python unit tests in the folders `test`, `actions/test` and `actions_lib/test`.
+
+The UI unit tests run with Angular's test builder from the `ui` folder (Node 22 required):
+
+```
+cd ui && npm test
+```
 
 In addition, the following calls are available:
 
