@@ -37,8 +37,6 @@ jobs:
         UI_DATA_PLANE_MODE: mediated
         PROJECT: ci
         FIRESTORE_DB_UI: ci
-        FIREBASE_API_KEY: ''
-        FIREBASE_AUTH_DOMAIN: ''
         GCS_BUCKET: ''
       run: envsubst < src/env.template.txt > src/env.ts
 
@@ -49,14 +47,14 @@ jobs:
       run: npm run lint
 
     - name: Type-check specs
-      # The bare-vitest harness (vitest.config.mts) emits each spec with
-      # prog.emit() and never surfaces semantic diagnostics, so `npx vitest run`
-      # passes even when the specs have type errors. tsc -p tsconfig.spec.json
-      # --noEmit is the gate that actually fails the build on those errors.
+      # The official unit-test builder transpiles specs with esbuild and does not
+      # surface semantic TypeScript diagnostics, so the test run passes even when
+      # specs have type errors. tsc -p tsconfig.spec.json --noEmit is the gate that
+      # actually fails the build on those errors.
       run: npm run typecheck:spec
 
     - name: Unit tests
-      run: npx vitest run
+      run: npm test -- --watch=false
 
     - name: Production build
       run: npx ng build --configuration production

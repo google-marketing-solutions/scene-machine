@@ -15,62 +15,14 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import '@angular/compiler';
 import {HttpClient, HttpErrorResponse} from '@angular/common/http';
-import {DOCUMENT} from '@angular/common';
-import {EnvironmentInjector, signal} from '@angular/core';
+import {DOCUMENT} from '@angular/core';
+import {TestBed} from '@angular/core/testing';
 import {MatSnackBar} from '@angular/material/snack-bar';
 import {Router} from '@angular/router';
-import {of, Subject, throwError} from 'rxjs';
+import {of, throwError} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ConfigService} from './config';
-
-// Pin the env to the mediated data plane: these tests cover the
-// flush-on-leave behavior, which must be active only in this mode.
-vi.mock('../../../env', async importOriginal => {
-  const actual = (await importOriginal()) as {env: Record<string, unknown>};
-  return {
-    env: {
-      ...actual.env,
-      dataPlaneMode: 'mediated',
-    },
-  };
-});
-
-const mockGet = vi.fn();
-const mockInjector = {get: mockGet};
-
-// Mock @angular/core to bypass runInInjectionContext and provide inject
-vi.mock('@angular/core', async importOriginal => {
-  const actual = (await importOriginal()) as any;
-  return {
-    ...actual,
-    runInInjectionContext: vi.fn((injector: any, fn: () => any) => fn()),
-    inject: vi.fn((token: any) => mockGet(token)),
-    resource: vi.fn((options: any) => {
-      const s = signal(options?.defaultValue ?? {});
-      return {
-        value: s,
-        set: (val: any) => s.set(val),
-        update: (fn: any) => s.update(fn),
-      };
-    }),
-    effect: vi.fn(() => {
-      return {
-        destroy: vi.fn(),
-      };
-    }),
-  };
-});
-
-// toObservable feeds the debounced autosave subscription; a per-test Subject
-// lets the tests drive the (skip(1) → debounceTime(5000)) pipeline directly.
-const toObservableSubject: {current: Subject<any> | null} = {current: null};
-vi.mock('@angular/core/rxjs-interop', async () => {
-  return {
-    toObservable: vi.fn(() => toObservableSubject.current!),
-  };
-});
 
 describe('ConfigService (mediated data plane)', () => {
   let service: ConfigService;
@@ -122,22 +74,41 @@ describe('ConfigService (mediated data plane)', () => {
       setItem: vi.fn(),
     };
 
-    mockGet.mockImplementation((token: any) => {
-      if (token === HttpClient) return httpClientMock;
-      if (token === Router) return routerMock;
-      if (token === DOCUMENT) return documentMock;
-      if (token === MatSnackBar) return matSnackBarMock;
-      if (token === EnvironmentInjector) return mockInjector;
-      return null;
+    TestBed.configureTestingModule({
+      providers: [
+        ConfigService,
+        {provide: HttpClient, useValue: httpClientMock},
+        {provide: MatSnackBar, useValue: matSnackBarMock},
+        {provide: Router, useValue: routerMock},
+        {provide: DOCUMENT, useValue: documentMock},
+      ],
     });
-
-    toObservableSubject.current = new Subject();
-    service = new ConfigService();
+    service = TestBed.inject(ConfigService);
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
+
+  // The autosave subscription reads projectConfig.value through the REAL
+  // toObservable, so a signal write reaches the RxJS pipeline only after Angular
+  // effects flush. TestBed.tick() performs that flush, emitting the current
+  // value; the 5s debounce is then advanced with fake timers.
+  //
+  // Call settleAutosave() (under real timers) BEFORE vi.useFakeTimers(). It does
+  // two things up front: lets the projectConfig resource loader resolve once
+  // (projectId stays null in these tests, so it never re-runs and cannot clobber
+  // a later value.set/update), and consumes the toObservable skip(1) priming
+  // emission — so the next emitProjectConfig() is the emission that actually
+  // flows through skip(1) -> debounceTime.
+  async function settleAutosave() {
+    TestBed.tick();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+  function emitProjectConfig() {
+    TestBed.tick();
+  }
 
   describe('flushPendingSave', () => {
     it('should PATCH immediately for a dirty, already-persisted project', () => {
@@ -294,36 +265,33 @@ describe('ConfigService (mediated data plane)', () => {
       expect(httpClientMock.patch).not.toHaveBeenCalled();
     });
 
-    it('should dedupe the trailing debounced emission (no double save)', () => {
-      vi.useFakeTimers();
+    it('should dedupe the trailing debounced emission (no double save)', async () => {
       markPersisted('proj-1');
-      const initial = service.projectConfig.value();
+      await settleAutosave();
+      vi.useFakeTimers();
       service.updateProjectConfig({id: 'proj-1', name: 'dirty'});
-      const dirty = service.projectConfig.value();
 
       service.saveNow();
       expect(saveRequestCount()).toBe(1);
 
       // The 5s autosave fires later carrying the exact object already saved.
-      toObservableSubject.current!.next(initial); // consumed by skip(1)
-      toObservableSubject.current!.next(dirty);
+      emitProjectConfig();
       vi.advanceTimersByTime(5000);
 
       expect(saveRequestCount()).toBe(1);
     });
 
-    it('should dedupe the trailing debounce after a brand-new create', () => {
+    it('should dedupe the trailing debounce after a brand-new create', async () => {
+      await settleAutosave();
       vi.useFakeTimers();
       service.setNewProject('new-proj');
-      const created = service.projectConfig.value();
 
       service.saveNow();
       expect(saveRequestCount()).toBe(1);
       expect(httpClientMock.post).toHaveBeenCalledTimes(1);
 
       // No edit since create: the same object re-emits via the debounce.
-      toObservableSubject.current!.next({...created, id: ''}); // skip(1)
-      toObservableSubject.current!.next(created);
+      emitProjectConfig();
       vi.advanceTimersByTime(5000);
 
       expect(saveRequestCount()).toBe(1);
@@ -347,19 +315,18 @@ describe('ConfigService (mediated data plane)', () => {
       expect(saveRequestCount()).toBe(1);
     });
 
-    it('should still save a title committed after an immediate save', () => {
+    it('should still save a title committed after an immediate save', async () => {
       // Mirrors the title-on-blur flow: a save, then more keystrokes, then a
       // later commit must persist the newer name.
-      vi.useFakeTimers();
       markPersisted('proj-1');
-      const initial = service.projectConfig.value();
+      await settleAutosave();
+      vi.useFakeTimers();
       service.updateProjectConfig({id: 'proj-1', name: 'My Proj'});
 
       service.saveNow();
       expect(saveRequestCount()).toBe(1);
 
       service.updateProjectConfig({name: 'My Project'});
-      const renamed = service.projectConfig.value();
       service.saveNow();
       expect(saveRequestCount()).toBe(2);
       expect(httpClientMock.patch.mock.calls[1][1]).toEqual(
@@ -367,8 +334,7 @@ describe('ConfigService (mediated data plane)', () => {
       );
 
       // And the trailing debounce on the latest object is still deduped.
-      toObservableSubject.current!.next(initial); // skip(1)
-      toObservableSubject.current!.next(renamed);
+      emitProjectConfig();
       vi.advanceTimersByTime(5000);
       expect(saveRequestCount()).toBe(2);
     });
@@ -456,15 +422,13 @@ describe('ConfigService (mediated data plane)', () => {
   });
 
   describe('debounced autosave interplay', () => {
-    it('should save a dirty config via the debounce when not flushed', () => {
-      vi.useFakeTimers();
+    it('should save a dirty config via the debounce when not flushed', async () => {
       markPersisted('proj-1');
-      const initial = service.projectConfig.value();
+      await settleAutosave();
+      vi.useFakeTimers();
       service.updateProjectConfig({id: 'proj-1', name: 'dirty'});
-      const dirty = service.projectConfig.value();
 
-      toObservableSubject.current!.next(initial); // consumed by skip(1)
-      toObservableSubject.current!.next(dirty);
+      emitProjectConfig();
       expect(saveRequestCount()).toBe(0); // debounce pending
 
       vi.advanceTimersByTime(5000);
@@ -472,15 +436,13 @@ describe('ConfigService (mediated data plane)', () => {
       expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
     });
 
-    it('should not duplicate the save when the debounce fires after a flush of the same config', () => {
-      vi.useFakeTimers();
+    it('should not duplicate the save when the debounce fires after a flush of the same config', async () => {
       markPersisted('proj-1');
-      const initial = service.projectConfig.value();
+      await settleAutosave();
+      vi.useFakeTimers();
       service.updateProjectConfig({id: 'proj-1', name: 'dirty'});
-      const dirty = service.projectConfig.value();
 
-      toObservableSubject.current!.next(initial); // consumed by skip(1)
-      toObservableSubject.current!.next(dirty);
+      emitProjectConfig();
 
       service.flushPendingSave();
       expect(saveRequestCount()).toBe(1);
@@ -491,19 +453,17 @@ describe('ConfigService (mediated data plane)', () => {
       expect(saveRequestCount()).toBe(1);
     });
 
-    it('should still save changes made after a flush', () => {
-      vi.useFakeTimers();
+    it('should still save changes made after a flush', async () => {
       markPersisted('proj-1');
-      const initial = service.projectConfig.value();
+      await settleAutosave();
+      vi.useFakeTimers();
       service.updateProjectConfig({id: 'proj-1', name: 'dirty'});
 
       service.flushPendingSave();
       expect(saveRequestCount()).toBe(1);
 
       service.updateProjectConfig({name: 'dirtier'});
-      const dirtier = service.projectConfig.value();
-      toObservableSubject.current!.next(initial); // consumed by skip(1)
-      toObservableSubject.current!.next(dirtier);
+      emitProjectConfig();
       vi.advanceTimersByTime(5000);
 
       expect(saveRequestCount()).toBe(2);

@@ -22,15 +22,6 @@ import {App} from './app';
 import {RemixEngineService} from './services/remix-engine/remix-engine';
 import './testing/mocks/match-media.mock';
 
-// Provide an isolated copy of env so the controlPlaneMode mutations in these
-// specs do not leak into the rendered (gitignored) src/env.ts or other specs.
-vi.mock('../env', async importOriginal => {
-  const actual = await importOriginal<typeof import('../env')>();
-  return {
-    env: {...actual.env},
-  };
-});
-
 describe('App', () => {
   let remixEngineInstantiations: number;
   // Restore controlPlaneMode after the 'none' test mutates it, so the rendered

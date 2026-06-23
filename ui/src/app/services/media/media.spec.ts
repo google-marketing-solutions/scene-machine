@@ -15,24 +15,11 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import '@angular/compiler';
 import {HttpClient} from '@angular/common/http';
-import {EnvironmentInjector} from '@angular/core';
+import {TestBed} from '@angular/core/testing';
 import {of, Subject, throwError} from 'rxjs';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {MediaService} from './media';
-
-const mockGet = vi.fn();
-
-// Mock @angular/core to provide inject without an injection context.
-vi.mock('@angular/core', async importOriginal => {
-  const actual = (await importOriginal()) as any;
-  return {
-    ...actual,
-    inject: vi.fn((token: any) => mockGet(token)),
-    runInInjectionContext: vi.fn((_injector: any, fn: () => any) => fn()),
-  };
-});
 
 interface SignUrlResponse {
   urls: Record<string, string>;
@@ -60,12 +47,13 @@ describe('MediaService', () => {
       post: vi.fn(),
       put: vi.fn(),
     };
-    mockGet.mockImplementation((token: any) => {
-      if (token === HttpClient) return httpClientMock;
-      if (token === EnvironmentInjector) return {get: vi.fn()};
-      return null;
+    TestBed.configureTestingModule({
+      providers: [
+        MediaService,
+        {provide: HttpClient, useValue: httpClientMock},
+      ],
     });
-    service = new MediaService();
+    service = TestBed.inject(MediaService);
   });
 
   describe('signUrls', () => {

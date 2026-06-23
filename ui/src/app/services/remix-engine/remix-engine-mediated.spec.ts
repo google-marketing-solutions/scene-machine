@@ -15,9 +15,9 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import '@angular/compiler';
 import {HttpClient} from '@angular/common/http';
-import {EnvironmentInjector} from '@angular/core';
+import {signal, type WritableSignal} from '@angular/core';
+import {TestBed} from '@angular/core/testing';
 import {MatSnackBar} from '@angular/material/snack-bar';
 import {of} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
@@ -26,52 +26,6 @@ import {ConfigService} from '../config/config';
 import {MediaService} from '../media/media';
 import {RemixEngineService} from './remix-engine';
 
-// Pin the env to the fully mediated front-door composition: these tests
-// cover persist/resume of in-flight generations (dataPlaneMode) and the
-// signUrl retry/allSettled completion path (mediaMode).
-vi.mock('../../../env', async importOriginal => {
-  const actual = (await importOriginal()) as any;
-  return {
-    env: {
-      ...actual.env,
-      controlPlaneMode: 'iap',
-      mediaMode: 'mediated',
-      dataPlaneMode: 'mediated',
-    },
-  };
-});
-
-// Shorten the poll interval and the signUrl retry backoff for tests.
-vi.mock('./remix-engine.interface', async importOriginal => {
-  const actual = (await importOriginal()) as any;
-  return {
-    ...actual,
-    WORKFLOW_STATUS_POLL_INTERVAL_MS: 10,
-    SIGN_URL_RETRY_DELAYS_MS: [5, 5],
-  };
-});
-
-const mockGet = vi.fn();
-const mockInjector = {get: mockGet};
-// The service's constructor registers a resume effect on the mediated data
-// plane; capture its callback so tests can drive the scan deterministically.
-const effectCallbacks: Array<() => void> = [];
-
-// Mock @angular/core to bypass runInInjectionContext, provide inject and
-// capture effect callbacks.
-vi.mock('@angular/core', async importOriginal => {
-  const actual = (await importOriginal()) as any;
-  return {
-    ...actual,
-    runInInjectionContext: vi.fn((injector: any, fn: () => any) => fn()),
-    inject: vi.fn((token: any) => mockGet(token)),
-    effect: vi.fn((fn: any) => {
-      effectCallbacks.push(fn);
-      return {destroy: vi.fn()};
-    }),
-  };
-});
-
 describe('RemixEngineService (mediated)', () => {
   let service: RemixEngineService;
   let httpClientMock: any;
@@ -79,6 +33,11 @@ describe('RemixEngineService (mediated)', () => {
   let clientMediaServiceMock: any;
   let matSnackBarMock: any;
   let mediaServiceMock: any;
+  // The fake ConfigService exposes projectConfig/globalConfig as REAL signals so
+  // the service's resume effect tracks them and re-runs when a test writes a new
+  // value (a vi.fn() getter would not retrigger a real effect).
+  let projectConfigSignal: WritableSignal<any>;
+  let globalConfigSignal: WritableSignal<any>;
 
   const generationParams = {
     durationSeconds: 5,
@@ -87,12 +46,15 @@ describe('RemixEngineService (mediated)', () => {
     resolution: '720p' as const,
   };
 
-  /** Runs the captured resume-effect callback(s), as Angular would on a
-   * projectConfig change. */
+  /**
+   * Re-runs the resume effect deterministically. Writing a fresh project
+   * reference makes the effect's projectConfig dependency look changed; the
+   * TestBed.tick() flush then runs the effect, exactly as Angular would on a
+   * real projectConfig change.
+   */
   function runResumeScan() {
-    for (const callback of [...effectCallbacks]) {
-      callback();
-    }
+    projectConfigSignal.set({...projectConfigSignal()});
+    TestBed.tick();
   }
 
   /** Lets the pending microtask chain settle (one macrotask). */
@@ -125,7 +87,6 @@ describe('RemixEngineService (mediated)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    effectCallbacks.length = 0;
     (globalThis as any).window = {location: {origin: 'http://localhost'}};
 
     httpClientMock = {
@@ -133,32 +94,31 @@ describe('RemixEngineService (mediated)', () => {
       get: vi.fn(),
     };
 
+    globalConfigSignal = signal<any>({
+      gcpProject: 'mock-project',
+      gcpLocation: 'mock-location',
+      gcsBucket: 'mock-bucket',
+      tasksQueuePrefix: 'mock-queue',
+      veoLocation: 'mock-veo-loc',
+      duration: 5,
+      veoModel: 'mock-veo',
+      numberOfCandidates: 2,
+      generateAudio: true,
+    });
+    projectConfigSignal = signal<any>({
+      id: 'project-1',
+      resolution: '720p',
+      aspectRatio: '16:9',
+      numberOfCandidates: 2,
+      candidateDurationSeconds: 5,
+      generateAudio: true,
+      model: 'mock-veo',
+      storyboard: [],
+    });
+
     configServiceMock = {
-      globalConfig: {
-        value: vi.fn().mockReturnValue({
-          gcpProject: 'mock-project',
-          gcpLocation: 'mock-location',
-          gcsBucket: 'mock-bucket',
-          tasksQueuePrefix: 'mock-queue',
-          veoLocation: 'mock-veo-loc',
-          duration: 5,
-          veoModel: 'mock-veo',
-          numberOfCandidates: 2,
-          generateAudio: true,
-        }),
-      },
-      projectConfig: {
-        value: vi.fn().mockReturnValue({
-          id: 'project-1',
-          resolution: '720p',
-          aspectRatio: '16:9',
-          numberOfCandidates: 2,
-          candidateDurationSeconds: 5,
-          generateAudio: true,
-          model: 'mock-veo',
-          storyboard: [],
-        }),
-      },
+      globalConfig: {value: globalConfigSignal},
+      projectConfig: {value: projectConfigSignal},
       isGeneratedScene: vi.fn((scene: any) => scene?.type === 'generated'),
       isProvidedVideoScene: vi.fn((scene: any) => scene?.type === 'video'),
       updateProjectConfig: vi.fn(),
@@ -186,27 +146,27 @@ describe('RemixEngineService (mediated)', () => {
       resolve: vi.fn(),
     };
 
-    mockGet.mockImplementation((token: any) => {
-      if (token === HttpClient) return httpClientMock;
-      if (token === ConfigService) return configServiceMock;
-      if (token === ClientMediaService) return clientMediaServiceMock;
-      if (token === MatSnackBar) return matSnackBarMock;
-      if (token === MediaService) return mediaServiceMock;
-      if (token === EnvironmentInjector) return mockInjector;
-      return null;
+    TestBed.configureTestingModule({
+      providers: [
+        RemixEngineService,
+        {provide: ConfigService, useValue: configServiceMock},
+        {provide: HttpClient, useValue: httpClientMock},
+        {provide: ClientMediaService, useValue: clientMediaServiceMock},
+        {provide: MediaService, useValue: mediaServiceMock},
+        {provide: MatSnackBar, useValue: matSnackBarMock},
+      ],
     });
-
-    service = new RemixEngineService();
+    service = TestBed.inject(RemixEngineService);
+    // Run the resume effect once at construction. The default project has no
+    // pending work, so this primes the effect as a harmless no-op.
+    TestBed.tick();
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     // Restore any console.error spies installed by the failure-path tests so
     // a real error in a later test is not silently swallowed.
     vi.restoreAllMocks();
-  });
-
-  it('should register exactly one resume effect at construction', () => {
-    expect(effectCallbacks.length).toBe(1);
   });
 
   describe('generateCandidates: immediate persistence', () => {
@@ -222,7 +182,7 @@ describe('RemixEngineService (mediated)', () => {
         numberOfCandidates: 2,
         storyboard: [mockScene],
       };
-      configServiceMock.projectConfig.value.mockReturnValue(mockProject);
+      projectConfigSignal.set(mockProject);
       return mockScene;
     }
 
@@ -404,7 +364,7 @@ describe('RemixEngineService (mediated)', () => {
         prompt: 'prompt 1',
         candidates: [],
       };
-      configServiceMock.projectConfig.value.mockReturnValue({
+      projectConfigSignal.set({
         id: 'project-1',
         numberOfCandidates: 2,
         storyboard: [mockScene],
@@ -432,7 +392,15 @@ describe('RemixEngineService (mediated)', () => {
           : Promise.resolve(`https://signed.example/${path}`),
       );
 
-      await service.generateCandidates(mockScene as any, generationParams);
+      vi.useFakeTimers();
+      const generatePromise = service.generateCandidates(
+        mockScene as any,
+        generationParams,
+      );
+      // pollWorkflow is spied, so the only timers are the finite signUrl retry
+      // backoffs; drain them to completion.
+      await vi.runAllTimersAsync();
+      await generatePromise;
 
       expect(errSpy).toHaveBeenCalledWith(
         'Failed to load a generated video:',
@@ -474,7 +442,13 @@ describe('RemixEngineService (mediated)', () => {
         return Promise.resolve(`https://signed.example/${path}`);
       });
 
-      await service.generateCandidates(mockScene as any, generationParams);
+      vi.useFakeTimers();
+      const generatePromise = service.generateCandidates(
+        mockScene as any,
+        generationParams,
+      );
+      await vi.runAllTimersAsync();
+      await generatePromise;
 
       const finalScene = lastUpdatedScene();
       expect(finalScene.candidates).toHaveLength(2);
@@ -499,7 +473,13 @@ describe('RemixEngineService (mediated)', () => {
       const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       mediaServiceMock.signUrl.mockRejectedValue(new Error('sign failed'));
 
-      await service.generateCandidates(mockScene as any, generationParams);
+      vi.useFakeTimers();
+      const generatePromise = service.generateCandidates(
+        mockScene as any,
+        generationParams,
+      );
+      await vi.runAllTimersAsync();
+      await generatePromise;
 
       // The run COMPLETED (it produced video outputs) but signing them all
       // failed transiently. (E3) That is not a generation failure: the marker
@@ -555,7 +535,7 @@ describe('RemixEngineService (mediated)', () => {
         pendingGeneration: {...persistedPending},
       };
       const project = {id: 'project-1', storyboard: [scene]};
-      configServiceMock.projectConfig.value.mockReturnValue(project);
+      projectConfigSignal.set(project);
       return project;
     }
 
@@ -621,7 +601,7 @@ describe('RemixEngineService (mediated)', () => {
       runResumeScan();
       expect(service.generatingSceneIds().has('scene-1')).toBe(true);
       // Navigate away before the first status emission is processed.
-      configServiceMock.projectConfig.value.mockReturnValue({
+      projectConfigSignal.set({
         id: 'other-project',
         storyboard: [],
       });
@@ -636,7 +616,7 @@ describe('RemixEngineService (mediated)', () => {
       expect(matSnackBarMock.open).not.toHaveBeenCalled();
 
       // Returning to the project resumes the same execution again.
-      configServiceMock.projectConfig.value.mockReturnValue(project);
+      projectConfigSignal.set(project);
       const pollSpy = vi
         .spyOn(service, 'pollWorkflow')
         .mockReturnValue(new Promise(() => {}));
@@ -742,13 +722,13 @@ describe('RemixEngineService (mediated)', () => {
       // dereference it, so the resume effect must early-return and NOT resume
       // (which, before the guard, threw a swallowed TypeError that could clear
       // a healthy run's marker).
-      configServiceMock.globalConfig.value.mockReturnValue(undefined);
+      globalConfigSignal.set(undefined);
       runResumeScan();
       expect(pollSpy).not.toHaveBeenCalled();
       expect(service.generatingSceneIds().has('scene-1')).toBe(false);
 
       // Once /api/config resolves, the effect re-runs and the resume proceeds.
-      configServiceMock.globalConfig.value.mockReturnValue({
+      globalConfigSignal.set({
         gcsBucket: 'mock-bucket',
       });
       runResumeScan();
@@ -767,7 +747,7 @@ describe('RemixEngineService (mediated)', () => {
           startedAt: '2026-06-12T00:00:00.000Z',
         },
       };
-      configServiceMock.projectConfig.value.mockReturnValue(project);
+      projectConfigSignal.set(project);
       return project;
     }
 
@@ -777,7 +757,7 @@ describe('RemixEngineService (mediated)', () => {
       // project with its own pendingRender was wrongly skipped. The guard is
       // now per-execution, so project B's distinct render resumes regardless.
       service.combiningScenes.set(true);
-      configServiceMock.projectConfig.value.mockReturnValue({
+      projectConfigSignal.set({
         id: 'project-B',
         storyboard: [],
         pendingRender: {
@@ -846,10 +826,12 @@ describe('RemixEngineService (mediated)', () => {
         sink: {output: {'0': {video: [{file: 'p/final.mp4'}]}}},
       } as any);
 
+      vi.useFakeTimers();
       runResumeScan();
-      await vi.waitFor(() =>
-        expect(configServiceMock.addRenderRun).toHaveBeenCalled(),
-      );
+      // Drive the withRetry backoff (real SIGN_URL_RETRY_DELAYS_MS) to
+      // completion; pollWorkflow is spied, so the only timers in flight are the
+      // finite retry delays — safe to drain.
+      await vi.runAllTimersAsync();
 
       expect(attempts).toBe(2); // failed once, retried, succeeded
       expect(configServiceMock.addRenderRun).toHaveBeenCalledWith(
@@ -866,7 +848,7 @@ describe('RemixEngineService (mediated)', () => {
       );
       // No error surfaced: the blip was fully recovered.
       expect(matSnackBarMock.open).not.toHaveBeenCalled();
-      await vi.waitFor(() => expect(service.combiningScenes()).toBe(false));
+      expect(service.combiningScenes()).toBe(false);
     });
 
     it('does not double-poll when the scan triggers repeatedly', async () => {
@@ -891,7 +873,7 @@ describe('RemixEngineService (mediated)', () => {
       runResumeScan();
       expect(service.combiningScenes()).toBe(true);
       // Navigate away before the first status emission is processed.
-      configServiceMock.projectConfig.value.mockReturnValue({
+      projectConfigSignal.set({
         id: 'other-project',
         storyboard: [],
       });
@@ -905,7 +887,7 @@ describe('RemixEngineService (mediated)', () => {
       expect(matSnackBarMock.open).not.toHaveBeenCalled();
 
       // Returning to the project resumes the same execution again.
-      configServiceMock.projectConfig.value.mockReturnValue(project);
+      projectConfigSignal.set(project);
       const pollSpy = vi
         .spyOn(service, 'pollWorkflow')
         .mockReturnValue(new Promise(() => {}));
@@ -953,8 +935,11 @@ describe('RemixEngineService (mediated)', () => {
         sink: {output: {'0': {video: [{file: 'p/final.mp4'}]}}},
       } as any);
 
+      vi.useFakeTimers();
       runResumeScan();
-      await vi.waitFor(() => expect(service.combiningScenes()).toBe(false));
+      // Drain the full withRetry backoff (real SIGN_URL_RETRY_DELAYS_MS) to its
+      // exhaustion; pollWorkflow is spied, so only finite retry timers run.
+      await vi.runAllTimersAsync();
 
       // No error run recorded and the marker is never cleared (kept for retry).
       expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
@@ -974,7 +959,7 @@ describe('RemixEngineService (mediated)', () => {
     // clear, recoverable message instead of a vague "Failed to start workflow"
     // from a non-null-assertion TypeError.
     it('fails generateStoryboard with a recoverable message when global config is not loaded', async () => {
-      configServiceMock.globalConfig.value.mockReturnValue(undefined);
+      globalConfigSignal.set(undefined);
 
       await service.generateStoryboard([], '', 'none');
 
@@ -987,7 +972,7 @@ describe('RemixEngineService (mediated)', () => {
     });
 
     it('fails combineScenes with a recoverable message when global config is not loaded', async () => {
-      configServiceMock.globalConfig.value.mockReturnValue(undefined);
+      globalConfigSignal.set(undefined);
 
       await service.combineScenes();
 
@@ -999,7 +984,7 @@ describe('RemixEngineService (mediated)', () => {
     });
 
     it('fails candidate generation with a recoverable message and does NOT flag the scene when global config is not loaded', async () => {
-      configServiceMock.globalConfig.value.mockReturnValue(undefined);
+      globalConfigSignal.set(undefined);
 
       await service.generateCandidates(
         {id: 'scene-1', type: 'generated'} as any,
@@ -1024,7 +1009,7 @@ describe('RemixEngineService (mediated)', () => {
       // (transient /api/signUrl outage). withRetry exhausts its attempts and the
       // completed render is kept (marker not cleared, no error run) so a reopen
       // re-collects it, mirroring the resumed-render path. (E3)
-      configServiceMock.projectConfig.value.mockReturnValue({
+      projectConfigSignal.set({
         id: 'project-1',
         storyboard: [],
         audioTracks: [],
@@ -1038,7 +1023,12 @@ describe('RemixEngineService (mediated)', () => {
       } as any);
       mediaServiceMock.signUrl.mockRejectedValue(new Error('sign failed'));
 
-      await service.combineScenes();
+      vi.useFakeTimers();
+      const combinePromise = service.combineScenes();
+      // pollWorkflow is spied, so the only timers are the finite signUrl retry
+      // backoffs; drain them to exhaustion.
+      await vi.runAllTimersAsync();
+      await combinePromise;
 
       // Marker set at start, but NEVER cleared (kept for a reopen to retry).
       expect(configServiceMock.setPendingRender).toHaveBeenCalledWith(

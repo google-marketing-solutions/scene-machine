@@ -30,17 +30,6 @@ import {
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {Storyboard} from './storyboard';
 
-vi.mock('../../env', async importOriginal => {
-  const actual = await importOriginal<typeof import('../../env')>();
-  return {
-    env: {
-      ...actual.env,
-      mediaMode: 'mediated',
-      dataPlaneMode: 'mediated',
-    },
-  };
-});
-
 describe('Storyboard', () => {
   let component: Storyboard;
   let fixture: ComponentFixture<Storyboard>;

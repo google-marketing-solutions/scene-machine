@@ -16,18 +16,14 @@
 
 import {HttpEvent, HttpHandlerFn, HttpRequest} from '@angular/common/http';
 import {Observable, lastValueFrom, of} from 'rxjs';
-import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {env} from '../../env';
 import {authTokenInterceptor} from './auth-token.interceptor';
 
-// controlPlaneMode is mutated per test; mock the module so we never depend on
-// the rendered (gitignored) src/env.ts, and restore it after each test.
-vi.mock('../../env', async importOriginal => {
-  const actual = await importOriginal<typeof import('../../env')>();
-  return {env: {...actual.env}};
-});
-
 describe('authTokenInterceptor', () => {
+  // controlPlaneMode is mutated per test against the real env object; the
+  // initial value is captured and restored in afterEach so the rendered
+  // (gitignored) src/env.ts value is not leaked between specs.
   const initialMode = env.controlPlaneMode;
   let captured: HttpRequest<unknown> | null;
   let next: HttpHandlerFn;
@@ -56,7 +52,7 @@ describe('authTokenInterceptor', () => {
 
   it('never touches non-/api/ requests (a stray header breaks Storage CORS)', async () => {
     env.controlPlaneMode = 'iap';
-    await run('https://firebasestorage.googleapis.com/v0/b/x/o/y?token=z');
+    await run('https://storage.googleapis.com/b/x/o/y?X-Goog-Signature=z');
     expect(captured!.headers.has('X-Requested-With')).toBe(false);
     expect(captured!.headers.has('Authorization')).toBe(false);
   });
