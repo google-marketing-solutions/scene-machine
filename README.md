@@ -551,6 +551,15 @@ vaules according to the
 [documentation](https://docs.cloud.google.com/tasks/docs/configuring-queues#rate)
 of rate limits and retry parameters.
 
+### Cloud Run memory
+
+When combining a large number of scenes, the Cloud Run instance hosting the
+backend (Remix Engine) may run out of memory. The default configuration in
+`deploy.sh` allocates 16GB of RAM (`--memory=16G`). If you experience Out of
+Memory (OOM) errors, you can increase this limit by editing `deploy.sh` and
+changing the `--memory` flag in the `gcloud run deploy` command to a higher
+value (e.g., `32G`).
+
 ## Alternatives to Scene Machine
 
 [< Caveats](#caveats) • [Top](#readme-top)

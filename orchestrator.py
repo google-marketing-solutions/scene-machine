@@ -290,13 +290,15 @@ def trigger_action(
   """
   action = data[Key.ACTION.value]
   node_id = data[Key.NODE_ID.value]
+  execution_id = data[Key.EXECUTION_ID.value]
+  group_id = data[Key.GROUP_ID.value]
   node = data[Key.WORKFLOW_DEF.value][node_id]
   logger.info((
-      data[Key.EXECUTION_ID.value],
+      execution_id,
       'TRIGGER',
       node,
       action,
-      data[Key.GROUP_ID.value],
+      group_id,
       data[Key.INPUT_FILES.value],
   ))
   if action != 'pass':
@@ -313,10 +315,8 @@ def trigger_action(
       can_still_retry,
   )
 
-  db.store_output(
-      data[Key.EXECUTION_ID.value], node_id, data[Key.GROUP_ID.value], output
-  )
-  logger.info((data[Key.EXECUTION_ID.value], 'PERFORMED', node, action, output))
+  db.store_output(execution_id, node_id, group_id, output)
+  logger.info((execution_id, 'PERFORMED', node, action, output))
   _inform_successors(instance, data, output)
 
 
