@@ -341,10 +341,13 @@ SCRIPT_START=$(date +%s)
 # Note: compute.googleapis.com is enabled here so the default Compute Engine
 # service account (used for role bindings below) is guaranteed to exist.
 # firestore.googleapis.com is the Cloud Firestore API the backend uses;
-# iap.googleapis.com gates the front door.
+# iap.googleapis.com gates the front door. cloudresourcemanager.googleapis.com
+# is needed by the post-deploy IAP access grant (deploy/grant-access.sh) — on a
+# brand-new project it is otherwise off, so the grant would prompt to enable it.
 phase "Enabling required Google Cloud APIs..."
 REQUIRED_APIS="aiplatform.googleapis.com artifactregistry.googleapis.com \
-cloudbuild.googleapis.com cloudtasks.googleapis.com compute.googleapis.com \
+cloudbuild.googleapis.com cloudresourcemanager.googleapis.com \
+cloudtasks.googleapis.com compute.googleapis.com \
 firestore.googleapis.com run.googleapis.com \
 iap.googleapis.com"
 
