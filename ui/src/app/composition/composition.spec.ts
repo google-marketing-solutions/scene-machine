@@ -81,7 +81,7 @@ describe('CompositionComponent', () => {
 
     // The template's mediaSrc pipe and the component's held-src/pre-warm
     // effects inject MediaService, which in turn injects HttpClient and
-    // Firebase Storage; stub the service itself so no real providers are
+    // signed GCS URLs; stub the service itself so no real providers are
     // needed. The held-src specs below reconfigure the mocks per test.
     mockMediaService = {
       getCachedUrl: vi.fn().mockReturnValue(undefined),

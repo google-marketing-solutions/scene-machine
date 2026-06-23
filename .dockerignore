@@ -7,8 +7,6 @@
 # (the builder stage installs from it).
 .git
 .gitignore
-.firebase/
-.firebaserc
 .venv/
 __pycache__/
 *.pyc
@@ -24,7 +22,6 @@ test/
 tools/
 scripts/
 deploy/
-firebase/
 creative_templates/
 
 # Deploy-time-only config / dev deps (the image installs requirements.txt only)
@@ -34,7 +31,6 @@ requirements-dev.in
 gcs-cors-config.json
 
 # Local-only logs and editor/OS files
-firebase-debug.log
 firestore-debug.log
 .vscode/
 .idea/

@@ -25,7 +25,7 @@
 # ---------------------------------------------------------------------------
 
 # Core retry+backoff loop shared by every add-*-iam-binding wrapper below.
-# Background GCP work (Firebase, service-agent provisioning) modifies IAM
+# Background GCP work (service-agent provisioning) modifies IAM
 # policies in parallel with our sequential read-modify-writes, occasionally
 # racing our etag; the gcloud error itself recommends "retry with exponential
 # backoff", which this does. It retries ONLY on concurrent-modification/etag

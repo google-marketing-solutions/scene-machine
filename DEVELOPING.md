@@ -38,7 +38,7 @@ Render the two files the UI needs from their templates (run again whenever the t
 ./scripts/dev-setup.sh
 ```
 
-This writes `ui/src/env.ts` and `ui/definitions/config.json` with `controlPlaneMode: 'none'` (the dev front-door mode: the UI treats you as already signed in and never opens a Firebase sign-in popup) and keeps the data plane mediated. Both files are gitignored. The deployed `iap` mode is untouched, and `deploy.sh` refuses to ship a `none` build, so this can never reach production.
+This writes `ui/src/env.ts` and `ui/definitions/config.json` with `controlPlaneMode: 'none'` (the dev front-door mode: the UI treats you as already signed in and never shows a sign-in gate) and keeps the data plane mediated. Both files are gitignored. The deployed `iap` mode is untouched, and `deploy.sh` refuses to ship a `none` build, so this can never reach production.
 
 Point it at your own dev project with the overrides `SM_DEV_PROJECT`, `SM_DEV_FIRESTORE_DB`, and `SM_DEV_GCS_BUCKET`.
 

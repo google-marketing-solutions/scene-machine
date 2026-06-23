@@ -3,9 +3,7 @@
 # exclude it WITHOUT a trailing slash so the pattern actually matches it.
 .git
 .gitignore
-.firebase/
 .venv/
-.firebaserc
 .style.yapf
 .gcloudignore
 .pylintrc
@@ -15,11 +13,7 @@
 config.txt
 
 gcs-cors-config.json
-firebase_storage.rules
 firestore.indexes.json
-firestore.rules
-firestore.rules.auth
-firebase.json
 
 ui/*
 !ui/definitions/
@@ -34,12 +28,10 @@ tools/
 # Host-only tooling and config that the image never COPYs (the Dockerfile copies
 # only actions/, actions_lib/, util/, *.py, deployed_version.txt, ui/dist,
 # ui/definitions, ui/remix-engine-status-viewer). deploy.sh runs scripts/ and
-# deploy/ on the build HOST, deploys firebase/ rules from the host, and seeds
-# creative_templates/ to Firestore from the host — none are needed in the
-# uploaded build context. Mirrors .dockerignore.
+# deploy/ on the build HOST and seeds creative_templates/ to Firestore from the
+# host — none are needed in the uploaded build context. Mirrors .dockerignore.
 scripts/
 deploy/
-firebase/
 creative_templates/
 # Docs (incl. the large media gifs) and example workflow inputs are never built
 # into or read by the image; only deploy.sh/dev tooling and humans use them.
@@ -61,7 +53,6 @@ requirements-dev.in
 
 # Node trees and local-only debug logs (the image only needs ui/dist).
 node_modules/
-firebase-debug.log
 firestore-debug.log
 
 # Editor and OS specific

@@ -4,15 +4,12 @@ config*.bak
 ui/definitions/config.json
 *.pyc
 __pycache__
-.firebase
 venv*
 .venv/
 ui/app/.vscode/
 ui/app/src/app/services/config/config.service.ts
 gcs-cors-config.json
 deployed_version.txt
-firebase/firebase.json
-firebase/.firebaserc
 .agents/skills.json
 .agents/skills/walkthrough.md
 .agents/skills/walkthrough/SKILL.md

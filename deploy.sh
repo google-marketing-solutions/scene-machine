@@ -51,7 +51,7 @@
 #     read-only here — we only mint it for the Authorization header and never
 #     write/mutate ADC state (`gcloud auth application-default login` is never
 #     run);
-#   * passes --project=$PROJECT on every gcloud/firebase call and
+#   * passes --project=$PROJECT on every gcloud call and
 #     `x-goog-user-project: $PROJECT` on every curl, so it is runnable under
 #     CLOUDSDK_ACTIVE_CONFIG_NAME=<any config> with zero writes to the
 #     user's global gcloud/ADC state.
@@ -210,10 +210,9 @@ echo "  Scene Machine FRONT-DOOR deploy (AUTH_MODE=${AUTH_MODE}) — pre-flight 
 echo "================================================================================"
 # --- Pre-flight: required tools and gcloud auth -----------------------------
 # Fail fast if a required command is missing or gcloud isn't authenticated,
-# rather than 30+ seconds into a gcloud/firebase call with a confusing error.
+# rather than 30+ seconds into a gcloud call with a confusing error.
 echo "[>] Checking required tools..."
 require_tool gcloud   "Install: https://cloud.google.com/sdk/docs/install"
-require_tool firebase "Install: npm i -g firebase-tools"
 require_tool node     "Install Node.js ≥ v22: https://nodejs.org/en/download"
 require_tool npm      "Install Node.js (includes npm): https://nodejs.org/en/download"
 require_tool envsubst "Install gettext (macOS: 'brew install gettext'; Debian/Ubuntu: 'apt-get install gettext')"
@@ -228,11 +227,11 @@ if [ -z "$ACTIVE_ACCOUNT" ]; then
   echo "Run: gcloud auth login" >&2
   exit 1
 fi
-echo "✓ All required tools found (gcloud, firebase, node, npm, envsubst, curl)."
+echo "✓ All required tools found (gcloud, node, npm, envsubst, curl)."
 echo "✓ gcloud authenticated as: $ACTIVE_ACCOUNT"
 
 # Application Default Credentials (ADC) are a SEPARATE login from `gcloud auth
-# login` above. The REST calls later in the deploy (Firebase Storage, Firestore
+# login` above. The REST calls later in the deploy (Firestore
 # seeding, GCS bucket CORS) authenticate with an ADC token,
 # so verify it now — otherwise the deploy would do much of its provisioning and
 # then abort at the first REST call on a machine that has the CLI login but not
@@ -291,10 +290,10 @@ if ! [[ "$APP_MIN_INSTANCES" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 # Data plane: the backend brokers all project data and media through the app
-# service's /api endpoints (signed URLs), and the deny-all client rules
-# (firestore.rules / storage.rules) are deployed, so the browser never touches
-# Firestore/Storage directly. This is always the case — there is no data-plane
-# mode to choose.
+# service's /api endpoints (signed URLs). The browser holds no Firestore or
+# Storage credentials and ships no client SDK, so there is no client data-plane
+# surface at all. This is always the case — there is no data-plane mode to
+# choose.
 echo "✓ config.txt is valid. Target project: $PROJECT"
 
 # --- Confirm deployment target ----------------------------------------------
@@ -334,25 +333,6 @@ else
 fi
 echo "✓ Continuing with project $PROJECT."
 
-# Fail fast if the Firebase CLI isn't ready. The project-link and
-# security-rules steps below use it, and it authenticates SEPARATELY from
-# gcloud (its own `firebase login`). Checking here — before any provisioning —
-# avoids minutes of work that would otherwise abort at the Firebase-link step.
-if ! command -v firebase > /dev/null 2>&1; then
-  echo "ERROR: the Firebase CLI (firebase-tools) is not installed." >&2
-  echo "  Install it, then sign in:" >&2
-  echo "    npm install -g firebase-tools && firebase login" >&2
-  exit 1
-fi
-if [ -z "${FIREBASE_TOKEN:-}" ] && ! firebase login:list 2>/dev/null | grep -q '@'; then
-  echo "ERROR: the Firebase CLI is not logged in." >&2
-  echo "  Run 'firebase login' (or 'firebase login --reauth' if your session" >&2
-  echo "  expired), then re-run $0. The deploy uses the Firebase CLI to link the" >&2
-  echo "  project and deploy the security rules; it signs in separately from gcloud." >&2
-  exit 1
-fi
-echo "✓ Firebase CLI is installed and signed in."
-
 echo
 echo "════════════════════════════════════════════════════════════════════════"
 echo "  Starting Scene Machine front-door deployment (AUTH_MODE=${AUTH_MODE})..."
@@ -365,15 +345,13 @@ SCRIPT_START=$(date +%s)
 # --- Enable services ---------------------------------------------------------
 # Note: compute.googleapis.com is enabled here so the default Compute Engine
 # service account (used for role bindings below) is guaranteed to exist.
-# firebase.googleapis.com is enabled up front; linking the project to Firebase
-# (firebase projects:addfirebase) is handled idempotently later, just before the
-# Firebase Web App setup. NO apigateway / servicecontrol (no API Gateway in this
-# topology); iap.googleapis.com for the IAP front door.
+# firestore.googleapis.com is the Cloud Firestore API the backend's Admin SDK
+# uses (NOT a Firebase product here). NO apigateway / servicecontrol (no API
+# Gateway in this topology); iap.googleapis.com for the IAP front door.
 phase "Enabling required Google Cloud APIs..."
 REQUIRED_APIS="aiplatform.googleapis.com artifactregistry.googleapis.com \
 cloudbuild.googleapis.com cloudtasks.googleapis.com compute.googleapis.com \
-firestore.googleapis.com run.googleapis.com firebase.googleapis.com \
-firebasestorage.googleapis.com firebaserules.googleapis.com \
+firestore.googleapis.com run.googleapis.com \
 iap.googleapis.com"
 
 # Only enable the APIs that aren't on yet, so a re-run on an already-provisioned
@@ -677,185 +655,6 @@ else
     echo "Firestore database $FIRESTORE_DB_UI already exists in the following location:"
     gcloud firestore databases describe --database="$FIRESTORE_DB_UI" --project=$PROJECT --format="value(locationId)"
 fi
-
-# --- Ensure the project is linked to Firebase --------------------------------
-# A fresh Google Cloud project is NOT automatically a Firebase project, so the
-# Firebase Web App step below would fail with "Firebase project <num> not
-# found. (HTTP 404)". The app needs the Firebase Web config so the browser can
-# initialize the Firebase SDK and hold a backend-minted custom-token session
-# (the data plane itself is mediated through the app backend). Decide whether
-# the project is ALREADY linked
-# WITHOUT parsing addfirebase's output: the Firebase CLI only prints a generic
-# error and buries the detail in firebase-debug.log (DEPLOYMENT-ISSUES.md issue
-# G), so a string match on its message is unreliable. Two independent positive
-# signals — either one means "already linked, skip addfirebase":
-#   1. firebase projects:list (CLI, already authenticated)
-#   2. the Firebase Management API GET (ADC token, CBA-safe)
-firebase_project_linked() {
-  # Match the Project ID column EXACTLY, not as a loose substring. The CLI prints
-  # a bordered table whose columns are split by '│'; `grep -w` is wrong because a
-  # hyphen counts as a word boundary, so id "my-proj" would also match a row for
-  # an unrelated "my-proj-staging" the account can see — skipping the link, after
-  # which a later step 404s. awk over the '│'-delimited fields, trimming spaces,
-  # and compare each field for an exact equality with $PROJECT instead.
-  if firebase projects:list 2>/dev/null \
-       | awk -F '│' -v p="$PROJECT" '
-           { for (i=1; i<=NF; i++) { f=$i; gsub(/^[[:space:]]+|[[:space:]]+$/, "", f); if (f==p) { found=1; exit } } }
-           END { exit found ? 0 : 1 }'; then
-    return 0
-  fi
-  local status
-  status=$(curl -s -o /dev/null -w '%{http_code}' \
-    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-    -H "x-goog-user-project: ${PROJECT}" \
-    "https://firebase.googleapis.com/v1beta1/projects/${PROJECT}" 2>/dev/null || echo "000")
-  [ "$status" = "200" ]
-}
-phase "Ensuring project ${PROJECT} is linked to Firebase..."
-if firebase_project_linked; then
-  echo "✓ Project ${PROJECT} is already a Firebase project — skipping link."
-elif firebase projects:addfirebase "$PROJECT"; then
-  echo "✓ Project ${PROJECT} linked to Firebase."
-elif firebase_project_linked; then
-  # addfirebase exited non-zero but the project IS linked now — a benign
-  # already-linked/race, not a real failure (its on-screen error is generic).
-  echo "✓ Project ${PROJECT} is already a Firebase project."
-else
-  echo "ERROR: linking ${PROJECT} to Firebase failed (see firebase-debug.log)." >&2
-  exit 1
-fi
-
-# --- Firebase Storage: initialize + link the project bucket via API ---------
-# Replaces what used to be TWO manual Firebase-console steps (the "Get
-# Started" wizard and "Import existing GCS buckets") with their public-API
-# equivalents; both are idempotent (re-running on an already-set-up project
-# is a clean no-op):
-#   (a) POST projects/{p}/defaultBucket — creates the project's *default*
-#       Firebase Storage bucket (<project>.firebasestorage.app). Required by
-#       `firebase deploy --only storage` further below; without it that
-#       command fails with "Firebase Storage has not been set up on project".
-#   (b) POST buckets/{b}:addFirebase — registers ${GCS_BUCKET} with Firebase
-#       Storage so it can be the deploy target.
-# The `firebase` CLI has no equivalent commands, so we hit the REST API
-# directly. A short verify loop at the end absorbs propagation delay.
-# NOTE: this authenticates with an Application Default Credentials (ADC) token
-# (`gcloud auth application-default print-access-token`) because under
-# corporate Certificate-Based Access (CBA) the plain `gcloud auth
-# print-access-token` token is bound to the gcloud client and is rejected by
-# these REST endpoints with HTTP 401. Every call still carries
-# `x-goog-user-project: $PROJECT`, so the project (not ADC quota state) is
-# billed for the request.
-phase "Ensuring Firebase Storage is initialized and ${GCS_BUCKET} is linked..."
-DEFAULT_BUCKET_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-  -H "x-goog-user-project: ${PROJECT}" \
-  "https://firebasestorage.googleapis.com/v1beta/projects/${PROJECT}/defaultBucket")
-if [ "$DEFAULT_BUCKET_STATUS" = "200" ]; then
-  echo "✓ Firebase Storage default bucket already exists."
-else
-  echo "Creating Firebase Storage default bucket in ${REGION} (replaces the console 'Get Started' wizard)..."
-  CREATE_BODY=$(curl -s -X POST \
-    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-    -H "x-goog-user-project: ${PROJECT}" \
-    -H "Content-Type: application/json" \
-    -d "{\"location\": \"${REGION}\"}" \
-    "https://firebasestorage.googleapis.com/v1beta/projects/${PROJECT}/defaultBucket")
-  if echo "$CREATE_BODY" | grep -q '"error"'; then
-    echo "ERROR: creating the Firebase Storage default bucket failed:" >&2
-    echo "$CREATE_BODY" >&2
-    echo "Create it manually (console 'Get Started' wizard), then re-run $0:" >&2
-    echo "  https://console.firebase.google.com/project/${PROJECT}/storage" >&2
-    exit 1
-  fi
-  echo "✓ Default bucket created."
-fi
-
-LINK_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-  -H "x-goog-user-project: ${PROJECT}" \
-  "https://firebasestorage.googleapis.com/v1beta/projects/${PROJECT}/buckets/${GCS_BUCKET}")
-if [ "$LINK_STATUS" = "200" ]; then
-  echo "✓ Bucket ${GCS_BUCKET} is already linked to Firebase Storage."
-else
-  echo "Linking ${GCS_BUCKET} to Firebase Storage (replaces the console 'Import existing GCS buckets' step)..."
-  LINK_BODY=$(curl -s -X POST \
-    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-    -H "x-goog-user-project: ${PROJECT}" \
-    -H "Content-Type: application/json" \
-    -d '{}' \
-    "https://firebasestorage.googleapis.com/v1beta/projects/${PROJECT}/buckets/${GCS_BUCKET}:addFirebase")
-  if echo "$LINK_BODY" | grep -q '"error"'; then
-    echo "ERROR: linking ${GCS_BUCKET} to Firebase Storage failed:" >&2
-    echo "$LINK_BODY" >&2
-    echo "Link it manually (console '+ Add bucket' → 'Import existing Google" >&2
-    echo "Cloud Storage buckets'), then re-run $0:" >&2
-    echo "  https://console.firebase.google.com/project/${PROJECT}/storage" >&2
-    exit 1
-  fi
-fi
-
-# Verify the link is visible before the storage rules deploy relies on it.
-BUCKET_WAIT_ATTEMPTS=0
-BUCKET_WAIT_MAX=20   # 20 × 3s = 60s total
-while true; do
-  HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-    -H "x-goog-user-project: ${PROJECT}" \
-    "https://firebasestorage.googleapis.com/v1beta/projects/${PROJECT}/buckets/${GCS_BUCKET}")
-  if [ "$HTTP_STATUS" = "200" ]; then
-    echo "✓ Bucket ${GCS_BUCKET} is linked to Firebase Storage."
-    break
-  fi
-  BUCKET_WAIT_ATTEMPTS=$((BUCKET_WAIT_ATTEMPTS + 1))
-  if [ $BUCKET_WAIT_ATTEMPTS -ge $BUCKET_WAIT_MAX ]; then
-    echo "ERROR: bucket ${GCS_BUCKET} still not linked after 60s — aborting." >&2
-    echo "Check the Firebase Storage page, then re-run $0:" >&2
-    echo "  https://console.firebase.google.com/project/${PROJECT}/storage" >&2
-    exit 1
-  fi
-  echo "Waiting for bucket link to propagate (attempt ${BUCKET_WAIT_ATTEMPTS}/${BUCKET_WAIT_MAX})..."
-  sleep 3
-done
-
-# --- Firestore + Storage rules for BOTH databases ------------------------------
-# Render mechanics: envsubst the firebase templates with CURRENT_FIRESTORE_DB,
-# target-apply the storage bucket, deploy, then remove the generated files. The
-# deployed rules (firestore.rules / storage.rules) are the deny-all client
-# variants: under the mediated data plane the browser never reads or writes
-# Firestore/Storage directly.
-phase "Deploying Firestore rules for Backend DB (${FIRESTORE_DB})..."
-(
-  cd firebase
-  export CURRENT_FIRESTORE_DB=$FIRESTORE_DB
-  envsubst < ./firebase.template.json > ./firebase.json
-  envsubst < ./.firebaserc.template > ./.firebaserc
-  # No `firebase target:apply storage` here: this phase deploys ONLY firestore
-  # rules (--only firestore), so a storage target is unnecessary. Applying it
-  # would also make this phase fail (set -e, no `|| true`) if the bucket's
-  # Firebase-Storage link has not finished propagating, which would leave the
-  # backend DB without its deny-all rules. The storage target is applied in the
-  # UI-DB phase below, which is the only phase that deploys storage rules.
-  firebase deploy --config ./firebase.json --only firestore --project $PROJECT
-)
-rm firebase/firebase.json
-rm firebase/.firebaserc
-
-phase "Deploying Firestore + Storage rules for UI DB (${FIRESTORE_DB_UI})..."
-(
-  cd firebase
-  export CURRENT_FIRESTORE_DB=$FIRESTORE_DB_UI
-  envsubst < ./firebase.template.json > ./firebase.json
-  envsubst < ./.firebaserc.template > ./.firebaserc
-  firebase target:apply storage bucket_target $GCS_BUCKET --project $PROJECT
-
-  echo "Deploying rules for UI Firestore DB..."
-  firebase deploy --config ./firebase.json --only firestore --project $PROJECT
-
-  echo "Deploying Storage rules..."
-  firebase deploy --config ./firebase.json --only storage:bucket_target --project $PROJECT
-)
-rm firebase/firebase.json
-rm firebase/.firebaserc
 
 # --- Render UI env + config (must precede the single image build) -------------
 # Order matters: these artifacts are baked into the image (Dockerfile

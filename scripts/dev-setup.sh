@@ -19,7 +19,7 @@
 #
 # It uses the SAME envsubst-on-the-templates mechanism deploy.sh uses, so the
 # local files match how production renders them — only the values differ:
-#   controlPlaneMode = 'none'  (no Firebase sign-in popup, no IAP front door)
+#   controlPlaneMode = 'none'  (no sign-in gate, no IAP front door)
 #   data plane        = 'mediated' (unchanged; the backend still brokers data)
 #
 # Both output files are gitignored (ui/.gitignore: src/env*.ts; root
@@ -58,9 +58,7 @@ export GCS_BUCKET="${SM_DEV_GCS_BUCKET:-${PROJECT}-scene-machine}"
 export REGION="${SM_DEV_REGION:-us-central1}"
 export TASKS_QUEUE_PREFIX="${SM_DEV_TASKS_QUEUE_PREFIX:-scene-machine-}"
 
-# No Firebase / no API key in local 'none' mode -> empty strings.
-export FIREBASE_API_KEY=""
-export FIREBASE_AUTH_DOMAIN=""
+# No API key in local 'none' mode.
 export API_KEY="none"
 
 # The whole point of local dev: the 'none' control-plane arm.

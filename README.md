@@ -132,8 +132,6 @@ The following APIs are used by Scene Machine:
     service.
 -   Identity-Aware Proxy (IAP) API ( iap.googleapis.com ): Used to secure the
     application and manage access.
--   Firebase API ( firebase.googleapis.com ): Used to link the project to
-    Firebase and to deploy the Firestore and Storage security rules.
 -   Cloud Storage API ( storage.googleapis.com ): Used for storing assets,
     examples, and generated content.
 -   Cloud Logging API ( logging.googleapis.com ): Used for application logging
@@ -162,7 +160,6 @@ Role | Why it's needed
 `roles/run.admin` | Create and configure the `app` and `worker` Cloud Run services
 `roles/cloudtasks.admin` | Create and manage the worker task queue
 `roles/storage.admin` | Create the GCS buckets and set their CORS
-`roles/firebase.admin` | Link the project to Firebase and deploy the Firestore/Storage rules
 `roles/iam.roleAdmin` | Create the custom `SceneMachineUser` role
 `roles/iam.serviceAccountAdmin` | Service-account-level IAM bindings (e.g. Cloud Tasks to Cloud Run "actAs")
 `roles/iam.serviceAccountUser` | actAs the runtime service account during the Cloud Run deploy
@@ -246,35 +243,28 @@ so end users never need direct storage/database permissions.
 -   **Google Cloud SDK (gcloud)**: Ensure you have the
     [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) installed and
     initialized.
--   **Firebase Tools**: Install with `npm i -g firebase-tools`.
 -   **envsubst**: Ensure you have `envsubst` installed (typically via the
     `gettext` package, e.g., `sudo apt-get install gettext` on Debian/Ubuntu,
     `brew install gettext` on macOS).
 
-#### Sign in first (three separate logins)
+#### Sign in first (two separate logins)
 
-The deploy uses **three independent credentials** that sign in — and expire —
-separately. `deploy.sh` checks all three before it does any work and stops with
-the exact command to run if one is missing, but it is simplest to refresh all
-three up front. Run them in this order, signing in with the **same Google
-account** each time (each opens a browser window):
+The deploy uses **two independent credentials** that sign in — and expire —
+separately. `deploy.sh` checks both before it does any work and stops with the
+exact command to run if one is missing, but it is simplest to refresh both up
+front. Run them in this order, signing in with the **same Google account** each
+time (each opens a browser window):
 
 ```bash
 gcloud auth login                       # 1. the gcloud CLI itself
 gcloud auth application-default login   # 2. Application Default Credentials (ADC)
-firebase login                          # 3. the Firebase CLI (add --reauth if your session expired)
 ```
 
 -   **#1 `gcloud auth login`** authenticates the gcloud command-line tool.
 -   **#2 ADC** is a *separate* credential that the deploy's REST calls use
-    (Firestore seeding, Storage, enabling sign-in). It is required even though
+    (Firestore seeding, Storage CORS, IAP setup). It is required even though
     you ran #1: under corporate Certificate-Based Access (CBA) the plain gcloud
     token is rejected by those REST endpoints, so the deploy uses ADC instead.
--   **#3 `firebase login`** is the Firebase CLI's own identity, used to link the
-    project and deploy the security rules. If you signed in a while ago, run
-    `firebase login --reauth` to refresh the session — an expired (rather than
-    absent) Firebase session can otherwise slip past the pre-flight check and
-    fail partway through the deploy.
 
 #### Step-by-Step Deployment
 
@@ -384,31 +374,12 @@ firebase login                          # 3. the Firebase CLI (add --reauth if y
 > [!IMPORTANT]
 > **A first-time deploy on a brand-new project needs a few one-time console
 > actions.** A fresh project needs a handful of one-time steps in the Google
-> Cloud and Firebase consoles that have no API to script: configuring the OAuth
+> Cloud console that have no API to script: configuring the OAuth
 > consent screen, enabling IAP on the `app` service, and — on a project with no
 > organization — creating a custom OAuth client. The deploy itself runs
 > unattended; it prints each remaining step, with the exact console URL, at the
 > end of the run. Once the project has been set up this way, later deploys need
 > no console steps at all.
-
-> [!TIP]
-> **Troubleshooting Firebase deployment failures:** If `./deploy.sh`
-> fails at the Firebase step with an error like `Error: Project not found`, it
-> usually means the Firebase CLI cannot access the project or terms have not
-> been accepted.
->
-> **How to fix it:**
->
-> 1.  **Check Login:** Ensure you are logged in by running `firebase login` in
->     your terminal.
-> 2.  **Manual Fallback (Accept Terms):** If still failing, go to the
->     [Firebase Console](https://console.firebase.google.com/).
-> 3.  Click **Add Project** and select your existing Google Cloud project from
->     the dropdown list.
-> 4.  Follow the prompts to add Firebase resources. This process will guide you
->     through accepting the necessary terms of service.
-> 5.  Once completed in the console, return to your terminal and re-run
->     `./deploy.sh`.
 
 4.  **Set up OAuth consent screen:**
 
@@ -424,26 +395,7 @@ firebase login                          # 3. the Firebase CLI (add --reauth if y
         step 6; in an organization, IAP uses Google's managed client and you do
         not create one.
 
-5.  **Link Storage Bucket to Firebase** — *two sequential actions* are required
-    on the same Firebase Storage page.
-
-    -   Open the [Firebase console](https://console.firebase.google.com/) →
-        select your project → **Databases & Storage** → **Storage**.
-
-    **(a) Initialize Firebase Storage** (one-time per project): - Click **Get
-    started** and walk through the wizard. This creates the project's *default*
-    `<project>.firebasestorage.app` bucket, which the Firebase CLI requires;
-    without it the storage deploy fails with `Firebase Storage has not been set
-    up on project`. - Production mode is fine. - *Note: No-cost locations are
-    only available in the USA.*
-
-    **(b) Register your project bucket with Firebase Storage:** - After (a)
-    finishes the bucket dropdown appears at the top of the page (it doesn't
-    exist until a bucket exists). - Click the dropdown → **+ Add bucket** →
-    **Import existing Google Cloud Storage buckets**. - Select your project
-    bucket (the one referenced by `GCS_BUCKET` in `config.txt`) → confirm.
-
-6.  **Identity-Aware Proxy (IAP)** — this is the only way the app gates access
+5.  **Identity-Aware Proxy (IAP)** — this is the only way the app gates access
     (there is no Firebase sign-in to set up), and the deploy sets most of it up
     for you:
     -   `deploy.sh` enables IAP directly on the `app` Cloud Run service (via the

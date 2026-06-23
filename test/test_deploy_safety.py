@@ -140,26 +140,6 @@ def test_artifactregistry_writer_is_build_only_not_runtime():
   )
 
 
-def test_storage_target_apply_only_paired_with_storage_deploy():
-  """D5: `firebase target:apply storage` is only meaningful in a phase that
-  actually deploys storage rules (`--only storage`). Applying it in a
-  firestore-only phase adds an abort path (set -e, no `|| true`) that, if the
-  bucket's Firebase-Storage link is still propagating, kills the phase and
-  leaves the deny-all Firestore rules undeployed. Guard that every
-  `target:apply storage` is matched by a `--only storage` deploy.
-  """
-  text = _deploy_sh()
-  target_applies = text.count('target:apply storage')
-  storage_deploys = text.count('--only storage')
-  assert target_applies == storage_deploys, (
-      f'`firebase target:apply storage` appears {target_applies} time(s) but '
-      f'`--only storage` deploy appears {storage_deploys} time(s). A storage '
-      'target must only be applied in a phase that deploys storage rules; '
-      'applying it in a firestore-only phase can leave deny-all rules '
-      'undeployed (D5).'
-  )
-
-
 def test_cloudtasks_lock_ttl_step_present():
   """PR #113 added a duplicate-execution lock (Cloud Tasks is at-least-once):
   the orchestrator records a `cloudTasks/{exec}_{node}_{group}` doc with an

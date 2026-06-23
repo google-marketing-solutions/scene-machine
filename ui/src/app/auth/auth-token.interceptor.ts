@@ -25,7 +25,7 @@ import {env} from '../../env';
  * - `none` (dev): pass-through, no auth header.
  *
  * Requests outside `/api/` are NEVER touched — the same HttpClient fetches
- * Firebase Storage token URLs, where a stray header breaks CORS.
+ * signed GCS URLs, where a stray header breaks CORS.
  */
 export const authTokenInterceptor: HttpInterceptorFn = (req, next) => {
   if (!req.url.startsWith('/api/')) {

@@ -54,7 +54,7 @@ export type Resolution = '720p' | '1080p' | '4k';
  */
 export interface GcsFile {
   path: string; // GCS path, starting after gcs://
-  url: string; // Firebase Storage path with token, starting with https://
+  url: string; // signed GCS URL with token, starting with https://
 }
 
 /**

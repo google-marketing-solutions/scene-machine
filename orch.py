@@ -374,8 +374,8 @@ def get_status_handler() -> flask_response:
 
 # ---------------------------------------------------------------------------
 # Mediated data plane (ROLE='app'): signed-URL minting for GCS plus CRUD on
-# the UI Firestore database, so the SPA can run without direct Firebase
-# SDK access. Module-level lazy singletons keep the per-request cost at
+# the UI Firestore database, so the SPA can run without direct Firestore or
+# Storage access. Module-level lazy singletons keep the per-request cost at
 # ~1 IAM signBlob RPC per unique path (the per-call construction in
 # util.gcs_wrapper.get_signed_url costs ~3 RPCs).
 # ---------------------------------------------------------------------------
@@ -523,10 +523,10 @@ def _parse_iso_datetime(value):
 def _convert_project_dates(payload) -> None:
   """Converts ProjectConfig date fields from ISO strings to datetime.
 
-  The Firebase JS SDK stores Date values as Firestore Timestamps; over
-  the mediated JSON API they arrive as ISO strings. Converting before
-  set() keeps the stored types (Firestore Timestamps) consistent with the
-  documents the JS SDK wrote, so legacy projects and date ordering still work.
+  Firestore stores Date values as Timestamps; over the mediated JSON API they
+  arrive as ISO strings. Converting before set() keeps the stored types
+  (Firestore Timestamps) consistent, so date ordering and range queries still
+  work.
   """
   if 'lastEdited' in payload:
     payload['lastEdited'] = _parse_iso_datetime(payload['lastEdited'])
