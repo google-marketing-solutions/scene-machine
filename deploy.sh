@@ -345,9 +345,8 @@ SCRIPT_START=$(date +%s)
 # --- Enable services ---------------------------------------------------------
 # Note: compute.googleapis.com is enabled here so the default Compute Engine
 # service account (used for role bindings below) is guaranteed to exist.
-# firestore.googleapis.com is the Cloud Firestore API the backend's Admin SDK
-# uses (NOT a Firebase product here). NO apigateway / servicecontrol (no API
-# Gateway in this topology); iap.googleapis.com for the IAP front door.
+# firestore.googleapis.com is the Cloud Firestore API the backend uses;
+# iap.googleapis.com gates the front door.
 phase "Enabling required Google Cloud APIs..."
 REQUIRED_APIS="aiplatform.googleapis.com artifactregistry.googleapis.com \
 cloudbuild.googleapis.com cloudtasks.googleapis.com compute.googleapis.com \

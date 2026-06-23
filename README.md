@@ -395,9 +395,8 @@ gcloud auth application-default login   # 2. Application Default Credentials (AD
         step 6; in an organization, IAP uses Google's managed client and you do
         not create one.
 
-5.  **Identity-Aware Proxy (IAP)** — this is the only way the app gates access
-    (there is no Firebase sign-in to set up), and the deploy sets most of it up
-    for you:
+5.  **Identity-Aware Proxy (IAP)** — this is the only way the app gates access,
+    and the deploy sets most of it up for you:
     -   `deploy.sh` enables IAP directly on the `app` Cloud Run service (via the
         `--iap` flag) and grants the IAP service agent the `run.invoker` role.
         If your `gcloud` is too old to support `--iap`, the script prints the
