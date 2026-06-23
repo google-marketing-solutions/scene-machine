@@ -45,6 +45,7 @@ import {ClientMediaService} from '../services/client-media/client-media';
 import {
   ImageImportService,
   ImportFailure,
+  MAX_IMAGE_UPLOAD_MB,
 } from '../services/image-import/image-import';
 import {MediaSrcPipe} from '../services/media/media-src.pipe';
 import {
@@ -129,7 +130,7 @@ export class Setup {
 
   creationMode = signal<'ai' | 'manual'>('ai');
 
-  readonly MAX_FILE_SIZE_MB = 30;
+  readonly MAX_FILE_SIZE_MB = MAX_IMAGE_UPLOAD_MB;
   readonly MAX_FILE_SIZE_BYTES = this.MAX_FILE_SIZE_MB * 1024 * 1024;
 
   readonly MAX_PRODUCT_DESCRIPTION_LENGTH = 500;

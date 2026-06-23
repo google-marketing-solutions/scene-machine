@@ -143,10 +143,7 @@ export class ImageUploadDialog implements OnInit, OnDestroy {
   }
 
   onDragLeave(event: DragEvent) {
-    // Ignore leaving for a child element still inside the drop zone.
-    const current = event.currentTarget as HTMLElement;
-    const next = event.relatedTarget as Node | null;
-    if (!next || !current.contains(next)) {
+    if (this.imageImport.hasLeftDropZone(event)) {
       this.isDragOver.set(false);
     }
   }
@@ -155,31 +152,16 @@ export class ImageUploadDialog implements OnInit, OnDestroy {
     event.preventDefault();
     event.stopPropagation();
     this.isDragOver.set(false);
-    const files = this.imageImport.imageFilesFromDataTransfer(
+    void this.imageImport.importFromDrop(
       event.dataTransfer,
+      file => this.processFile(file),
+      reason =>
+        this.matSnackBar.open(
+          this.imageImport.importFailureMessage(reason),
+          'Dismiss',
+          {duration: 5000},
+        ),
     );
-    if (files.length > 0) {
-      this.processFile(files[0]);
-      return;
-    }
-    // Dragged from another tab: only the image's URL came across — fetch it.
-    const url = this.imageImport.imageUrlFromDataTransfer(event.dataTransfer);
-    if (url) {
-      void this.dropImageUrl(url);
-    }
-  }
-
-  private async dropImageUrl(url: string): Promise<void> {
-    const {files, failures} = await this.imageImport.importText(url);
-    if (files.length > 0) {
-      this.processFile(files[0]);
-    } else if (failures.length > 0) {
-      this.matSnackBar.open(
-        `Couldn't add that image — it ${failures[0].reason}.`,
-        'Dismiss',
-        {duration: 5000},
-      );
-    }
   }
 
   onFileSelected(event: Event): void {

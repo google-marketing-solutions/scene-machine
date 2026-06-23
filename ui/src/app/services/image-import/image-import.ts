@@ -19,9 +19,12 @@ import {Injectable} from '@angular/core';
 /** Give up on a single image download after this long so one bad link cannot
  * stall the whole import. */
 const FETCH_TIMEOUT_MS = 20000;
-/** Reject images larger than this (mirrors the setup page's 30MB upload cap)
- * before they are downloaded/decoded into memory. */
-const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
+/** Single source of truth for the image upload size cap, in MB. The setup
+ * page's file picker and this service's URL/base64 import both enforce it. */
+export const MAX_IMAGE_UPLOAD_MB = 30;
+/** Reject images larger than this before they are downloaded/decoded into
+ * memory. */
+const MAX_IMAGE_BYTES = MAX_IMAGE_UPLOAD_MB * 1024 * 1024;
 
 /** A single source string that could not be turned into an image. */
 export interface ImportFailure {
@@ -125,6 +128,50 @@ export class ImageImportService {
       tag === 'SELECT' ||
       (el as HTMLElement).isContentEditable === true
     );
+  }
+
+  /**
+   * True when a `dragleave` means the pointer actually left the drop zone,
+   * rather than moving onto a child element still inside it.
+   */
+  hasLeftDropZone(event: DragEvent): boolean {
+    const current = event.currentTarget as HTMLElement;
+    const next = event.relatedTarget as Node | null;
+    return !next || !current.contains(next);
+  }
+
+  /**
+   * Shared single-image drop handler for the storyboard and overlay drop zones.
+   * Uses a dropped/pasted image file when present, otherwise fetches an image
+   * dragged from another tab. Calls `onFile` with the first resolved File, or
+   * `onFailure` with a plain-language reason when a dragged URL yielded nothing.
+   */
+  async importFromDrop(
+    dt: DataTransfer | null | undefined,
+    onFile: (file: File) => void,
+    onFailure?: (reason: string) => void,
+  ): Promise<void> {
+    const files = this.imageFilesFromDataTransfer(dt);
+    if (files.length > 0) {
+      onFile(files[0]);
+      return;
+    }
+    // Dragged from another tab: only the image's URL came across — fetch it.
+    const url = this.imageUrlFromDataTransfer(dt);
+    if (!url) {
+      return;
+    }
+    const {files: urlFiles, failures} = await this.importText(url);
+    if (urlFiles.length > 0) {
+      onFile(urlFiles[0]);
+    } else if (failures.length > 0) {
+      onFailure?.(failures[0].reason);
+    }
+  }
+
+  /** User-facing message for an image source that produced no usable image. */
+  importFailureMessage(reason: string): string {
+    return `Couldn't add that image — it ${reason}.`;
   }
 
   /**
