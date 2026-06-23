@@ -20,7 +20,6 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {env} from '../env';
 import {App} from './app';
 import {RemixEngineService} from './services/remix-engine/remix-engine';
-import './testing/mocks/match-media.mock';
 
 describe('App', () => {
   let remixEngineInstantiations: number;

@@ -21,7 +21,6 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {routes} from '../app.routes';
 import {ConfigService} from '../services/config/config';
 import {Generate} from './generate';
-import '../testing/mocks/match-media.mock';
 
 describe('Generate', () => {
   let component: Generate;

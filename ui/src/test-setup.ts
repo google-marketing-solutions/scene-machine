@@ -64,3 +64,35 @@ for (const storageName of ['localStorage', 'sessionStorage'] as const) {
     });
   }
 }
+
+/**
+ * jsdom does not provide a usable `matchMedia`, yet `ConfigService` (and Angular
+ * CDK layout utilities) call `document.defaultView.matchMedia(...)` at
+ * construction — so any spec that builds a real component tree needs it. Provide
+ * a plain (non-vi.fn) stub here: setupFiles re-run for every test file, so it is
+ * present deterministically regardless of import order or which worker a file
+ * lands in. A per-spec mock proved flaky under the builder's parallel file
+ * runner — a sibling file could leave `matchMedia` undefined for the next file —
+ * and a plain function is immune to vitest's mock reset/restore between tests.
+ */
+function createMatchMediaStub(): (query: string) => MediaQueryList {
+  return (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList;
+}
+
+if (typeof globalThis.matchMedia !== 'function') {
+  Object.defineProperty(globalThis, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: createMatchMediaStub(),
+  });
+}

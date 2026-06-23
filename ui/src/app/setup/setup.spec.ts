@@ -23,7 +23,6 @@ import {routes} from '../app.routes';
 import {ConfigService, ProjectConfig} from '../services/config/config';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {Setup} from './setup';
-import '../testing/mocks/match-media.mock';
 
 describe('Setup', () => {
   let component: Setup;
