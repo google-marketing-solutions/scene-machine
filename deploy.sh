@@ -706,7 +706,7 @@ else
   export NG_CLI_ANALYTICS=ci
   (
     cd ui \
-      && npm ci --legacy-peer-deps \
+      && npm ci \
       && npx ng build --configuration production
   )
 fi

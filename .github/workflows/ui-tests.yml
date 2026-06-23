@@ -25,7 +25,7 @@ jobs:
         cache-dependency-path: ui/package-lock.json
 
     - name: Install dependencies
-      run: npm ci --legacy-peer-deps
+      run: npm ci
 
     - name: Generate env.ts (CI placeholder values; not a real deploy)
       # ui/src/env.ts is rendered from env.template.txt by deploy.sh and is
