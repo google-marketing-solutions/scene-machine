@@ -34,6 +34,7 @@ import {
   ProjectConfig,
   ThumbnailMaterial,
 } from '../services/config/config';
+import {MediaService} from '../services/media/media';
 import {MediaSrcPipe} from '../services/media/media-src.pipe';
 import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialog';
 
@@ -60,6 +61,7 @@ import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialo
 export class Homepage {
   private config = inject(ConfigService);
   private dialog = inject(MatDialog);
+  private mediaService = inject(MediaService);
   projects = signal<ProjectConfig[]>([]);
   theme = this.config.theme;
   primaryColor = this.config.primaryColor;
@@ -83,6 +85,35 @@ export class Homepage {
         return dateB - dateA;
       });
       this.projects.set(projects);
+      this.presignThumbnails(projects);
+    });
+  }
+
+  /**
+   * Pre-warms the signed-URL cache for every visible thumbnail with one batch
+   * `/api/signUrl` request, so each card's `| mediaSrc` resolves from the cache
+   * instead of firing its own request (one IAM signBlob RPC per card).
+   */
+  private presignThumbnails(projects: ProjectConfig[]) {
+    const paths: string[] = [];
+    for (const project of projects) {
+      const thumb = this.getThumbnailData(project);
+      if (thumb.highQualityThumbnail?.path) {
+        paths.push(thumb.highQualityThumbnail.path);
+      }
+      if (thumb.showReference && thumb.referenceImage?.path) {
+        paths.push(thumb.referenceImage.path);
+      }
+      if (thumb.showVideo && thumb.videoUrl?.path) {
+        paths.push(thumb.videoUrl.path);
+      }
+    }
+    if (paths.length === 0) {
+      return;
+    }
+    // Best-effort: each mediaSrc pipe re-signs its own path on a cache miss.
+    void this.mediaService.signUrls(paths).catch((error: unknown) => {
+      console.error('Failed to pre-sign project thumbnails', error);
     });
   }
 

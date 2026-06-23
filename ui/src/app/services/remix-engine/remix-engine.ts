@@ -1051,6 +1051,11 @@ export class RemixEngineService {
     const fileItems = videoItems.filter(
       (e): e is NodeItem & {file: string} => e.file !== undefined,
     );
+    // Pre-warm the signed-URL cache for every candidate with one batch request;
+    // each buildCandidate's signUrl(path) below then joins it (dedup) instead of
+    // issuing one /api/signUrl request per candidate. Best-effort: on a batch
+    // failure the per-candidate withRetry re-signs the path on its own.
+    void this.mediaService.signUrls(fileItems.map(e => e.file)).catch(() => {});
     const settled = await Promise.allSettled(fileItems.map(buildCandidate));
     const candidates = settled
       .filter(
@@ -1267,6 +1272,16 @@ export class RemixEngineService {
         string,
         Record<string, ProductImage>
       > = {};
+      // Pre-warm the signed-URL cache for every outpaint image with one batch
+      // request; the per-image signUrl calls below then join it (dedup) instead
+      // of issuing one /api/signUrl request each.
+      void this.mediaService
+        .signUrls(
+          outpaintedImages
+            .filter(image => image.product_id !== undefined)
+            .map(image => String(image.file)),
+        )
+        .catch(() => {});
       for (const image of outpaintedImages) {
         if (image.product_id !== undefined) {
           const productId = String(image.product_id);
