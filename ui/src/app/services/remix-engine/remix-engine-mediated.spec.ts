@@ -87,7 +87,11 @@ describe('RemixEngineService (mediated)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    (globalThis as any).window = {location: {origin: 'http://localhost'}};
+    // Do NOT replace the global `window` here. jsdom already provides
+    // window.location.origin (only used in debug log strings, never asserted),
+    // and clobbering window with a bare stub strips navigator / matchMedia /
+    // addEventListener. Under the official builder's parallel file runner that
+    // leak corrupts the DOM environment for component specs sharing a worker.
 
     httpClientMock = {
       post: vi.fn(),
