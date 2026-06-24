@@ -516,6 +516,52 @@ describe('RemixEngineService (mediated)', () => {
       expect(finalScene).toHaveProperty('pendingGeneration');
       expect(finalScene).not.toHaveProperty('generationError');
     });
+
+    it('does not attach candidates to the wrong project when the user navigates while signing (E5)', async () => {
+      const mockScene = {
+        id: 'scene-1',
+        type: 'generated',
+        prompt: 'prompt 1',
+        candidates: [],
+      };
+      projectConfigSignal.set({
+        id: 'project-1',
+        numberOfCandidates: 2,
+        storyboard: [mockScene],
+      });
+      setupHappyMedia();
+      // Hold signing open so the user can navigate AFTER the poll completes but
+      // BEFORE the candidates are attached — the exact reported race.
+      let resolveSign!: (url: string) => void;
+      mediaServiceMock.signUrl.mockReturnValue(
+        new Promise<string>(resolve => (resolveSign = resolve)),
+      );
+      vi.spyOn(service, 'startVideoGenerationWorkflow').mockResolvedValue(
+        of({executionId: 'mock-execution-id'}) as any,
+      );
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/v1.mp4'}]}}},
+      } as any);
+
+      const generatePromise = service.generateCandidates(
+        mockScene as any,
+        generationParams,
+      );
+      await settle(); // reach the signing await
+      // Only the start marker has been persisted so far.
+      expect(configServiceMock.updateProjectConfig).toHaveBeenCalledTimes(1);
+
+      // User leaves project-1 for another project before signing finishes.
+      projectConfigSignal.set({id: 'project-B', storyboard: []});
+      resolveSign('https://signed.example/p/v1.mp4');
+      await generatePromise;
+
+      // The finished candidates were NOT attached to the now-loaded project-B
+      // (no second update), so project-1's pendingGeneration marker survives for
+      // its reopen to re-collect. Nothing landed in the wrong project.
+      expect(configServiceMock.updateProjectConfig).toHaveBeenCalledTimes(1);
+      expect(lastUpdatedScene()).toHaveProperty('pendingGeneration');
+    });
   });
 
   describe('resume of persisted in-flight generations', () => {
@@ -896,6 +942,45 @@ describe('RemixEngineService (mediated)', () => {
         .spyOn(service, 'pollWorkflow')
         .mockReturnValue(new Promise(() => {}));
       runResumeScan();
+      expect(pollSpy).toHaveBeenCalledWith('render-exec-id', 'project-1');
+    });
+
+    it('does not record the render to the wrong project when navigation happens while signing, and re-resumes on return (E5)', async () => {
+      const project = mockProjectWithRender();
+      // The poll completes with a finished render...
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/final.mp4'}]}}},
+      } as any);
+      // ...but signing its output URL is still in flight, leaving a window for
+      // the user to navigate away before the render is recorded.
+      let resolveSign!: (url: string) => void;
+      mediaServiceMock.signUrl.mockReturnValue(
+        new Promise<string>(resolve => (resolveSign = resolve)),
+      );
+
+      runResumeScan();
+      await settle(); // reach the signing await
+      expect(service.combiningScenes()).toBe(true);
+
+      // User navigates to another project before signing finishes.
+      projectConfigSignal.set({id: 'project-B', storyboard: []});
+      resolveSign('https://signed.example/p/final.mp4');
+      await settle();
+
+      // The finished render was NOT recorded against project-B and project-1's
+      // marker was NOT cleared: it is not lost to the wrong project. The button
+      // is reset rather than left stuck.
+      expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+      expect(configServiceMock.setPendingRender).not.toHaveBeenCalled();
+      expect(service.combiningScenes()).toBe(false);
+
+      // Returning to project-1 re-resumes the same execution (the resume claim
+      // was released), so the render is re-collected into the correct project.
+      const pollSpy = vi
+        .spyOn(service, 'pollWorkflow')
+        .mockReturnValue(new Promise(() => {}));
+      projectConfigSignal.set(project);
+      TestBed.tick();
       expect(pollSpy).toHaveBeenCalledWith('render-exec-id', 'project-1');
     });
 

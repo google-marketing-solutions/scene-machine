@@ -795,6 +795,12 @@ export class RemixEngineService {
           referenceImage: scene.referenceImage,
         },
       );
+      // Collecting/signing the candidates above is async; if the user navigated
+      // to another project meanwhile, attaching now would write this scene's
+      // candidates to the wrong project (or silently drop them, since that
+      // project has no scene with this id). Bail like a navigation so the marker
+      // survives and reopening the original project re-collects them. (E5)
+      this.assertProjectUnchanged(projectId);
       if (newCandidates.length === 0) {
         // The run is complete but produced no (new) videos: clear the
         // persisted in-flight marker now instead of leaving it for the
@@ -926,7 +932,11 @@ export class RemixEngineService {
         },
       );
       // Attach even when newCandidates is empty: the run is complete, so
-      // the pendingGeneration marker must be cleared either way.
+      // the pendingGeneration marker must be cleared either way. But signing
+      // above is async: if the user navigated away meanwhile, bail like a
+      // navigation so the marker survives and a later return re-collects, rather
+      // than attaching to (or clearing the marker on) the wrong project. (E5)
+      this.assertProjectUnchanged(projectId);
       this.attachCandidates(sceneId, [...existingCandidates, ...newCandidates]);
     } catch (error) {
       if (error instanceof ProjectChangedError) {
@@ -1051,10 +1061,8 @@ export class RemixEngineService {
     const fileItems = videoItems.filter(
       (e): e is NodeItem & {file: string} => e.file !== undefined,
     );
-    // Pre-warm the signed-URL cache for every candidate with one batch request;
-    // each buildCandidate's signUrl(path) below then joins it (dedup) instead of
-    // issuing one /api/signUrl request per candidate. Best-effort: on a batch
-    // failure the per-candidate withRetry re-signs the path on its own.
+    // Warm the cache in one request so the per-candidate signUrl calls below
+    // dedup into it; best-effort, withRetry re-signs each path if it fails.
     void this.mediaService.signUrls(fileItems.map(e => e.file)).catch(() => {});
     const settled = await Promise.allSettled(fileItems.map(buildCandidate));
     const candidates = settled
@@ -1272,9 +1280,8 @@ export class RemixEngineService {
         string,
         Record<string, ProductImage>
       > = {};
-      // Pre-warm the signed-URL cache for every outpaint image with one batch
-      // request; the per-image signUrl calls below then join it (dedup) instead
-      // of issuing one /api/signUrl request each.
+      // Warm the cache in one request so the per-image signUrl calls below
+      // dedup into it.
       void this.mediaService
         .signUrls(
           outpaintedImages
@@ -1397,7 +1404,7 @@ export class RemixEngineService {
       // reliance on the shared combiningScenes flag.)
       this.resumedRenderExecutionIds.add(executionId);
       const workflowStatus = await this.pollWorkflow(executionId, projectId);
-      await this.recordRenderOutput(workflowStatus);
+      await this.recordRenderOutput(workflowStatus, projectId);
       this.combiningScenes.set(false);
     } catch (error) {
       if (error instanceof ProjectChangedError) {
@@ -1472,12 +1479,32 @@ export class RemixEngineService {
   }
 
   /**
+   * Throws ProjectChangedError when the loaded project is no longer
+   * `projectId`. Called right before a completed run's result is written:
+   * pollWorkflow guards project identity only DURING polling, so a navigation
+   * in the async gap between a successful poll and the write (e.g. while the
+   * output URL is being signed) would otherwise persist the result against
+   * whatever project is now loaded, losing it from the project it belongs to.
+   * Throwing routes into the existing ProjectChangedError handlers, which keep
+   * the in-flight marker and release the resume claim, so reopening the
+   * original project re-collects the finished result. (E5)
+   */
+  private assertProjectUnchanged(projectId: string) {
+    if (this.configService.projectConfig.value().id !== projectId) {
+      throw new ProjectChangedError();
+    }
+  }
+
+  /**
    * Records a completed combine-scenes workflow's output as a render run and
    * clears the in-flight render marker. Throws on a workflow error or missing
    * output so the caller's catch handles it. Shared by combineScenes() and
    * resumeRender() so the two paths cannot diverge.
    */
-  private async recordRenderOutput(workflowStatus: WorkflowStatusResponse) {
+  private async recordRenderOutput(
+    workflowStatus: WorkflowStatusResponse,
+    projectId: string,
+  ) {
     if (workflowStatus.sink?.output['0']['video'][0]['_error']) {
       const errorMsg =
         workflowStatus.sink?.output['0']['video'][0]['_error'] ||
@@ -1499,6 +1526,12 @@ export class RemixEngineService {
     } catch (error) {
       throw new RenderSigningError(error);
     }
+    // The poll succeeded and the URL is signed, but signing was async: if the
+    // user navigated to another project meanwhile, recording now would attach
+    // this render to the wrong project and clear ITS marker, losing the render
+    // from the project it belongs to. Bail like a navigation so the marker
+    // survives and reopening the original project re-collects it. (E5)
+    this.assertProjectUnchanged(projectId);
     this.configService.addRenderRun({
       createdAt: new Date(),
       outputVideo: {
@@ -1527,7 +1560,7 @@ export class RemixEngineService {
         pending.executionId,
         projectId,
       );
-      await this.recordRenderOutput(workflowStatus);
+      await this.recordRenderOutput(workflowStatus, projectId);
       this.combiningScenes.set(false);
     } catch (error) {
       if (error instanceof ProjectChangedError) {
