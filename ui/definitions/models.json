@@ -63,11 +63,14 @@
       "capabilities": {
         "supports_audio": true,
         "enhance_prompt_locked": true,
-        "allowed_durations_seconds": [4, 6, 8],
         "max_videos_per_request": 4,
-        "allowed_resolutions": ["720p", "1080p", "4k"]
+        "allowed_aspect_ratios": ["16:9", "9:16"],
+        "allowed_resolutions": ["720p", "1080p", "4k"],
+        "duration_by_resolution": {"720p": [4, 6, 8], "1080p": [8], "4k": [8]},
+        "supports_last_frame": true,
+        "supports_reference_images": true
       },
-      "_notes": "Template default VEO_MODEL (config.template.txt:26), VEO_REGION=global. us-central1 required: workflow_examples submit gcp_location=us-central1. No retirement date announced. Discrete durations, enhance-prompt lock, and 4k are UNVERIFIED for GA 3.1."
+      "_notes": "Template default VEO_MODEL (config.template.txt:26), VEO_REGION=global. us-central1 required: workflow_examples submit gcp_location=us-central1. max_videos_per_request=4 verified callable in global 2026-07-06 (generate_videos batched 2->2, 4->4). duration_by_resolution: 1080p/4k require 8s per Veo docs -- not yet enforced in code. last_frame + reference_images are model capabilities, not yet wired in veo.py."
     },
     "veo-3.1-fast-generate-001": {
       "family": "veo",
@@ -79,11 +82,33 @@
       "capabilities": {
         "supports_audio": true,
         "enhance_prompt_locked": true,
-        "allowed_durations_seconds": [4, 6, 8],
         "max_videos_per_request": 4,
-        "allowed_resolutions": ["720p", "1080p", "4k"]
+        "allowed_aspect_ratios": ["16:9", "9:16"],
+        "allowed_resolutions": ["720p", "1080p", "4k"],
+        "duration_by_resolution": {"720p": [4, 6, 8], "1080p": [8], "4k": [8]},
+        "supports_last_frame": true,
+        "supports_reference_images": true
       },
-      "_notes": "Used by workflow_examples (gcp_location=us-central1). No retirement date announced. Capability flags copied from veo-3.1-generate-001; UNVERIFIED."
+      "_notes": "Used by workflow_examples (gcp_location=us-central1). Same capabilities as veo-3.1-generate-001; max_videos_per_request=4 verified callable in global 2026-07-06 (2->2, 4->4). duration_by_resolution: 1080p/4k require 8s per docs -- not enforced. last_frame + reference_images supported, not yet wired."
+    },
+    "veo-3.1-lite-generate-001": {
+      "family": "veo",
+      "actions": ["generate_video"],
+      "locations": ["global"],
+      "launch_stage": "GA",
+      "release_date": null,
+      "retirement_date": null,
+      "capabilities": {
+        "supports_audio": true,
+        "enhance_prompt_locked": true,
+        "max_videos_per_request": 4,
+        "allowed_aspect_ratios": ["16:9", "9:16"],
+        "allowed_resolutions": ["720p", "1080p"],
+        "duration_by_resolution": {"720p": [4, 6, 8], "1080p": [8]},
+        "supports_last_frame": true,
+        "supports_reference_images": false
+      },
+      "_notes": "Veo 3.1 Lite. Vertex ID veo-3.1-lite-generate-001 verified callable in global 2026-07-06 (generate_videos batched 2->2, 4->4); the Gemini API names it veo-3.1-lite-generate-preview. No 4k and no reference_images (Lite excludes them). launch_stage/dates UNVERIFIED -- absent from the GA lifecycle table. us-central1 not tested."
     },
     "gemini-3-pro-image": {
       "family": "image",
