@@ -41,7 +41,7 @@
       "release_date": null,
       "retirement_date": null,
       "capabilities": {},
-      "_notes": "Gemini 3.1 Pro (preview). Not in the GA lifecycle table -- preview models retire 45 days after their GA replacement. Location global verified callable on Vertex (2026-07-06); capabilities UNVERIFIED."
+      "_notes": "Gemini 3.1 Pro (preview). Not in the GA lifecycle table -- preview models retire 45 days after their GA replacement. Callable in global only (absent in us-central1), verified 2026-07-06; capabilities UNVERIFIED."
     },
     "gemini-3.1-flash-lite": {
       "family": "gemini",
@@ -51,7 +51,7 @@
       "release_date": "2026-05-07",
       "retirement_date": "2027-05-07",
       "capabilities": {},
-      "_notes": "Gemini 3.1 Flash-Lite. Location global verified callable on Vertex (2026-07-06); capabilities UNVERIFIED -- confirm against the model docs."
+      "_notes": "Gemini 3.1 Flash-Lite. Callable in global only (absent in us-central1), verified 2026-07-06; capabilities UNVERIFIED -- confirm against the model docs."
     },
     "veo-3.1-generate-001": {
       "family": "veo",
@@ -109,7 +109,7 @@
         "image_sizes": ["0.5K", "2K", "4K"],
         "supports_video_input": true
       },
-      "_notes": "Nano Banana 2 (non-Lite); recommended in the config.template.txt comment. Cheap-outpaint candidate (0.5K/2K/4K). Model resolves in global (verified 2026-07-06); image_sizes and supports_video_input UNVERIFIED."
+      "_notes": "Nano Banana 2 (non-Lite); recommended in the config.template.txt comment. Cheap-outpaint candidate (0.5K/2K/4K). Resolves in global only (absent in us-central1), verified 2026-07-06; image_sizes and supports_video_input UNVERIFIED."
     },
     "gemini-3.1-flash-lite-image": {
       "family": "image",
@@ -119,7 +119,7 @@
       "release_date": "2026-06-30",
       "retirement_date": null,
       "capabilities": {},
-      "_notes": "Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image). Short-term availability model (retires 45 days after a replacement ships), so no fixed retirement date. Model resolves in global (verified 2026-07-06). generate_image only: outpaint needs image_sizes covering 2K and 4K, UNVERIFIED here -- add outpaint_image once image_sizes is confirmed."
+      "_notes": "Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image). Short-term availability model (retires 45 days after a replacement ships), so no fixed retirement date. Resolves in global only (absent in us-central1), verified 2026-07-06. generate_image only: outpaint needs image_sizes covering 2K and 4K, UNVERIFIED here -- add outpaint_image once image_sizes is confirmed."
     }
   }
 }
