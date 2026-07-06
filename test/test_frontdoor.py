@@ -583,3 +583,77 @@ def test_app_serves_definitions_and_status_viewer(
   assert response.status_code == 200
   assert b'<' in response.data  # serves status.html for the bare /status
   assert client.get('/status/re.css').status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# (i) ROLE=app validates the submission against the model allowlist before
+# anything is stored or a task runs. The worker route is exempt by role.
+# ---------------------------------------------------------------------------
+def _video_node(model, location):
+  return {
+      'nodeId': 'n',
+      'workflowDefinition': {
+          'n': {
+              'action': 'generate_video',
+              'parameters': {'model': model, 'gcp_location': location},
+          }
+      },
+  }
+
+
+def _app_submit(monkeypatch, orch, body):
+  captured = _capture_supply_node(monkeypatch, orch)
+  response = orch.app.test_client().post('/api/supplyNode', json=body)
+  return response, captured
+
+
+def test_app_rejects_rogue_model(monkeypatch, orchestrator_module):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  response, captured = _app_submit(
+      monkeypatch, orch, _video_node('rogue', 'global'))
+  assert response.status_code == 400
+  assert response.get_json()['code'] == 'MODEL_NOT_ALLOWED'
+  assert captured == {}  # nothing stored, no task scheduled
+
+
+def test_app_rejects_disallowed_location(monkeypatch, orchestrator_module):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  response, captured = _app_submit(
+      monkeypatch, orch, _video_node('veo-3.1-generate-001', 'europe-west4'))
+  assert response.status_code == 400
+  assert response.get_json()['code'] == 'MODEL_LOCATION_PAIR_INVALID'
+  assert captured == {}
+
+
+def test_app_rejects_client_execution_id(monkeypatch, orchestrator_module):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  body = _video_node('veo-3.1-generate-001', 'global')
+  body['executionId'] = 'exec-injected'
+  response, captured = _app_submit(monkeypatch, orch, body)
+  assert response.status_code == 400
+  assert response.get_json()['code'] == 'EXECUTION_ID_NOT_ALLOWED'
+  assert captured == {}
+
+
+def test_app_accepts_valid_submission(monkeypatch, orchestrator_module):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  response, captured = _app_submit(
+      monkeypatch, orch, _video_node('veo-3.1-generate-001', 'global'))
+  assert response.status_code == 200
+  assert 'data' in captured  # the node reached orchestrator.supply_node
+
+
+def test_worker_route_does_not_validate(monkeypatch, orchestrator_module):
+  # Leak detector: a rogue model on the worker route is NOT rejected --
+  # validation runs only on the app role.
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker', WORKER_URL='https://w.a.run.app')
+  captured = _capture_supply_node(monkeypatch, orch)
+  response = orch.app.test_client().post(
+      '/supplyNode', json=_video_node('rogue', 'global'))
+  assert response.status_code == 200
+  assert 'data' in captured

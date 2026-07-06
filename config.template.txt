@@ -22,7 +22,7 @@ export GEMINI_REGION=global # choose from: https://docs.cloud.google.com/vertex-
 # Video generation model.
 # All available models can be found at:
 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models#veo-models
-# Recommended models: veo-3.1-generate-001, veo-3.1-fast-generate-001, veo-3.1-lite-generate-001
+# Recommended models: veo-3.1-generate-001, veo-3.1-fast-generate-001
 export VEO_MODEL=veo-3.1-generate-001
 export VEO_REGION=global # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models
 

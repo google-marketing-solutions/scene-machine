@@ -63,7 +63,6 @@ export interface GcsFile {
 export const VIDEO_GENERATION_MODELS = [
   'veo-3.1-generate-001',
   'veo-3.1-fast-generate-001',
-  'veo-3.1-lite-generate-001',
 ];
 
 interface GlobalConfig {

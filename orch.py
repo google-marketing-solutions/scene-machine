@@ -67,6 +67,7 @@ from google.oauth2 import id_token as google_id_token
 import orchestrator
 from util import database as util_database
 from util import errors as util_errors
+from util import submission_validation
 from werkzeug.security import safe_join
 
 # At most the queue's allowed attempts minus one, so the workflow proceeds:
@@ -251,6 +252,20 @@ def supply_node_handler() -> flask_response:
           mimetype=ContentType.JSON.value,
       )
     params[k] = server_value
+  # Only the app service serves /api/supplyNode. Check the submission against
+  # the model allowlist before anything is stored or a task runs; a bad model,
+  # location pair, or a client-supplied executionId is rejected here with a
+  # 400. The worker route re-supplies successor nodes with trusted data and is
+  # exempt by role.
+  if _ROLE == 'app':
+    problem = submission_validation.validate_submission(data)
+    if problem is not None:
+      message, code = problem
+      return flask_response(
+          json.dumps({'error': message, 'code': code}),
+          status=400,
+          mimetype=ContentType.JSON.value,
+      )
   execution_id = orchestrator.supply_node(data, instance)
   output = {Key.EXECUTION_ID.value: execution_id}
   return flask_response(

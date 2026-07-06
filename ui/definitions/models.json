@@ -1,0 +1,125 @@
+{
+  "_notes": [
+    "Scene Machine model allowlist. Ships in the single image; the backend loads it like actions.json; the UI can fetch it via GET /definitions/models.json.",
+    "Underscore keys are documentation: ignored by loader, validator, and tests.",
+    "defaults: the default model per family, used when a caller does not pick one.",
+    "actions: one entry per model-parameterized action in actions.json. location_param is the node parameter carrying the model location (null = no location param; the worker runs it at a hardcoded region). default_key is the config field the UI resolver reads its default from.",
+    "models: keyed by exact Vertex model ID. locations must cover every location the UI, config.template.txt, and workflow_examples submit. capabilities carries ONLY flags code branches on, keyed per family. Values marked UNVERIFIED still need confirming against the model docs.",
+    "release_date / retirement_date (from the model-versions lifecycle table, YYYY-MM-DD). retirement_date is the earliest date the model may be retired ('Not before ...' in the table); null = no date announced, a short-term model, or not in the table."
+  ],
+  "defaults": {
+    "gemini": "gemini-3.5-flash",
+    "image": "gemini-3-pro-image",
+    "veo": "veo-3.1-generate-001"
+  },
+  "actions": {
+    "translate":             { "location_param": "gemini_model_location", "default_key": "geminiModel" },
+    "describe_image":        { "location_param": null,                    "default_key": "geminiModel" },
+    "write_products_script": { "location_param": "gemini_model_location", "default_key": "geminiModel" },
+    "analyse_file":          { "location_param": null,                    "default_key": "geminiModel" },
+    "generate_storyboard":   { "location_param": "gemini_model_location", "default_key": "geminiModel" },
+    "outpaint_image":        { "location_param": "image_model_location",  "default_key": "imageModel" },
+    "generate_image":        { "location_param": "image_model_location",  "default_key": "imageModel" },
+    "generate_video":        { "location_param": "gcp_location",          "default_key": "veoModel" }
+  },
+  "models": {
+    "gemini-3.5-flash": {
+      "family": "gemini",
+      "actions": ["translate", "describe_image", "write_products_script", "analyse_file", "generate_storyboard"],
+      "locations": ["global"],
+      "launch_stage": "GA",
+      "release_date": "2026-05-19",
+      "retirement_date": "2027-05-19",
+      "capabilities": {},
+      "_notes": "Template default GEMINI_MODEL (config.template.txt:19), GEMINI_REGION=global. describe_image/analyse_file carry no location param (the worker runs them at a hardcoded region), so their (model, location) pair check is vacuous."
+    },
+    "gemini-3.1-pro-preview": {
+      "family": "gemini",
+      "actions": ["translate", "describe_image", "write_products_script", "analyse_file", "generate_storyboard"],
+      "locations": ["global"],
+      "launch_stage": "preview",
+      "release_date": null,
+      "retirement_date": null,
+      "capabilities": {},
+      "_notes": "Gemini 3.1 Pro (preview). Not in the GA lifecycle table -- preview models retire 45 days after their GA replacement. Location global verified callable on Vertex (2026-07-06); capabilities UNVERIFIED."
+    },
+    "gemini-3.1-flash-lite": {
+      "family": "gemini",
+      "actions": ["translate", "describe_image", "write_products_script", "analyse_file", "generate_storyboard"],
+      "locations": ["global"],
+      "launch_stage": "GA",
+      "release_date": "2026-05-07",
+      "retirement_date": "2027-05-07",
+      "capabilities": {},
+      "_notes": "Gemini 3.1 Flash-Lite. Location global verified callable on Vertex (2026-07-06); capabilities UNVERIFIED -- confirm against the model docs."
+    },
+    "veo-3.1-generate-001": {
+      "family": "veo",
+      "actions": ["generate_video"],
+      "locations": ["global", "us-central1"],
+      "launch_stage": "GA",
+      "release_date": "2025-11-17",
+      "retirement_date": null,
+      "capabilities": {
+        "supports_audio": true,
+        "enhance_prompt_locked": true,
+        "allowed_durations_seconds": [4, 6, 8],
+        "max_videos_per_request": 4,
+        "allowed_resolutions": ["720p", "1080p", "4k"]
+      },
+      "_notes": "Template default VEO_MODEL (config.template.txt:26), VEO_REGION=global. us-central1 required: workflow_examples submit gcp_location=us-central1. No retirement date announced. Discrete durations, enhance-prompt lock, and 4k are UNVERIFIED for GA 3.1."
+    },
+    "veo-3.1-fast-generate-001": {
+      "family": "veo",
+      "actions": ["generate_video"],
+      "locations": ["global", "us-central1"],
+      "launch_stage": "GA",
+      "release_date": "2025-11-17",
+      "retirement_date": null,
+      "capabilities": {
+        "supports_audio": true,
+        "enhance_prompt_locked": true,
+        "allowed_durations_seconds": [4, 6, 8],
+        "max_videos_per_request": 4,
+        "allowed_resolutions": ["720p", "1080p", "4k"]
+      },
+      "_notes": "Used by workflow_examples (gcp_location=us-central1). No retirement date announced. Capability flags copied from veo-3.1-generate-001; UNVERIFIED."
+    },
+    "gemini-3-pro-image": {
+      "family": "image",
+      "actions": ["generate_image", "outpaint_image"],
+      "locations": ["global"],
+      "launch_stage": "GA",
+      "release_date": "2026-05-28",
+      "retirement_date": "2027-05-28",
+      "capabilities": {
+        "image_sizes": ["1K", "2K", "4K"],
+        "supports_video_input": false
+      },
+      "_notes": "Nano Banana Pro; template default IMAGE_MODEL (config.template.txt:33), IMAGE_MODEL_REGION=global. Outpaint-eligible: {2K,4K} subset of image_sizes (the outpainter always requests 2K/4K). supports_video_input UNVERIFIED."
+    },
+    "gemini-3.1-flash-image": {
+      "family": "image",
+      "actions": ["generate_image", "outpaint_image"],
+      "locations": ["global"],
+      "launch_stage": "GA",
+      "release_date": "2026-05-28",
+      "retirement_date": "2027-05-28",
+      "capabilities": {
+        "image_sizes": ["0.5K", "2K", "4K"],
+        "supports_video_input": true
+      },
+      "_notes": "Nano Banana 2 (non-Lite); recommended in the config.template.txt comment. Cheap-outpaint candidate (0.5K/2K/4K). Model resolves in global (verified 2026-07-06); image_sizes and supports_video_input UNVERIFIED."
+    },
+    "gemini-3.1-flash-lite-image": {
+      "family": "image",
+      "actions": ["generate_image"],
+      "locations": ["global"],
+      "launch_stage": "GA",
+      "release_date": "2026-06-30",
+      "retirement_date": null,
+      "capabilities": {},
+      "_notes": "Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image). Short-term availability model (retires 45 days after a replacement ships), so no fixed retirement date. Model resolves in global (verified 2026-07-06). generate_image only: outpaint needs image_sizes covering 2K and 4K, UNVERIFIED here -- add outpaint_image once image_sizes is confirmed."
+    }
+  }
+}
