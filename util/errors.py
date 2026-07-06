@@ -61,6 +61,12 @@ def is_retryable(e: Exception) -> bool:
       getattr(e, 'status_code', None) == TOO_MANY_REQUESTS,
       callable(code_attr)
       and getattr(code_attr(), 'value', None) == TOO_MANY_REQUESTS,
+      # Some SDKs put the HTTP status in `code` as an integer-like value:
+      # google-genai's is a plain int, api_core's is an HTTPStatus that compares
+      # equal to 429. Retry 429 only -- it means throttled before any work ran,
+      # so repeating is safe. 5xx is deliberately left non-retryable: generation
+      # is not idempotent, so a retry could bill twice.
+      code_attr == TOO_MANY_REQUESTS,
       # Removed because this would need to be retried much later:
       # isinstance(e, RuntimeError) and 'try again later' in repr(e).lower(),
   ])
