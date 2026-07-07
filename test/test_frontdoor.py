@@ -123,7 +123,7 @@ def _capture_supply_node(monkeypatch, orch, execution_id='exec-test'):
 
 
 # ---------------------------------------------------------------------------
-# (f) ROLE unset (default 'all'): exactly today's three root routes, no
+# (a) ROLE unset (default 'all'): exactly today's three root routes, no
 # auth, Host-derived callback — byte-identical legacy behavior.
 # ---------------------------------------------------------------------------
 def test_default_role_all_routes_and_no_auth(monkeypatch, orchestrator_module):
@@ -169,7 +169,7 @@ def test_supply_node_rejects_non_object_workflow_params(
 
 
 # ---------------------------------------------------------------------------
-# (a) ROLE=worker: /supplyNode + /triggerAction only; no /api/*, no
+# (b) ROLE=worker: /supplyNode + /triggerAction only; no /api/*, no
 # /getStatus, no static serving.
 # ---------------------------------------------------------------------------
 def test_worker_exposes_only_task_routes(monkeypatch, orchestrator_module):
@@ -189,7 +189,7 @@ def test_worker_exposes_only_task_routes(monkeypatch, orchestrator_module):
 
 
 # ---------------------------------------------------------------------------
-# (b) ROLE=app: /api/supplyNode + /api/getStatus; the bare worker routes
+# (c) ROLE=app: /api/supplyNode + /api/getStatus; the bare worker routes
 # are not registered.
 # ---------------------------------------------------------------------------
 def test_app_exposes_api_routes_not_worker_routes(
@@ -222,7 +222,7 @@ def test_app_exposes_api_routes_not_worker_routes(
 
 
 # ---------------------------------------------------------------------------
-# (c) WORKER_URL overrides the Host-derived Cloud Tasks callback base in
+# (d) WORKER_URL overrides the Host-derived Cloud Tasks callback base in
 # both task-creating handlers.
 # ---------------------------------------------------------------------------
 def test_worker_url_overrides_host_for_supply_node(
@@ -403,7 +403,7 @@ def _accept_iap(monkeypatch, orch, email='user@example.com'):
 
 
 # ---------------------------------------------------------------------------
-# (d) AUTH_MODE=iap on ROLE=app: /api/* requires a valid IAP JWT assertion;
+# (e) AUTH_MODE=iap on ROLE=app: /api/* requires a valid IAP JWT assertion;
 # static paths stay open.
 # ---------------------------------------------------------------------------
 def test_iap_auth_gates_api_routes(monkeypatch, orchestrator_module):
@@ -477,7 +477,7 @@ def test_iap_auth_gates_api_routes(monkeypatch, orchestrator_module):
 
 
 # ---------------------------------------------------------------------------
-# (e) AUTH_MODE=iap on ROLE=app: the IAP JWT assertion is verified against the
+# (f) AUTH_MODE=iap on ROLE=app: the IAP JWT assertion is verified against the
 # configured audience and certs URL; the Firebase custom-token bridge no longer
 # exists (the client signs in via IAP directly, not Firebase Auth).
 # ---------------------------------------------------------------------------
@@ -605,7 +605,7 @@ def _app_submit(monkeypatch, orch, body):
 
 
 # ---------------------------------------------------------------------------
-# (i) ROLE=app validates the submission against the model allowlist before
+# (g) ROLE=app validates the submission against the model allowlist before
 # anything is stored or a task runs. The worker route is exempt by role.
 # ---------------------------------------------------------------------------
 def test_app_rejects_rogue_model(monkeypatch, orchestrator_module):
