@@ -585,10 +585,7 @@ def test_app_serves_definitions_and_status_viewer(
   assert client.get('/status/re.css').status_code == 200
 
 
-# ---------------------------------------------------------------------------
-# (i) ROLE=app validates the submission against the model allowlist before
-# anything is stored or a task runs. The worker route is exempt by role.
-# ---------------------------------------------------------------------------
+# Helpers for the ROLE=app submission-validation tests below.
 def _video_node(model, location):
   return {
       'nodeId': 'n',
@@ -607,6 +604,10 @@ def _app_submit(monkeypatch, orch, body):
   return response, captured
 
 
+# ---------------------------------------------------------------------------
+# (i) ROLE=app validates the submission against the model allowlist before
+# anything is stored or a task runs. The worker route is exempt by role.
+# ---------------------------------------------------------------------------
 def test_app_rejects_rogue_model(monkeypatch, orchestrator_module):
   del orchestrator_module
   orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
