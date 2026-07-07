@@ -20,7 +20,6 @@ is exercised and cannot drift from what the runtime uses. CI is the single
 strictness point for the allowlist.
 """
 
-import datetime
 import glob
 import json
 import os
@@ -77,28 +76,6 @@ def test_defaults_reference_real_models_of_their_family():
     assert model is not None, f'default {model_id!r} is not a real model'
     assert model['family'] == family, (
         f'default {model_id!r} is family {model["family"]!r}, not {family!r}')
-
-
-def test_model_dates_valid_and_ordered():
-  # release_date / retirement_date are ISO YYYY-MM-DD or null, and retirement
-  # (the earliest-possible date) is after release when both are set.
-  for mid, m in _MODELS['models'].items():
-    dates = {}
-    for field in ('release_date', 'retirement_date'):
-      val = m.get(field)
-      if val is None:
-        continue
-      dates[field] = datetime.date.fromisoformat(val)  # raises if malformed
-    if 'release_date' in dates and 'retirement_date' in dates:
-      assert dates['retirement_date'] > dates['release_date'], (
-          f'{mid}: retirement_date must be after release_date')
-
-
-def test_every_model_has_both_date_keys():
-  # Present (possibly null) so a new model can't silently omit lifecycle data.
-  for mid, m in _MODELS['models'].items():
-    assert 'release_date' in m, f'{mid} missing release_date'
-    assert 'retirement_date' in m, f'{mid} missing retirement_date'
 
 
 def test_outpaint_models_cover_2k_and_4k():

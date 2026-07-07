@@ -1,12 +1,4 @@
 {
-  "_notes": [
-    "Scene Machine model allowlist. Ships in the single image; the backend loads it like actions.json; the UI can fetch it via GET /definitions/models.json.",
-    "Underscore keys are documentation: ignored by loader, validator, and tests.",
-    "defaults: the default model per family, used when a caller does not pick one.",
-    "actions: one entry per model-parameterized action in actions.json. location_param is the node parameter carrying the model location (null = no location param; the worker runs it at a hardcoded region). default_key is the config field the UI resolver reads its default from.",
-    "models: keyed by exact Vertex model ID. locations must cover every location the UI, config.template.txt, and workflow_examples submit. capabilities is a forward-looking catalog: the validator checks only model/action/location, so no capability field gates runtime yet (image_sizes is read only by a CI drift test). Values marked UNVERIFIED still need confirming against the model docs.",
-    "release_date / retirement_date (from the model-versions lifecycle table, YYYY-MM-DD). retirement_date is the earliest date the model may be retired ('Not before ...' in the table); null = no date announced, a short-term model, or not in the table."
-  ],
   "defaults": {
     "gemini": "gemini-3.5-flash",
     "image": "gemini-3-pro-image",
@@ -27,39 +19,24 @@
       "family": "gemini",
       "actions": ["translate", "describe_image", "write_products_script", "analyse_file", "generate_storyboard"],
       "locations": ["global"],
-      "launch_stage": "GA",
-      "release_date": "2026-05-19",
-      "retirement_date": "2027-05-19",
-      "capabilities": {},
-      "_notes": "Template default GEMINI_MODEL (config.template.txt:19), GEMINI_REGION=global. describe_image/analyse_file carry no location param (the worker runs them at a hardcoded region), so their (model, location) pair check is vacuous."
+      "capabilities": {}
     },
     "gemini-3.1-pro-preview": {
       "family": "gemini",
       "actions": ["translate", "describe_image", "write_products_script", "analyse_file", "generate_storyboard"],
       "locations": ["global"],
-      "launch_stage": "preview",
-      "release_date": null,
-      "retirement_date": null,
-      "capabilities": {},
-      "_notes": "Gemini 3.1 Pro (preview). Not in the GA lifecycle table -- preview models retire 45 days after their GA replacement. Callable in global only (absent in us-central1), verified 2026-07-06; capabilities UNVERIFIED."
+      "capabilities": {}
     },
     "gemini-3.1-flash-lite": {
       "family": "gemini",
       "actions": ["translate", "describe_image", "write_products_script", "analyse_file", "generate_storyboard"],
       "locations": ["global"],
-      "launch_stage": "GA",
-      "release_date": "2026-05-07",
-      "retirement_date": "2027-05-07",
-      "capabilities": {},
-      "_notes": "Gemini 3.1 Flash-Lite. Callable in global only (absent in us-central1), verified 2026-07-06; capabilities UNVERIFIED -- confirm against the model docs."
+      "capabilities": {}
     },
     "veo-3.1-generate-001": {
       "family": "veo",
       "actions": ["generate_video"],
       "locations": ["global", "us-central1"],
-      "launch_stage": "GA",
-      "release_date": "2025-11-17",
-      "retirement_date": null,
       "capabilities": {
         "supports_audio": true,
         "enhance_prompt_locked": true,
@@ -69,16 +46,12 @@
         "duration_by_resolution": {"720p": [4, 6, 8], "1080p": [4, 6, 8], "4k": [8]},
         "supports_last_frame": true,
         "supports_reference_images": true
-      },
-      "_notes": "Template default VEO_MODEL (config.template.txt:26), VEO_REGION=global. us-central1 required: workflow_examples submit gcp_location=us-central1. max_videos_per_request=4 and 720p/1080p durations 4/6/8s verified live in global 2026-07-06 (the '1080p 8s-only' claim was disproven). 4k submit accepted, but generation did not complete under load; 8s-only behavior unverified (Veo Lite by contrast cleanly rejects 4k: 'Unsupported output video resolution RESOLUTION_4K'). enhance_prompt cannot be disabled on Veo 3.x (live operation error 2026-07-06). Capability fields are not yet enforced or wired in veo.py."
+      }
     },
     "veo-3.1-fast-generate-001": {
       "family": "veo",
       "actions": ["generate_video"],
       "locations": ["global", "us-central1"],
-      "launch_stage": "GA",
-      "release_date": "2025-11-17",
-      "retirement_date": null,
       "capabilities": {
         "supports_audio": true,
         "enhance_prompt_locked": true,
@@ -88,16 +61,12 @@
         "duration_by_resolution": {"720p": [4, 6, 8], "1080p": [4, 6, 8], "4k": [8]},
         "supports_last_frame": true,
         "supports_reference_images": true
-      },
-      "_notes": "Used by workflow_examples (gcp_location=us-central1). Same capabilities as veo-3.1-generate-001. max_videos_per_request=4 and 720p/1080p durations 4/6/8s verified live 2026-07-06. 4k submit accepted, but generation did not complete under load; 8s-only behavior unverified. enhance_prompt cannot be disabled on Veo 3.x (live operation error 2026-07-06). Capability fields are not yet wired."
+      }
     },
     "veo-3.1-lite-generate-001": {
       "family": "veo",
       "actions": ["generate_video"],
       "locations": ["global", "us-central1"],
-      "launch_stage": "preview",
-      "release_date": "2026-04-02",
-      "retirement_date": null,
       "capabilities": {
         "supports_audio": true,
         "enhance_prompt_locked": true,
@@ -107,47 +76,34 @@
         "duration_by_resolution": {"720p": [4, 6, 8], "1080p": [4, 6, 8]},
         "supports_last_frame": true,
         "supports_reference_images": false
-      },
-      "_notes": "Veo 3.1 Lite. veo-3.1-lite-generate-001 verified callable in global + us-central1 2026-07-06 (batched 2->2, 4->4); the Gemini API names it veo-3.1-lite-generate-preview. 1080p accepts 4/6/8s (verified live). No 4k -- cleanly rejected: 'Unsupported output video resolution RESOLUTION_4K'. No reference_images (Lite excludes them). Launch stage Preview, release 2026-04-02 (Vertex model page). enhance_prompt cannot be disabled on Veo 3.x (verified live 2026-07-06)."
+      }
     },
     "gemini-3-pro-image": {
       "family": "image",
       "actions": ["generate_image", "outpaint_image"],
       "locations": ["global"],
-      "launch_stage": "GA",
-      "release_date": "2026-05-28",
-      "retirement_date": "2027-05-28",
       "capabilities": {
         "image_sizes": ["1K", "2K", "4K"],
         "supports_video_input": false
-      },
-      "_notes": "Nano Banana Pro; template default IMAGE_MODEL (config.template.txt:33), IMAGE_MODEL_REGION=global. Outpaint-eligible: {2K,4K} subset of image_sizes (the outpainter always requests 2K/4K). image_sizes {1K,2K,4K} and no video input -- verified against the model docs 2026-07-06."
+      }
     },
     "gemini-3.1-flash-image": {
       "family": "image",
       "actions": ["generate_image", "outpaint_image"],
       "locations": ["global"],
-      "launch_stage": "GA",
-      "release_date": "2026-05-28",
-      "retirement_date": "2027-05-28",
       "capabilities": {
         "image_sizes": ["0.5K", "1K", "2K", "4K"],
         "supports_video_input": true
-      },
-      "_notes": "Nano Banana 2 (non-Lite); recommended in the config.template.txt comment. Outpaint-eligible: {2K,4K} subset of image_sizes. image_sizes {0.5K,1K,2K,4K}, default 1K; generates from video input -- verified against the model docs 2026-07-06. Resolves in global only (absent in us-central1), verified 2026-07-06."
+      }
     },
     "gemini-3.1-flash-lite-image": {
       "family": "image",
       "actions": ["generate_image"],
       "locations": ["global"],
-      "launch_stage": "GA",
-      "release_date": "2026-06-30",
-      "retirement_date": null,
       "capabilities": {
         "image_sizes": ["1K"],
         "supports_video_input": true
-      },
-      "_notes": "Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image). Short-term availability model (retires 45 days after a replacement ships), so no fixed retirement date. Resolves in global only (absent in us-central1), verified 2026-07-06. image_sizes {1K} only and generates from video input -- verified against the model docs 2026-07-06. generate_image only (outpaint needs 2K/4K, which this lacks)."
+      }
     }
   }
 }

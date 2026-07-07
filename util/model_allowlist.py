@@ -28,24 +28,10 @@ _ALLOWLIST_PATH = os.path.join(
 )
 
 
-def _drop_documentation_keys(obj):
-  """Drops underscore-prefixed documentation keys from the allowlist JSON.
-
-  The loader stays lenient: CI enforces shape, while runtime readers get the
-  same parsed allowlist without documentation-only notes.
-  """
-  if isinstance(obj, dict):
-    return {k: _drop_documentation_keys(v) for k, v in obj.items()
-            if not (isinstance(k, str) and k.startswith('_'))}
-  if isinstance(obj, list):
-    return [_drop_documentation_keys(v) for v in obj]
-  return obj
-
-
 @functools.lru_cache(maxsize=1)
 def _parse_allowlist(path: str) -> dict:
   with open(path, encoding='utf-8') as f:
-    return _drop_documentation_keys(json.load(f))
+    return json.load(f)
 
 
 def load_allowlist(path: str = _ALLOWLIST_PATH) -> dict:
