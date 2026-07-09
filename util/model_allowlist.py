@@ -47,19 +47,19 @@ def load_allowlist(path: str = _ALLOWLIST_PATH) -> dict:
 def models_for_action(action: str, allowlist: dict | None = None) -> list[str]:
   """Returns the model IDs allowed for `action`."""
   allowlist = allowlist or load_allowlist()
-  return [mid for mid, m in allowlist['models'].items()
-          if action in m.get('actions', [])]
+  return [model_id for model_id, entry in allowlist['models'].items()
+          if action in entry.get('actions', [])]
 
 
 def is_pair_allowed(action: str, model: str, location: str | None,
                     allowlist: dict | None = None) -> bool:
-  """True iff `model` is allowed for `action` and (when the action has a
+  """True if `model` is allowed for `action` and (when the action has a
   location param) `location` is in the model's allowed locations."""
   allowlist = allowlist or load_allowlist()
-  m = allowlist['models'].get(model)
-  if m is None or action not in m.get('actions', []):
+  entry = allowlist['models'].get(model)
+  if entry is None or action not in entry.get('actions', []):
     return False
   action_spec = allowlist['actions'].get(action, {})
   if action_spec.get('location_param') is None:
     return True  # no location param on this action -> location not validated
-  return location in m.get('locations', [])
+  return location in entry.get('locations', [])

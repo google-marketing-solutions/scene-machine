@@ -22,6 +22,7 @@ wording.
 import functools
 import json
 import os
+from typing import Any
 
 from util.model_allowlist import is_pair_allowed, load_allowlist
 
@@ -36,28 +37,32 @@ _WORKFLOW_DEFINITION = 'workflowDefinition'
 
 
 @functools.lru_cache(maxsize=1)
-def _load_actions_json():
+def _load_actions_json() -> dict:
   # Parsed once and cached, like the allowlist. A missing/unreadable file then
   # fails on the first load, not on every request at the trust boundary.
   with open(_ACTIONS_JSON, encoding='utf-8') as f:
     return json.load(f)
 
 
-def _action_params(action, actions_json):
-  d = actions_json.get(action, {})
-  if not isinstance(d, dict):
+def _action_params(action: str, actions_json: dict) -> set[str]:
+  action_def = actions_json.get(action, {})
+  if not isinstance(action_def, dict):
     return set()
-  return set(d.get('parameters') or {}) | set(d.get('input') or {})
+  return set(action_def.get('parameters') or {}) | set(action_def.get('input') or {})
 
 
-def _model_param_name(action, actions_json):
+def _model_param_name(action: str, actions_json: dict) -> str | None:
   for name in _MODEL_PARAM_NAMES:
     if name in _action_params(action, actions_json):
       return name
   return None
 
 
-def validate_submission(data, allowlist=None, actions_json=None):
+def validate_submission(
+    data: Any,
+    allowlist: dict | None = None,
+    actions_json: dict | None = None,
+) -> tuple[str, str] | None:
   """Returns ``(message, code)`` for the first problem, else ``None``. Stops at
   the first problem, in node order.
 
@@ -103,29 +108,31 @@ def validate_submission(data, allowlist=None, actions_json=None):
     model_value = params.get(model_param) if model_param else None
     model_list = model_value if isinstance(model_value, list) else [model_value]
     # Empty list, or any empty element, means no model was actually supplied.
-    if not model_list or any(m is None or m == '' for m in model_list):
+    if not model_list or any(model is None or model == '' for model in model_list):
       return (f'Node {node_id!r}: {action} is missing its model ({model_param})',
               'MISSING_MODEL_PARAM')
 
     location_param = action_specs[action].get('location_param')
     locations = None
     if location_param is not None:
-      loc = params.get(location_param)
-      locations = loc if isinstance(loc, list) else [loc]
+      location_value = params.get(location_param)
+      locations = (location_value if isinstance(location_value, list)
+                   else [location_value])
       # Empty list or empty element falls back to the infra region at run time,
       # so the checked pair would differ from what actually runs. Reject it.
-      if not locations or any(l is None or l == '' for l in locations):
+      if not locations or any(
+          location is None or location == '' for location in locations):
         return (f'Node {node_id!r}: {action} is missing its location '
                 f'({location_param})', 'MISSING_MODEL_PARAM')
 
-    for m in model_list:
-      if (not isinstance(m, str) or m not in models
-          or action not in models[m].get('actions', [])):
-        return (f'Node {node_id!r}: {action} model {m!r} is not allowed',
+    for model in model_list:
+      if (not isinstance(model, str) or model not in models
+          or action not in models[model].get('actions', [])):
+        return (f'Node {node_id!r}: {action} model {model!r} is not allowed',
                 'MODEL_NOT_ALLOWED')
       if location_param is not None:
-        for loc in locations:
-          if not is_pair_allowed(action, m, loc, allowlist):
-            return (f'Node {node_id!r}: {action} model {m!r} is not allowed in '
-                    f'{loc!r}', 'MODEL_LOCATION_PAIR_INVALID')
+        for location in locations:
+          if not is_pair_allowed(action, model, location, allowlist):
+            return (f'Node {node_id!r}: {action} model {model!r} is not allowed '
+                    f'in {location!r}', 'MODEL_LOCATION_PAIR_INVALID')
   return None
