@@ -144,17 +144,14 @@ As Remix Engine is meant for use by various applications and can also be useful 
 
 The following are awaiting inclusion in Scene Machine:
 
-- `analyse_file.py`
 - `convert_image.py`
 - `convert_video.py`
 - `copy_web_to_gcs.py`
 
-The following serve a potential scaled workflow (like `scaled_video.json`) to generate ad videos from scratch:
+The following support batch/scaled ad-video generation:
 
-- `devise_variants.py`
 - `generate_arrangement.py`
 - `generate_image.py`
-- `write_ad_script.py`
 
 The following are used by `demo.json` to test Remix Engine without any complex operations, e.g. for race conditions dealing with Firestore:
 

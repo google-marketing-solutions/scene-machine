@@ -134,14 +134,6 @@ def test_is_pair_allowed_location_gated():
   assert not is_pair_allowed('generate_video', 'gemini-3-pro-image', 'global')
 
 
-def test_is_pair_allowed_null_location_is_vacuous():
-  # describe_image has no location param -> location is not validated.
-  assert is_pair_allowed('describe_image', 'gemini-3.5-flash', 'any-region')
-  assert is_pair_allowed('describe_image', 'gemini-3.5-flash', None)
-  # but the model must still serve the action:
-  assert not is_pair_allowed('describe_image', 'veo-3.1-generate-001', None)
-
-
 # --- coverage: every literal (model, location) pair in workflow_examples ------
 
 def _example_pairs():

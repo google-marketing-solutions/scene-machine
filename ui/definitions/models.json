@@ -6,9 +6,7 @@
   },
   "actions": {
     "translate":             { "location_param": "gemini_model_location", "default_key": "geminiModel" },
-    "describe_image":        { "location_param": null,                    "default_key": "geminiModel" },
     "write_products_script": { "location_param": "gemini_model_location", "default_key": "geminiModel" },
-    "analyse_file":          { "location_param": null,                    "default_key": "geminiModel" },
     "generate_storyboard":   { "location_param": "gemini_model_location", "default_key": "geminiModel" },
     "outpaint_image":        { "location_param": "image_model_location",  "default_key": "imageModel" },
     "generate_image":        { "location_param": "image_model_location",  "default_key": "imageModel" },
@@ -17,19 +15,19 @@
   "models": {
     "gemini-3.5-flash": {
       "family": "gemini",
-      "actions": ["translate", "describe_image", "write_products_script", "analyse_file", "generate_storyboard"],
+      "actions": ["translate", "write_products_script", "generate_storyboard"],
       "locations": ["global"],
       "capabilities": {}
     },
     "gemini-3.1-pro-preview": {
       "family": "gemini",
-      "actions": ["translate", "describe_image", "write_products_script", "analyse_file", "generate_storyboard"],
+      "actions": ["translate", "write_products_script", "generate_storyboard"],
       "locations": ["global"],
       "capabilities": {}
     },
     "gemini-3.1-flash-lite": {
       "family": "gemini",
-      "actions": ["translate", "describe_image", "write_products_script", "analyse_file", "generate_storyboard"],
+      "actions": ["translate", "write_products_script", "generate_storyboard"],
       "locations": ["global"],
       "capabilities": {}
     },

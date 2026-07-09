@@ -110,17 +110,6 @@ def test_list_model_with_one_bad_element():
               ) == 'MODEL_NOT_ALLOWED'
 
 
-def test_null_location_action_ok():
-  # describe_image has no location param -> a valid model passes with no location.
-  assert validate_submission(
-      _sub('describe_image', {'gemini_model': 'gemini-3.5-flash'})) is None
-
-
-def test_null_location_action_rogue_model():
-  assert _code(_sub('describe_image',
-                    {'gemini_model': 'rogue'})) == 'MODEL_NOT_ALLOWED'
-
-
 def test_non_model_action_is_ignored():
   # A real but non-model-parameterized action (e.g. concat) is not validated.
   assert validate_submission(_sub('concat', {})) is None
@@ -193,12 +182,3 @@ def test_non_string_action_rejected():
 
 def test_non_dict_parameters_rejected():
   assert _code(_sub('generate_video', 'not-a-dict')) == 'MALFORMED_SUBMISSION'
-
-
-def test_null_location_action_ignores_stray_location():
-  # describe_image has no location_param, so a stray location value is not
-  # validated -- this documents that as intentional, not a missed check.
-  assert validate_submission(
-      _sub('describe_image',
-           {'gemini_model': 'gemini-3.5-flash',
-            'gemini_model_location': 'mars'})) is None
