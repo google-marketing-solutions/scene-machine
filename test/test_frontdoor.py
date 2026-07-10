@@ -658,3 +658,12 @@ def test_worker_route_does_not_validate(monkeypatch, orchestrator_module):
       '/supplyNode', json=_video_node('rogue', 'global'))
   assert response.status_code == 200
   assert 'data' in captured
+
+
+def test_role_all_with_iap_is_refused(monkeypatch, orchestrator_module):
+  # A public (IAP) service must run ROLE=app so submissions are validated;
+  # ROLE=all skips validation and is dev-only. The misconfiguration must fail
+  # fast at import rather than silently serving an unvalidated route.
+  del orchestrator_module
+  with pytest.raises(RuntimeError, match='ROLE=all'):
+    _load_orch(monkeypatch, ROLE='all', AUTH_MODE='iap')

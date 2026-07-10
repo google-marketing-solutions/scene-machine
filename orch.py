@@ -98,6 +98,11 @@ if _ROLE not in ('all', 'app', 'worker'):
   raise RuntimeError(f'Invalid ROLE: {_ROLE!r} (use all|app|worker)')
 if _AUTH_MODE not in ('none', 'iap'):
   raise RuntimeError(f'Invalid AUTH_MODE: {_AUTH_MODE!r} (use none|iap)')
+# Public deploys must use ROLE=app so /api/supplyNode is validated.
+if _ROLE == 'all' and _AUTH_MODE == 'iap':
+  raise RuntimeError(
+      'ROLE=all with AUTH_MODE=iap is not allowed: a public service must run '
+      'ROLE=app so submissions are validated. ROLE=all is dev-only (AUTH_MODE=none).')
 if _ROLE == 'app' and _AUTH_MODE == 'iap' and not _IAP_AUDIENCE:
   raise RuntimeError('IAP_AUDIENCE is required when AUTH_MODE=iap')
 # Without WORKER_URL the app derives the Cloud Tasks callback base from its own
