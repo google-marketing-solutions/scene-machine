@@ -131,15 +131,34 @@ def validate_submission(
     for key, files in input_files.items():
       if not isinstance(files, list):
         return (f'inputFiles {key!r} is not a list', 'MALFORMED_SUBMISSION')
+      dimension_keys = None
       for entry in files:
         if (not isinstance(entry, dict) or not isinstance(entry.get('file'), str)
             or not entry['file'].strip()):
           return (f'inputFiles {key!r} entries must each have a non-empty '
                   f'file', 'MALFORMED_SUBMISSION')
+        # The engine groups on the non-file fields of the first entry and
+        # indexes every entry by them (group_input._group_dictionaries), so
+        # ragged keys raise KeyError there and a non-scalar value makes an
+        # unhashable group key. Fail closed on both shapes.
+        entry_keys = frozenset(entry) - {'file'}
+        if dimension_keys is None:
+          dimension_keys = entry_keys
+        elif entry_keys != dimension_keys:
+          return (f'inputFiles {key!r} entries carry inconsistent dimension '
+                  'keys', 'MALFORMED_SUBMISSION')
+        for field in entry_keys:
+          value = entry[field]
+          if value is not None and not isinstance(value, (str, int, float, bool)):
+            return (f'inputFiles {key!r} dimension {field!r} must be a scalar',
+                    'MALFORMED_SUBMISSION')
       if len(files) > _MAX_INPUT_FILES:
         return (f'inputFiles {key!r} has too many entries '
                 f'({len(files)} > {_MAX_INPUT_FILES})', 'TOO_MANY_INPUT_FILES')
-      input_group_sizes[key] = len(files)
+      # An empty group still becomes one grouping slot in the engine
+      # (group_input returns {(): []}), so counting it as 0 would zero out
+      # every downstream multiplier and hide real fan-out from the budget.
+      input_group_sizes[key] = max(1, len(files))
 
   definition = data.get(_WORKFLOW_DEFINITION)
   if definition is None:

@@ -281,6 +281,49 @@ def test_input_files_not_object_rejected():
   assert validate_submission(data)[1] == 'MALFORMED_SUBMISSION'
 
 
+def test_input_files_inconsistent_dimension_keys_rejected():
+  # group_input indexes every entry by the first entry's non-file keys; a
+  # ragged entry raises KeyError in the worker.
+  wf = _pipeline(2)
+  wf['inputFiles']['image'] = [{'file': 'a', 'language': 'en'}, {'file': 'b'}]
+  assert validate_submission(wf)[1] == 'MALFORMED_SUBMISSION'
+
+
+def test_input_files_unhashable_dimension_value_rejected():
+  # group_input uses dimension values in a tuple dict key; a list value is
+  # unhashable in the worker.
+  wf = _pipeline(1)
+  wf['inputFiles']['image'] = [{'file': 'a', 'language': ['en', 'de']}]
+  assert validate_submission(wf)[1] == 'MALFORMED_SUBMISSION'
+
+
+def test_input_files_scalar_dimensions_ok():
+  wf = _pipeline(2)
+  wf['inputFiles']['image'] = [
+      {'file': 'a', 'language': 'en'}, {'file': 'b', 'language': 'de'}]
+  assert validate_submission(wf) is None
+
+
+def test_empty_input_group_is_valid():
+  # The UI's text-to-video shape submits image: []; it must stay accepted.
+  assert validate_submission(_pipeline(0)) is None
+
+
+def test_empty_input_group_does_not_zero_the_budget():
+  # The engine turns an empty group into ONE grouping slot, not zero, so a
+  # node that also consumes a populated group fans out with the populated
+  # group's full size. A 0 multiplier would erase that from the budget.
+  wf = _pipeline(100, groups=['image', 'prompt'])
+  wf['inputFiles']['image'] = []
+  wf['workflowDefinition']['v'] = {
+      'action': 'generate_video',
+      'input': {'image': {'node': 'root', 'output': 'image'},
+                'prompt': {'node': 'root', 'output': 'prompt'}},
+      'parameters': {'model': ['veo-3.1-generate-001'] * 3,
+                     'gcp_location': 'global'}}
+  assert validate_submission(wf)[1] == 'TOO_MANY_GENERATIONS'
+
+
 def _pipeline(n, image_nodes=(), video_nodes=(('v', 'root', 'image'),), groups=None):
   """Builds a wired workflow: `root` forwards inputFiles, then the named image /
   video nodes each draw from a predecessor's output."""
