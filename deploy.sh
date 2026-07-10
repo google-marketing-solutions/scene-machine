@@ -215,6 +215,7 @@ require_tool node     "Install Node.js ≥ v22: https://nodejs.org/en/download"
 require_tool npm      "Install Node.js (includes npm): https://nodejs.org/en/download"
 require_tool envsubst "Install gettext (macOS: 'brew install gettext'; Debian/Ubuntu: 'apt-get install gettext')"
 require_tool curl     "Install curl (it ships with macOS and most Linux distributions)"
+require_tool python3  "Install Python 3 (macOS: 'brew install python' or the Xcode CLT; Debian/Ubuntu: 'apt-get install python3')"
 if [ $MISSING_TOOLS -gt 0 ]; then
   echo "Please install the missing tools above, then re-run $0."
   exit 1

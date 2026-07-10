@@ -19,6 +19,8 @@ a model/region typo or an un-allowlisted choice fails loudly at deploy time
 instead of only at runtime against Vertex. Exits non-zero on any problem.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 from collections.abc import Mapping
