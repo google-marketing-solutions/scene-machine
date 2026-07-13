@@ -104,6 +104,22 @@ def test_diff_reports_a_live_only_null_field():
   assert lines == ["- will remove section 'note' (exists only live)"]
 
 
+def test_diff_reports_a_boolean_vs_integer_type_change():
+  # Python's == calls True == 1 equal; Firestore types are distinct and the
+  # seed rewrites them, so the preview must not claim "changes nothing".
+  lines = seed_config_models.diff_lines(
+      {'models': {'m': {'supports_audio': True}}},
+      {'models': {'m': {'supports_audio': 1}}})
+  assert lines == ['~ will change models.m (supports_audio)']
+
+
+def test_diff_reports_an_integer_vs_double_type_change():
+  lines = seed_config_models.diff_lines(
+      {'models': {'m': {'duration': 4}}},
+      {'models': {'m': {'duration': 4.0}}})
+  assert lines == ['~ will change models.m (duration)']
+
+
 def test_diff_names_a_null_only_subfield_change():
   lines = seed_config_models.diff_lines(
       {'models': {'m': {'family': 'veo'}}},

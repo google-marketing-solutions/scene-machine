@@ -93,6 +93,25 @@ def document_to_plain(doc: dict[str, Any]) -> dict[str, Any]:
   return {k: from_typed(v) for k, v in doc.get('fields', {}).items()}
 
 
+def values_equal(left: Any, right: Any) -> bool:
+  """Type-sensitive equality for the diff.
+
+  Python's == treats True == 1 and 4 == 4.0 as equal, but Firestore stores
+  boolean, integer, and double as distinct types, so a console edit that only
+  changes a field's type would preview as "changes nothing" while the seed
+  still rewrites the stored type.
+  """
+  if type(left) is not type(right):
+    return False
+  if isinstance(left, dict):
+    return (left.keys() == right.keys()
+            and all(values_equal(left[key], right[key]) for key in left))
+  if isinstance(left, list):
+    return (len(left) == len(right)
+            and all(values_equal(a, b) for a, b in zip(left, right)))
+  return left == right
+
+
 def diff_lines(repo: dict[str, Any], live: dict[str, Any]) -> list[str]:
   """What overwriting `live` with `repo` changes, one line per difference.
 
@@ -110,7 +129,7 @@ def diff_lines(repo: dict[str, Any], live: dict[str, Any]) -> list[str]:
       lines.append(f'- will remove section {section!r} (exists only live)')
       continue
     repo_value, live_value = repo[section], live[section]
-    if repo_value == live_value:
+    if values_equal(repo_value, live_value):
       continue
     if not (isinstance(repo_value, dict) and isinstance(live_value, dict)):
       lines.append(f'~ will replace {section!r}')
@@ -123,13 +142,13 @@ def diff_lines(repo: dict[str, Any], live: dict[str, Any]) -> list[str]:
         lines.append(f'- will remove {section}.{key} (exists only live)')
         continue
       entry_repo, entry_live = repo_value[key], live_value[key]
-      if entry_repo == entry_live:
+      if values_equal(entry_repo, entry_live):
         continue
       if isinstance(entry_repo, dict) and isinstance(entry_live, dict):
         changed = sorted(
             field for field in set(entry_repo) | set(entry_live)
             if (field in entry_repo) != (field in entry_live)
-            or entry_repo.get(field) != entry_live.get(field))
+            or not values_equal(entry_repo.get(field), entry_live.get(field)))
         lines.append(f'~ will change {section}.{key} ({", ".join(changed)})')
       else:
         lines.append(f'~ will change {section}.{key}: '
