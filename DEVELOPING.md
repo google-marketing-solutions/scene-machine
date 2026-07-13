@@ -58,6 +58,15 @@ curl -s -X PATCH \
   -H "x-goog-user-project: ${PROJECT}" \
   -H "Content-Type: application/json" \
   -d @<(envsubst < ./firestore_config_frontdoor.template.json)
+
+# The model catalog document (config/models), seeded from the repo file the
+# same way deploy.sh does it:
+python3 scripts/seed_config_models.py convert < ui/definitions/models.json | curl -s -X PATCH \
+  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/models" \
+  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  -H "Content-Type: application/json" \
+  -d @-
 ```
 
 This requires a Firestore database to already exist in your dev project (the one `FIRESTORE_DB_UI` names) and ADC with write access to it.

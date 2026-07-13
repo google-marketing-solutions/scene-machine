@@ -319,6 +319,26 @@ if ! python3 scripts/validate_config_models.py; then
   exit 1
 fi
 
+# --- Preview the model-catalog seed ------------------------------------------
+# Deploys overwrite config/models from ui/definitions/models.json (the repo is
+# the source of truth), so a live console edit does not survive a deploy. Show
+# what this deploy's seed will change before the confirmation prompt below. On
+# a fresh project the Firestore API or database does not exist yet, so any
+# read failure only means "nothing to diff" -- the preview never blocks.
+echo "[>] Previewing the model-catalog seed (config/models)..."
+LIVE_MODELS_DOC=$(mktemp)
+if curl -sf \
+  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/models" \
+  -H "Authorization: Bearer $(gcloud auth application-default print-access-token 2>/dev/null || true)" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  -o "$LIVE_MODELS_DOC" 2>/dev/null; then
+  python3 scripts/seed_config_models.py diff ui/definitions/models.json "$LIVE_MODELS_DOC"
+else
+  echo "    no live config/models to read (fresh project or not seeded yet);"
+  echo "    this deploy seeds it from the repo."
+fi
+rm -f "$LIVE_MODELS_DOC"
+
 # --- Confirm deployment target ----------------------------------------------
 # Final pre-flight gate. Shows gcloud's current state alongside config.txt's
 # intended target. This script NEVER changes gcloud's
@@ -907,6 +927,23 @@ CONFIG_SEED_STATUS=$(curl -s -X PATCH \
 if [ "$CONFIG_SEED_STATUS" != "200" ]; then
   echo "ERROR: seeding the UI config (config/global) failed (HTTP ${CONFIG_SEED_STATUS:-no response})." >&2
   echo "       The app's backend wiring was not written; aborting." >&2
+  exit 1
+fi
+
+# The model catalog: config/models is overwritten from the repo file on every
+# deploy. Operators may edit the live doc between deploys; the pre-flight
+# preview above showed what this write replaces. Same fail-loudly contract as
+# the config/global seed.
+MODELS_SEED_STATUS=$(python3 scripts/seed_config_models.py convert < ui/definitions/models.json | curl -s -X PATCH \
+"https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/models" \
+  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  -H "Content-Type: application/json" \
+  -o /dev/null -w '%{http_code}' \
+  -d @-)
+if [ "$MODELS_SEED_STATUS" != "200" ]; then
+  echo "ERROR: seeding the model catalog (config/models) failed (HTTP ${MODELS_SEED_STATUS:-no response})." >&2
+  echo "       The runtime model catalog was not written; aborting." >&2
   exit 1
 fi
 
