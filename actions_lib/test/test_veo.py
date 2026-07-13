@@ -126,6 +126,21 @@ class TestVeo(unittest.TestCase):
 
   @mock.patch('actions_lib.veo.time.sleep')
   @mock.patch('actions_lib.veo.genai.Client')
+  def test_string_false_capability_flags_do_not_enable(self, mock_genai_client, _):
+    """A hand-edited catalog can hold "false" (a truthy string) instead of a
+    boolean; neither behavior may switch on."""
+    with mock.patch.object(
+        veo, '_model_capabilities',
+        return_value={'enhance_prompt_locked': 'false',
+                      'supports_audio': 'false'}):
+      _, config, _ = self._generate(
+          mock_genai_client, model='veo-3.1-generate-001',
+          enhance_prompt=False, generate_audio=True)
+    self.assertFalse(config.enhance_prompt)
+    self.assertIsNone(getattr(config, 'generate_audio', None))
+
+  @mock.patch('actions_lib.veo.time.sleep')
+  @mock.patch('actions_lib.veo.genai.Client')
   def test_unlisted_model_has_no_capability_overrides(
       self, mock_genai_client, _):
     """A model not in the allowlist gets no capability flags: enhance_prompt is
@@ -150,8 +165,12 @@ def test_allowlist_generate_video_models_carry_capability_flags():
   assert video_models, 'no generate_video models in the allowlist'
   for mid, m in video_models.items():
     caps = m.get('capabilities', {})
-    assert 'supports_audio' in caps, f'{mid} missing supports_audio'
-    assert 'enhance_prompt_locked' in caps, f'{mid} missing enhance_prompt_locked'
+    # Real booleans, not merely present: veo.generate applies them with
+    # `is True`, so a string "false" would silently disable the behavior.
+    assert isinstance(caps.get('supports_audio'), bool), (
+        f'{mid}: supports_audio must be a boolean')
+    assert isinstance(caps.get('enhance_prompt_locked'), bool), (
+        f'{mid}: enhance_prompt_locked must be a boolean')
 
 
 if __name__ == '__main__':

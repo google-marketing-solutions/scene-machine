@@ -75,11 +75,12 @@ def generate(
       'enhance_prompt': enhance_prompt,
   }
   # Drive per-model behavior from the allowlist's capability flags, not a
-  # string comparison on the model name.
+  # string comparison on the model name. Strict True: a hand-edited catalog
+  # can hold the string "false", which is truthy.
   capabilities = _model_capabilities(model)
-  if capabilities.get('enhance_prompt_locked'):
+  if capabilities.get('enhance_prompt_locked') is True:
     config_params['enhance_prompt'] = True
-  if capabilities.get('supports_audio'):
+  if capabilities.get('supports_audio') is True:
     config_params['generate_audio'] = generate_audio
   image = (
       types.Image(gcs_uri=image_url, mime_type=image_type)
