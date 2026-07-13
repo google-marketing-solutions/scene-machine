@@ -14,12 +14,22 @@
 
 """Tests for veo.py."""
 
-import json
 import unittest
 from unittest import mock
 
 from actions_lib import veo
-from google.genai import types
+
+
+def _done_operation_with_video(uri='gs://test-bucket/output.mp4'):
+  """A completed operation carrying one generated video."""
+  video = mock.Mock()
+  video.uri = uri
+  entry = mock.Mock()
+  entry.video = video
+  operation = mock.Mock()
+  operation.done = True
+  operation.result = mock.Mock(generated_videos=[entry])
+  return operation
 
 
 class TestVeo(unittest.TestCase):
@@ -33,177 +43,116 @@ class TestVeo(unittest.TestCase):
     self.image_url = 'gs://test-bucket/image.jpg'
     self.image_type = 'image/jpeg'
 
-  @mock.patch('actions_lib.veo.time.sleep')
-  @mock.patch('actions_lib.veo.genai.Client')
-  def test_generate_success(self, mock_genai_client, mock_sleep):
-    """Tests successful video generation without polling."""
-    # Mock client
-    mock_client_instance = mock.Mock()
-    mock_genai_client.return_value = mock_client_instance
-
-    # Mock operation
-    mock_operation = mock.Mock()
-    mock_operation.done = True
-
-    # Mock result
-    mock_video = mock.Mock()
-    mock_video.uri = 'gs://test-bucket/output.mp4'
-    mock_entry = mock.Mock()
-    mock_entry.video = mock_video
-
-    mock_result = mock.Mock()
-    mock_result.generated_videos = [mock_entry]
-
-    mock_operation.result = mock_result
-
-    mock_client_instance.models.generate_videos.return_value = mock_operation
-
-    # Call
+  def _generate(self, mock_genai_client, model, **kwargs):
+    """Runs veo.generate with a mocked client that returns one video."""
+    client = mock.Mock()
+    mock_genai_client.return_value = client
+    client.models.generate_videos.return_value = _done_operation_with_video()
     uris = veo.generate(
         self.gcp_project,
         self.gcp_location,
         self.prompt,
         self.image_url,
         self.image_type,
+        model=model,
+        **kwargs,
     )
+    config = client.models.generate_videos.call_args.kwargs['config']
+    return uris, config, client
 
-    # Assertions
+  @mock.patch('actions_lib.veo.time.sleep')
+  @mock.patch('actions_lib.veo.genai.Client')
+  def test_generate_success(self, mock_genai_client, mock_sleep):
+    """Returns the video URI without polling."""
+    uris, _, client = self._generate(
+        mock_genai_client, model='veo-3.1-generate-001')
     self.assertEqual(uris, ['gs://test-bucket/output.mp4'])
-    mock_client_instance.models.generate_videos.assert_called_once()
+    client.models.generate_videos.assert_called_once()
     mock_sleep.assert_not_called()
 
   @mock.patch('actions_lib.veo.time.sleep')
   @mock.patch('actions_lib.veo.genai.Client')
   def test_generate_polling_success(self, mock_genai_client, mock_sleep):
-    """Tests successful video generation after polling."""
-    # Mock client
-    mock_client_instance = mock.Mock()
-    mock_genai_client.return_value = mock_client_instance
+    """Polls until the operation is done, then returns the URI."""
+    client = mock.Mock()
+    mock_genai_client.return_value = client
+    pending = mock.Mock(done=False)
+    client.models.generate_videos.return_value = pending
+    client.operations.get.return_value = _done_operation_with_video()
 
-    # Mock operations
-    mock_op1 = mock.Mock()
-    mock_op1.done = False
-
-    mock_op2 = mock.Mock()
-    mock_op2.done = True
-
-    # Mock result for op2
-    mock_video = mock.Mock()
-    mock_video.uri = 'gs://test-bucket/output.mp4'
-    mock_entry = mock.Mock()
-    mock_entry.video = mock_video
-    mock_result = mock.Mock()
-    mock_result.generated_videos = [mock_entry]
-    mock_op2.result = mock_result
-
-    mock_client_instance.models.generate_videos.return_value = mock_op1
-    mock_client_instance.operations.get.return_value = mock_op2
-
-    # Call
     uris = veo.generate(
-        self.gcp_project,
-        self.gcp_location,
-        self.prompt,
-        self.image_url,
-        self.image_type,
-    )
+        self.gcp_project, self.gcp_location, self.prompt,
+        self.image_url, self.image_type, model='veo-3.1-generate-001')
 
-    # Assertions
     self.assertEqual(uris, ['gs://test-bucket/output.mp4'])
-    mock_client_instance.models.generate_videos.assert_called_once()
     mock_sleep.assert_called_once_with(5)
-    mock_client_instance.operations.get.assert_called_once_with(mock_op1)
+    client.operations.get.assert_called_once_with(pending)
 
   @mock.patch('actions_lib.veo.time.sleep')
   @mock.patch('actions_lib.veo.genai.Client')
   def test_generate_error(self, mock_genai_client, mock_sleep):
-    """Tests error handling when generation fails."""
-    # Mock client
-    mock_client_instance = mock.Mock()
-    mock_genai_client.return_value = mock_client_instance
+    """Raises with the operation's error message when nothing is generated."""
+    client = mock.Mock()
+    mock_genai_client.return_value = client
+    operation = mock.Mock(done=True, result=None, error={'message': 'boom'})
+    client.models.generate_videos.return_value = operation
 
-    # Mock operation with error
-    mock_operation = mock.Mock()
-    mock_operation.done = True
-    mock_operation.result = None
-    mock_operation.error = {'message': 'Test error message'}
-
-    mock_client_instance.models.generate_videos.return_value = mock_operation
-
-    # Call and Assert
-    with self.assertRaisesRegex(
-        RuntimeError, 'No videos generated: Test error message'
-    ):
+    with self.assertRaisesRegex(RuntimeError, 'No videos generated: boom'):
       veo.generate(
-          self.gcp_project,
-          self.gcp_location,
-          self.prompt,
-          self.image_url,
-          self.image_type,
-      )
+          self.gcp_project, self.gcp_location, self.prompt,
+          self.image_url, self.image_type, model='veo-3.1-generate-001')
 
   @mock.patch('actions_lib.veo.time.sleep')
   @mock.patch('actions_lib.veo.genai.Client')
-  def test_generate_veo2_model(self, mock_genai_client, mock_sleep):
-    """Tests that generate_audio is not added for older models."""
-    # Mock client
-    mock_client_instance = mock.Mock()
-    mock_genai_client.return_value = mock_client_instance
+  def test_veo31_locks_prompt_and_enables_audio(self, mock_genai_client, _):
+    """veo-3.1 is allowlisted with enhance_prompt_locked + supports_audio:
+    enhance_prompt is forced True even when False is passed, and generate_audio
+    is applied."""
+    _, config, _ = self._generate(
+        mock_genai_client, model='veo-3.1-generate-001',
+        enhance_prompt=False, generate_audio=True)
+    self.assertTrue(config.enhance_prompt)
+    self.assertTrue(config.generate_audio)
 
-    # Mock operation
-    mock_operation = mock.Mock()
-    mock_operation.done = True
-    mock_operation.result = mock.Mock(generated_videos=[])
-    mock_operation.error = {'message': 'Test error message'}
+  @mock.patch('actions_lib.veo.time.sleep')
+  @mock.patch('actions_lib.veo.genai.Client')
+  def test_veo31_audio_false_is_preserved(self, mock_genai_client, _):
+    """supports_audio is set, but a passed generate_audio=False stays False
+    (the flag enables the param; it doesn't force audio on)."""
+    _, config, _ = self._generate(
+        mock_genai_client, model='veo-3.1-generate-001',
+        enhance_prompt=True, generate_audio=False)
+    self.assertFalse(config.generate_audio)
 
-    mock_client_instance.models.generate_videos.return_value = mock_operation
+  @mock.patch('actions_lib.veo.time.sleep')
+  @mock.patch('actions_lib.veo.genai.Client')
+  def test_unlisted_model_has_no_capability_overrides(
+      self, mock_genai_client, _):
+    """A model not in the allowlist gets no capability flags: enhance_prompt is
+    preserved as passed and generate_audio is never set."""
+    _, config, _ = self._generate(
+        mock_genai_client, model='veo-2.0-preview',
+        enhance_prompt=False, generate_audio=True)
+    self.assertFalse(config.enhance_prompt)
+    self.assertIsNone(config.generate_audio)
 
-    # Call with an older model name (alphabetically less than 'veo-3')
-    try:
-      veo.generate(
-          self.gcp_project,
-          self.gcp_location,
-          self.prompt,
-          self.image_url,
-          self.image_type,
-          model='veo-2.0-preview',
-      )
-    except RuntimeError:
-      # Expecting runtime error because result is empty, but we want to check kwargs
-      pass
 
-    # Verify call arguments
-    call_args = mock_client_instance.models.generate_videos.call_args
-    config = call_args.kwargs['config']
-    
-    # Check that generate_audio is not in config (it's not a property of GenerateVideosConfig if not passed)
-    # We can check the config params passed to types.GenerateVideosConfig if we can inspect it,
-    # or just check that it defaults to False or is missing.
-    # Since we can't easily inspect the kwargs passed to the GenerateVideosConfig constructor inside the function,
-    # we rely on the behavior.
-    # However, we can assert that enhance_prompt is NOT forced to True if it was False.
-    
-    # Let's try to pass enhance_prompt=False and check if it is preserved for veo-2.
-    mock_client_instance.models.generate_videos.reset_mock()
-    
-    try:
-      veo.generate(
-          self.gcp_project,
-          self.gcp_location,
-          self.prompt,
-          self.image_url,
-          self.image_type,
-          model='veo-2.0-preview',
-          enhance_prompt=False,
-      )
-    except RuntimeError:
-      pass
-      
-    call_args = mock_client_instance.models.generate_videos.call_args
-    config = call_args.kwargs['config']
-    # If enhance_prompt was False, it should remain False for veo-2
-    # In GenerateVideosConfig, enhance_prompt is a field.
-    # We can check if it is False.
-    # Assuming GenerateVideosConfig has enhance_prompt attribute.
-    # Let's just assert that the call was made.
-    self.assertTrue(mock_client_instance.models.generate_videos.called)
+def test_allowlist_generate_video_models_carry_capability_flags():
+  """veo.py drives enhance-prompt lock + audio from these flags for any model
+  that SERVES generate_video (it keys on the model ID, not on family). So the
+  invariant must cover every generate_video model, not just family=='veo' --
+  otherwise an entry checked in with a mistyped family and empty capabilities
+  escapes the net and silently fails open."""
+  from util.model_allowlist import load_allowlist
+  video_models = {
+      mid: m for mid, m in load_allowlist()['models'].items()
+      if 'generate_video' in m.get('actions', [])}
+  assert video_models, 'no generate_video models in the allowlist'
+  for mid, m in video_models.items():
+    caps = m.get('capabilities', {})
+    assert 'supports_audio' in caps, f'{mid} missing supports_audio'
+    assert 'enhance_prompt_locked' in caps, f'{mid} missing enhance_prompt_locked'
+
+
+if __name__ == '__main__':
+  unittest.main()

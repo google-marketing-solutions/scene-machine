@@ -23,9 +23,16 @@ from common import get_api_client_headers
 from common import TrackingType
 from google import genai
 from google.genai import types
+from util import model_allowlist
 
 
 Resolution = Literal['720p', '1080p', '4k']
+
+
+def _model_capabilities(model: str) -> dict[str, Any]:
+  """The model's capability flags from the allowlist ({} if not listed)."""
+  models = model_allowlist.load_allowlist().get('models', {})
+  return models.get(model, {}).get('capabilities', {})
 
 
 def generate(
@@ -34,6 +41,7 @@ def generate(
     prompt: str,
     image_url: str | None,
     image_type: str | None,
+    model: str,
     duration_seconds: int = 8,
     amount: int = 1,
     aspect_ratio: str = '16:9',
@@ -41,7 +49,6 @@ def generate(
     output_gcs: str = 'gs://',
     enhance_prompt: bool = True,
     allow_persons: bool = True,
-    model: str = 'veo-3.1-generate-001',
     generate_audio: bool = False,
 ) -> list[str] | None:
   """Generates videos using Veo."""
@@ -67,9 +74,12 @@ def generate(
       ),
       'enhance_prompt': enhance_prompt,
   }
-  if model > 'veo-3':
-    # Veo 3 doesn't allow disabling enhance_prompt
+  # Drive per-model behavior from the allowlist's capability flags, not a
+  # string comparison on the model name.
+  capabilities = _model_capabilities(model)
+  if capabilities.get('enhance_prompt_locked'):
     config_params['enhance_prompt'] = True
+  if capabilities.get('supports_audio'):
     config_params['generate_audio'] = generate_audio
   image = (
       types.Image(gcs_uri=image_url, mime_type=image_type)
