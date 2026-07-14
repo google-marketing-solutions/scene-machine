@@ -17,10 +17,29 @@
 /**
  * Node unit test for the status-viewer response classifier (V4). Run with:
  *   node ui/remix-engine-status-viewer/callBackend.spec.js
- * It exercises only the pure classifier (no DOM), so it needs no test harness.
+ * It exercises pure request construction and response classification (no DOM),
+ * so it needs no test harness.
  */
 const assert = require('assert');
-const {classifyStatusResponse} = require('./callBackend');
+const {buildStatusUrl, classifyStatusResponse} = require('./callBackend');
+
+assert.strictEqual(
+  buildStatusUrl('/api', 'private bucket', 'exec/one', ''),
+  '/api/getStatus?gcsBucket=private%20bucket&executionId=exec%2Fone&signUrls=true',
+);
+assert.strictEqual(
+  buildStatusUrl(
+    'https://backend.example.com/api',
+    'private-bucket',
+    'exec two',
+    'legacy key+',
+  ),
+  'https://backend.example.com/api/getStatus?gcsBucket=private-bucket&executionId=exec%20two&signUrls=true&api_key=legacy%20key%2B',
+);
+assert.strictEqual(
+  buildStatusUrl('/api', 'private-bucket', 'exec', 'none'),
+  '/api/getStatus?gcsBucket=private-bucket&executionId=exec&signUrls=true',
+);
 
 // An IAP login redirect: fetch followed the 302 to an HTML sign-in page, so
 // response.redirected is true even though the status is 200.
@@ -49,4 +68,4 @@ assert.strictEqual(
   'bad-json',
 );
 
-console.log('callBackend classifier tests passed ✓');
+console.log('callBackend tests passed ✓');

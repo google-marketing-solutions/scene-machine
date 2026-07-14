@@ -58,16 +58,32 @@ function resolveStatusBaseUrl() {
  * configured. The front-door config carries a sentinel ('none'/empty) which we
  * must NOT send — the same-origin control plane has no api key.
  *
+ * @param {*} apiKeyValue Configured API key value.
  * @return {string} `&api_key=<encoded>` for a legacy key, otherwise ''.
  */
-function statusApiKeyParam() {
-  const apiKey = config.backendApi && config.backendApi.apiKey
-    ? String(config.backendApi.apiKey).trim()
-    : '';
+function statusApiKeyParam(apiKeyValue) {
+  const apiKey = apiKeyValue ? String(apiKeyValue).trim() : '';
   if (!apiKey || apiKey.toLowerCase() === 'none') {
     return '';
   }
   return `&api_key=${encodeURIComponent(apiKey)}`;
+}
+
+/**
+ * Builds a signed-media status request URL.
+ *
+ * @param {string} baseUrl Resolved status endpoint base URL.
+ * @param {string} gcsBucket Configured private GCS bucket.
+ * @param {string} executionId Workflow execution ID.
+ * @param {*} apiKeyValue Optional legacy API key.
+ * @return {string} Encoded status request URL.
+ */
+function buildStatusUrl(baseUrl, gcsBucket, executionId, apiKeyValue) {
+  return `${baseUrl}/getStatus?gcsBucket=${encodeURIComponent(
+    gcsBucket,
+  )}&executionId=${encodeURIComponent(
+    executionId,
+  )}&signUrls=true${statusApiKeyParam(apiKeyValue)}`;
 }
 
 /**
@@ -99,9 +115,12 @@ async function callCloudRunEndpoint() {
     alert('Could not get Execution ID or GCS Bucket.');
     return;
   }
-  const cloudRunUrl = `${resolveStatusBaseUrl()}/getStatus?gcsBucket=${encodeURIComponent(
+  const cloudRunUrl = buildStatusUrl(
+    resolveStatusBaseUrl(),
     config.gcsBucket,
-  )}&executionId=${encodeURIComponent(executionId)}${statusApiKeyParam()}`;
+    executionId,
+    config.backendApi && config.backendApi.apiKey,
+  );
   getStatusButton.disabled = true;
   // Served same-origin behind IAP: the default same-origin credentials carry the
   // IAP session cookie automatically, so no auth header is needed here.
@@ -144,5 +163,5 @@ async function callCloudRunEndpoint() {
 // status viewer loads this as a plain <script>, where `module` is undefined, so
 // this guard is a no-op there.
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {classifyStatusResponse};
+  module.exports = {buildStatusUrl, classifyStatusResponse};
 }

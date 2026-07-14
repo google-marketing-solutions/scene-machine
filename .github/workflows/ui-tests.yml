@@ -56,5 +56,8 @@ jobs:
     - name: Unit tests
       run: npm test -- --watch=false
 
+    - name: Status viewer tests
+      run: node remix-engine-status-viewer/callBackend.spec.js
+
     - name: Production build
       run: npx ng build --configuration production
