@@ -484,18 +484,7 @@ echo "✓ Service account ${BUILD_SA} ready."
 # demand (idempotent: skip if it already exists), then wait for propagation the
 # same way before granting it roles below.
 phase "Ensuring runtime service account ${RUNTIME_SA} exists..."
-gcloud iam service-accounts describe "${RUNTIME_SA}" --project=$PROJECT &> /dev/null \
-  || gcloud iam service-accounts create sm-runtime --project=$PROJECT \
-       --display-name="Scene Machine runtime (app + worker)"
-RUNTIME_SA_WAIT_ATTEMPTS=0
-until gcloud iam service-accounts describe "${RUNTIME_SA}" --project=$PROJECT &> /dev/null; do
-  RUNTIME_SA_WAIT_ATTEMPTS=$((RUNTIME_SA_WAIT_ATTEMPTS + 1))
-  if [ $RUNTIME_SA_WAIT_ATTEMPTS -ge $SA_WAIT_MAX ]; then
-    echo "ERROR: runtime SA ${RUNTIME_SA} did not appear after 10 minutes." >&2
-    exit 1
-  fi
-  sleep 5
-done
+ensure_runtime_service_account "$RUNTIME_SA" "$PROJECT" "$SA_WAIT_MAX"
 echo "✓ Service account ${RUNTIME_SA} ready."
 
 # --- IAM: runtime SA roles + service agents ----------------------------------

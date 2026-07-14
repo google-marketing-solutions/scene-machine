@@ -81,6 +81,48 @@ _retry_iam_write() {
   done
 }
 
+# Ensure the dedicated Scene Machine runtime service account exists and is
+# visible before the deploy grants it roles. A second deploy can observe the
+# account as missing while IAM is still propagating it, then lose the create
+# race with ALREADY_EXISTS. Treat only that specific create result as benign;
+# real create failures (permission, policy, invalid arguments) still fail
+# immediately. Call as: ensure_runtime_service_account <email> <project> <max>
+ensure_runtime_service_account() {
+  local runtime_sa="$1" project="$2" max_attempts="$3"
+  local create_output=""
+
+  if gcloud iam service-accounts describe "$runtime_sa" \
+      --project="$project" &>/dev/null; then
+    return 0
+  fi
+
+  if create_output=$(gcloud iam service-accounts create sm-runtime \
+      --project="$project" \
+      --display-name="Scene Machine runtime (app + worker)" 2>&1); then
+    [ -z "$create_output" ] || printf '%s\n' "$create_output"
+  elif grep -q 'ALREADY_EXISTS:' <<<"$create_output" \
+      || grep -Fq \
+        "Service account sm-runtime already exists within project projects/${project}" \
+        <<<"$create_output"; then
+    echo "  Runtime service account was created by another deploy; waiting for visibility."
+  else
+    echo "ERROR: failed to create runtime SA ${runtime_sa}:" >&2
+    printf '%s\n' "$create_output" >&2
+    return 1
+  fi
+
+  local attempts=0
+  until gcloud iam service-accounts describe "$runtime_sa" \
+      --project="$project" &>/dev/null; do
+    attempts=$((attempts + 1))
+    if [ "$attempts" -ge "$max_attempts" ]; then
+      echo "ERROR: runtime SA ${runtime_sa} did not appear after 10 minutes." >&2
+      return 1
+    fi
+    sleep 5
+  done
+}
+
 # `gcloud projects add-iam-policy-binding` with the shared retry, plus a cheap
 # get-iam-policy pre-check so a re-run on an already-provisioned project does no
 # write (no etag race). Call as: add_iam_binding "$PROJECT" --member=... --role=...
