@@ -21,6 +21,8 @@ import glob
 import json
 import os
 
+import pytest
+
 from util.submission_validation import validate_submission
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -31,10 +33,22 @@ def _code(data):
   return result[1] if result is not None else None
 
 
-def _sub(action='generate_video', params=None, **top):
-  data = {'workflowDefinition': {'n': {'action': action, 'parameters': params or {}}}}
+def _submission(definition, input_files=None, node_id=None, **top):
+  data = {
+      'workflowId': 'workflow-test',
+      'nodeId': node_id or next(iter(definition), 'n'),
+      'workflowDefinition': definition,
+      'workflowParams': {},
+      'inputFiles': input_files if input_files is not None else {},
+  }
   data.update(top)
   return data
+
+
+def _sub(action='generate_video', params=None, **top):
+  return _submission(
+      {'n': {'action': action, 'parameters': params or {}}}, **top
+  )
 
 
 # --- the acceptance invariant: every shipped example must pass ---------------
@@ -98,10 +112,12 @@ def test_empty_location_rejected():
               ) == 'MISSING_MODEL_PARAM'
 
 
-def test_unknown_action_is_ignored():
-  # This check only covers actions that take a model. An unknown action name is
-  # the orchestrator's to reject.
-  assert validate_submission(_sub('definitely_not_an_action', {})) is None
+def test_unknown_action_is_rejected():
+  assert _code(_sub('definitely_not_an_action', {})) == 'ACTION_UNDEFINED'
+
+
+def test_removed_web_copy_action_is_rejected():
+  assert _code(_sub('copy_web_to_gcs', {})) == 'ACTION_UNDEFINED'
 
 
 def test_list_model_with_one_bad_element():
@@ -169,12 +185,231 @@ def test_non_dict_submission_rejected():
 
 
 def test_non_dict_workflow_definition_rejected():
-  assert validate_submission({'workflowDefinition': 'nope'})[1] == 'MALFORMED_SUBMISSION'
+  data = _submission({})
+  data['workflowDefinition'] = 'nope'
+  assert validate_submission(data)[1] == 'MALFORMED_SUBMISSION'
 
 
 def test_non_dict_node_rejected():
-  assert validate_submission(
-      {'workflowDefinition': {'n': 'nope'}})[1] == 'MALFORMED_SUBMISSION'
+  assert validate_submission(_submission({'n': 'nope'}))[1] == 'MALFORMED_SUBMISSION'
+
+
+def test_non_dict_workflow_params_rejected():
+  data = _sub('pass')
+  data['workflowParams'] = ['not', 'an', 'object']
+  assert validate_submission(data)[1] == 'MALFORMED_SUBMISSION'
+
+
+def test_required_envelope_fields_rejected_when_missing_or_empty():
+  for field in ('workflowId', 'nodeId', 'workflowDefinition', 'inputFiles'):
+    data = _sub('pass')
+    del data[field]
+    assert _code(data) == 'MALFORMED_SUBMISSION', f'missing {field} passed'
+  for field in ('workflowId', 'nodeId'):
+    for value in ('', '  '):
+      data = _sub('pass')
+      data[field] = value
+      assert _code(data) == 'MALFORMED_SUBMISSION', f'{field}={value!r} passed'
+
+
+def test_selected_node_must_exist():
+  data = _sub('pass')
+  data['nodeId'] = 'missing'
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+@pytest.mark.parametrize(
+    ('field', 'value'),
+    (
+        ('workflowId', 'workflow/child'),
+        ('workflowId', 'x' * 1473),
+        ('nodeId', 'node/child'),
+        ('nodeId', '.'),
+        ('nodeId', '..'),
+        ('nodeId', '__reserved__'),
+        ('nodeId', 'x' * 1501),
+    ),
+)
+def test_firestore_path_identifiers_rejected(field, value):
+  data = _sub('pass')
+  if field == 'nodeId':
+    data['workflowDefinition'] = {value: {'action': 'pass'}}
+  data[field] = value
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+def test_every_workflow_node_id_must_be_one_firestore_segment():
+  data = _submission({
+      'root': {'action': 'pass'},
+      'later/node': {'action': 'pass'},
+  }, node_id='root')
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+def test_workflow_and_node_ids_must_fit_generated_task_lock_id():
+  workflow_id = 'w' * 1400
+  at_limit = 'n' * 65
+  data = _submission({at_limit: {'action': 'pass'}}, node_id=at_limit)
+  data['workflowId'] = workflow_id
+  assert validate_submission(data) is None
+
+  over_limit = 'n' * 66
+  data = _submission({over_limit: {'action': 'pass'}}, node_id=over_limit)
+  data['workflowId'] = workflow_id
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+@pytest.mark.parametrize('key', ('input/name', '', 'x' * 1495))
+def test_input_group_names_must_be_firestore_safe(key):
+  data = _submission(
+      {'root': {'action': 'pass', 'input': {key: None}}},
+      {key: []},
+      node_id='root',
+  )
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+@pytest.mark.parametrize('field', ('groupId', 'inputCount'))
+def test_app_submission_rejects_server_only_resume_fields(field):
+  data = _sub('pass')
+  data[field] = 'attacker/value'
+  assert _code(data) == 'SERVER_FIELD_NOT_ALLOWED'
+
+
+def test_selected_node_input_requires_matching_input_files_group():
+  data = _submission(
+      {'root': {'action': 'pass', 'input': {'image': None}}},
+      node_id='root',
+  )
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+def test_selected_node_rejects_extra_input_files_group():
+  data = _submission(
+      {
+          'video': {
+              'action': 'generate_video',
+              'input': {'prompt': None},
+              'parameters': {
+                  **_VALID_VIDEO,
+                  'video_variant_quantity': 2,
+              },
+          },
+      },
+      {
+          'prompt': [{'file': 'prompt.txt'}],
+          'extra': [
+              {'file': f'image-{i}.png', 'slot': i} for i in range(200)
+          ],
+      },
+      node_id='video',
+  )
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+def test_selected_node_rejects_predecessor_input_edge():
+  data = _submission(
+      {
+          'predecessor': {
+              'action': 'translate',
+              'parameters': {
+                  'gemini_model': 'gemini-3.5-flash',
+                  'gemini_model_location': 'global',
+              },
+          },
+          'video': {
+              'action': 'generate_video',
+              'input': {
+                  'prompt': {'node': 'predecessor', 'output': 'text'},
+              },
+              'parameters': {
+                  **_VALID_VIDEO,
+                  'video_variant_quantity': 2,
+              },
+          },
+      },
+      {
+          'prompt': [
+              {'file': f'prompt-{i}.txt', 'slot': i} for i in range(200)
+          ],
+      },
+      node_id='video',
+  )
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+def test_empty_edge_object_rejected():
+  data = _submission(
+      {'root': {'action': 'pass', 'input': {'image': {}}}},
+      {'image': []},
+      node_id='root',
+  )
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+def test_downstream_null_source_rejected():
+  data = _submission(
+      {'root': {'action': 'pass', 'input': {'image': None}},
+       'next': {'action': 'pass', 'input': {'image': None}}},
+      {'image': []},
+      node_id='root',
+  )
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+def test_unknown_predecessor_output_rejected():
+  data = _submission(
+      {'root': {'action': 'pass', 'input': {'image': None}},
+       'next': {'action': 'outpaint_image',
+                'input': {'image': {'node': 'root', 'output': 'missing'}},
+                'parameters': {'image_model': 'gemini-3-pro-image',
+                               'image_model_location': 'global'}}},
+      {'image': []},
+      node_id='root',
+  )
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+def test_unknown_declared_action_output_rejected():
+  data = _submission(
+      {'root': {'action': 'generate_image',
+                'input': {'prompt': None},
+                'parameters': {'image_model': 'gemini-3-pro-image',
+                               'image_model_location': 'global'}},
+       'next': {'action': 'outpaint_image',
+                'input': {'image': {'node': 'root', 'output': 'missing'}},
+                'parameters': {'image_model': 'gemini-3-pro-image',
+                               'image_model_location': 'global'}}},
+      {'prompt': []},
+      node_id='root',
+  )
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+def test_undeclared_consumer_input_rejected():
+  data = _submission(
+      {'root': {'action': 'pass', 'input': {'image': None}},
+       'next': {'action': 'outpaint_image',
+                'input': {'prompt': {'node': 'root', 'output': 'image'}},
+                'parameters': {'image_model': 'gemini-3-pro-image',
+                               'image_model_location': 'global'}}},
+      {'image': []},
+      node_id='root',
+  )
+  assert _code(data) == 'MALFORMED_SUBMISSION'
+
+
+def test_pass_exposes_only_its_same_named_inputs():
+  data = _submission(
+      {'root': {'action': 'pass', 'input': {'image': None}},
+       'next': {'action': 'outpaint_image',
+                'input': {'image': {'node': 'root', 'output': 'image'}},
+                'parameters': {'image_model': 'gemini-3-pro-image',
+                               'image_model_location': 'global'}}},
+      {'image': []},
+      node_id='root',
+  )
+  assert validate_submission(data) is None
 
 
 def test_non_string_action_rejected():
@@ -232,7 +467,7 @@ def test_fan_out_product_too_large():
 
 def test_too_many_nodes():
   nodes = {f'n{i}': {'action': 'pass', 'parameters': {}} for i in range(201)}
-  assert validate_submission({'workflowDefinition': nodes})[1] == 'TOO_MANY_NODES'
+  assert validate_submission(_submission(nodes, node_id='n0'))[1] == 'TOO_MANY_NODES'
 
 
 def test_too_many_input_files():
@@ -334,9 +569,12 @@ def _pipeline(n, image_nodes=(), video_nodes=(('v', 'root', 'image'),), groups=N
   for nid, pred, out in video_nodes:
     nodes[nid] = {'action': 'generate_video', 'parameters': dict(_VALID_VIDEO),
                   'input': {'image': {'node': pred, 'output': out}}}
-  return {'inputFiles': {g: [{'file': str(i)} for i in range(n)]
-                         for g in (groups or ['image'])},
-          'workflowDefinition': nodes}
+  return _submission(
+      nodes,
+      {g: [{'file': str(i)} for i in range(n)]
+       for g in (groups or ['image'])},
+      node_id='root',
+  )
 
 
 def test_billable_generations_over_cap_rejected():
@@ -371,15 +609,20 @@ def test_shared_lineage_counted_once():
   # squared. prompt(1) + image(N) both via root: outpaint(N) + video(N) = 2N, so
   # N=100 -> 200 (ok), N=101 -> 202 (over). Squaring would blow up far sooner.
   def wf(n):
-    return {'inputFiles': {'prompt': [{'file': 'p'}],
-                           'image': [{'file': str(i)} for i in range(n)]},
-            'workflowDefinition': {
-                'root': {'action': 'pass', 'input': {'prompt': None, 'image': None}},
-                'o': {'action': 'outpaint_image', 'parameters': dict(_VALID_IMAGE),
-                      'input': {'image': {'node': 'root', 'output': 'image'}}},
-                'v': {'action': 'generate_video', 'parameters': dict(_VALID_VIDEO),
-                      'input': {'prompt': {'node': 'root', 'output': 'prompt'},
-                                'image': {'node': 'o', 'output': 'outpainted_image'}}}}}
+    nodes = {
+        'root': {'action': 'pass', 'input': {'prompt': None, 'image': None}},
+        'o': {'action': 'outpaint_image', 'parameters': dict(_VALID_IMAGE),
+              'input': {'image': {'node': 'root', 'output': 'image'}}},
+        'v': {'action': 'generate_video', 'parameters': dict(_VALID_VIDEO),
+              'input': {'prompt': {'node': 'root', 'output': 'prompt'},
+                        'image': {'node': 'o', 'output': 'outpainted_image'}}},
+    }
+    return _submission(
+        nodes,
+        {'prompt': [{'file': 'p'}],
+         'image': [{'file': str(i)} for i in range(n)]},
+        node_id='root',
+    )
   assert validate_submission(wf(100)) is None
   assert validate_submission(wf(101))[1] == 'TOO_MANY_GENERATIONS'
 
@@ -430,11 +673,14 @@ def test_quantity_list_summed_not_multiplied():
 def test_cheap_text_generations_not_counted():
   # Gemini text is not billable: fanning a text action well past the generation
   # cap still passes -- only image/Veo/Omni families count toward the cost cap.
-  data = {'inputFiles': {'images': [{'file': str(i)} for i in range(150)]},
-          'workflowDefinition': {
-              't': {'action': 'translate',
-                    'parameters': {'gemini_model': 'gemini-3.5-flash',
-                                   'gemini_model_location': 'global'}}}}
+  data = _submission(
+      {'t': {'action': 'translate',
+             'input': {'text': None},
+             'parameters': {'gemini_model': 'gemini-3.5-flash',
+                            'gemini_model_location': 'global'}}},
+      {'text': [{'file': str(i)} for i in range(150)]},
+      node_id='t',
+  )
   assert validate_submission(data) is None
 
 
@@ -458,7 +704,9 @@ def test_queue_safety_fan_out_rejected():
     nodes[f'p{i}'] = {'action': 'pass', 'parameters': {'x': list(range(100))},
                       'input': {'image': {'node': prev, 'output': 'image'}}}
     prev = f'p{i}'
-  wf = {'inputFiles': {'image': [{'file': '0'}]}, 'workflowDefinition': nodes}
+  wf = _submission(
+      nodes, {'image': [{'file': '0'}]}, node_id='root'
+  )
   assert validate_submission(wf)[1] == 'TOTAL_FAN_OUT_TOO_LARGE'
 
 
@@ -469,17 +717,23 @@ def test_dimensions_mapping_under_count_rejected():
   # dimensions the engine cross-products (n -> n*n). A dim-altering node's output
   # is treated as an opaque source, so the merge at z multiplies (100*100 > 200)
   # instead of deduping by origin (which under-counted to 100).
-  wf = {'inputFiles': {'src': [{'file': str(i), 'd': str(i)} for i in range(100)]},
-        'workflowDefinition': {
-            'root': {'action': 'pass', 'input': {'src': None}},
-            'x': {'action': 'translate', 'dimensionsMapping': {'d': 'd2'},
-                  'input': {'src': {'node': 'root', 'output': 'src'}},
-                  'parameters': {'gemini_model': 'gemini-3.5-flash',
-                                 'gemini_model_location': 'global'}},
-            'y': {'action': 'pass', 'input': {'src': {'node': 'root', 'output': 'src'}}},
-            'z': {'action': 'generate_image', 'parameters': dict(_VALID_IMAGE),
-                  'input': {'a': {'node': 'x', 'output': 'src'},
-                            'b': {'node': 'y', 'output': 'src'}}}}}
+  nodes = {
+      'root': {'action': 'pass', 'input': {'text': None}},
+      'x': {'action': 'translate', 'dimensionsMapping': {'d': 'd2'},
+            'input': {'text': {'node': 'root', 'output': 'text'}},
+            'parameters': {'gemini_model': 'gemini-3.5-flash',
+                           'gemini_model_location': 'global'}},
+      'y': {'action': 'pass',
+            'input': {'text': {'node': 'root', 'output': 'text'}}},
+      'z': {'action': 'generate_video', 'parameters': dict(_VALID_VIDEO),
+            'input': {'image': {'node': 'x', 'output': 'text'},
+                      'prompt': {'node': 'y', 'output': 'text'}}},
+  }
+  wf = _submission(
+      nodes,
+      {'text': [{'file': str(i), 'd': str(i)} for i in range(100)]},
+      node_id='root',
+  )
   assert validate_submission(wf)[1] == 'TOO_MANY_GENERATIONS'
 
 
@@ -488,17 +742,23 @@ def test_dimensions_consumed_under_count_rejected():
   # needed: p projects out dim2, q projects out dim1, so they cross-product at c.
   def branch(drop):
     return {'action': 'translate', 'dimensionsConsumed': [drop],
-            'input': {'src': {'node': 'root', 'output': 'src'}},
+            'input': {'text': {'node': 'root', 'output': 'text'}},
             'parameters': {'gemini_model': 'gemini-3.5-flash',
                            'gemini_model_location': 'global'}}
-  wf = {'inputFiles': {'src': [{'file': str(i), 'dim1': str(i), 'dim2': str(i)}
-                               for i in range(100)]},
-        'workflowDefinition': {
-            'root': {'action': 'pass', 'input': {'src': None}},
-            'p': branch('dim2'), 'q': branch('dim1'),
-            'c': {'action': 'generate_image', 'parameters': dict(_VALID_IMAGE),
-                  'input': {'a': {'node': 'p', 'output': 'src'},
-                            'b': {'node': 'q', 'output': 'src'}}}}}
+  nodes = {
+      'root': {'action': 'pass', 'input': {'text': None}},
+      'p': branch('dim2'),
+      'q': branch('dim1'),
+      'c': {'action': 'generate_video', 'parameters': dict(_VALID_VIDEO),
+            'input': {'image': {'node': 'p', 'output': 'text'},
+                      'prompt': {'node': 'q', 'output': 'text'}}},
+  }
+  wf = _submission(
+      nodes,
+      {'text': [{'file': str(i), 'dim1': str(i), 'dim2': str(i)}
+                for i in range(100)]},
+      node_id='root',
+  )
   assert validate_submission(wf)[1] == 'TOO_MANY_GENERATIONS'
 
 
@@ -507,8 +767,12 @@ def test_malformed_input_edge_rejected():
   # when hashed in the graph walk, a missing/empty output crashes the mapper.
   for edge in ({'node': [], 'output': 'i'}, {'node': 'r', 'output': []},
                {'node': 'r'}, {'node': '', 'output': 'i'}, {'node': 'r', 'output': ''}):
-    wf = {'workflowDefinition': {'a': {'action': 'pass', 'input': {'x': edge}},
-                                 'r': {'action': 'pass'}}}
+    wf = _submission(
+        {'a': {'action': 'pass', 'input': {'x': edge}},
+         'r': {'action': 'pass'}},
+        {'x': []},
+        node_id='a',
+    )
     assert validate_submission(wf)[1] == 'MALFORMED_SUBMISSION', f'{edge!r} passed'
 
 
@@ -517,7 +781,7 @@ def test_malformed_dimensions_mapping_rejected():
   # value or a duplicate target corrupts the rename. All must fail closed here.
   for mapping in ('evil', ['d'], {'d': ['x']}, {'d': 1}, {'': 'd2'}, {'d': ''},
                   {'a': 'x', 'b': 'x'}):
-    wf = {'workflowDefinition': {'n': {'action': 'pass', 'dimensionsMapping': mapping}}}
+    wf = _submission({'n': {'action': 'pass', 'dimensionsMapping': mapping}})
     assert validate_submission(wf)[1] == 'MALFORMED_SUBMISSION', f'{mapping!r} passed'
 
 
@@ -525,16 +789,18 @@ def test_malformed_dimensions_consumed_rejected():
   # A non-list throws when the worker does `key in dimensionsConsumed`; a non-string
   # element never matches and silently fails to project. Reject both shapes.
   for consumed in (123, True, 'x', {'d': 1}, [1], [''], ['ok', 2]):
-    wf = {'workflowDefinition': {'n': {'action': 'pass', 'dimensionsConsumed': consumed}}}
+    wf = _submission({'n': {'action': 'pass', 'dimensionsConsumed': consumed}})
     assert validate_submission(wf)[1] == 'MALFORMED_SUBMISSION', f'{consumed!r} passed'
 
 
 def test_wellformed_dimension_controls_accepted():
   # The shape check must not reject a legitimate rename/projection.
-  wf = {'inputFiles': {'src': [{'file': '1', 'd': 'x'}]},
-        'workflowDefinition': {
-            'root': {'action': 'pass', 'input': {'src': None}},
-            'x': {'action': 'pass', 'dimensionsMapping': {'d': 'd2'},
-                  'dimensionsConsumed': ['other'],
-                  'input': {'src': {'node': 'root', 'output': 'src'}}}}}
+  wf = _submission(
+      {'root': {'action': 'pass', 'input': {'src': None}},
+       'x': {'action': 'pass', 'dimensionsMapping': {'d': 'd2'},
+             'dimensionsConsumed': ['other'],
+             'input': {'src': {'node': 'root', 'output': 'src'}}}},
+      {'src': [{'file': '1', 'd': 'x'}]},
+      node_id='root',
+  )
   assert validate_submission(wf) is None

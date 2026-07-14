@@ -166,7 +166,6 @@ The following are awaiting inclusion in Scene Machine:
 
 - `convert_image.py`
 - `convert_video.py`
-- `copy_web_to_gcs.py`
 
 The following support batch/scaled ad-video generation:
 
