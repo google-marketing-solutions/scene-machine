@@ -215,6 +215,18 @@ export interface ProjectConfig {
   pendingRender?: PendingRender;
 }
 
+interface ProjectSave {
+  source: ProjectConfig;
+  payload: ProjectConfig;
+}
+
+interface ProjectSaveState {
+  latestSource: ProjectConfig | null;
+  lastSavedSource: ProjectConfig | null;
+  inFlight: ProjectSave | null;
+  pending: ProjectSave | null;
+}
+
 interface Scene {
   id: string;
   name: string;
@@ -451,6 +463,9 @@ export class ConfigService {
       if (params.projectId === null) {
         return {...this.DEFAULT_PROJECT_CONFIG()};
       }
+      const localProjectAtLoad = this.projectWithUnsettledSave(
+        params.projectId,
+      );
       try {
         const data = await firstValueFrom(
           this.httpClient.get<ProjectConfig>(
@@ -458,9 +473,21 @@ export class ConfigService {
           ),
         );
         this.persistedProjectIds.add(params.projectId);
+        if (localProjectAtLoad) {
+          return (
+            this.projectSaveStates.get(params.projectId)?.latestSource ??
+            localProjectAtLoad
+          );
+        }
         return this.normalizeLoadedProject(data);
       } catch (error) {
         if (error instanceof HttpErrorResponse && error.status === 404) {
+          if (localProjectAtLoad) {
+            return (
+              this.projectSaveStates.get(params.projectId)?.latestSource ??
+              localProjectAtLoad
+            );
+          }
           void this.router.navigate(['/']);
           console.error(`Project ${params.projectId} does not exist.`);
           return {...this.DEFAULT_PROJECT_CONFIG()};
@@ -515,20 +542,11 @@ export class ConfigService {
     localStorage.getItem('primaryColor') ?? 'theme-azure',
   );
   /**
-   * The exact config object last handed to a save request; lets the
-   * debounced autosave skip a config that `flushPendingSave()` already
-   * persisted, keeping request counts identical to the pre-flush behavior.
+   * Save ordering and identity-based dedupe state, isolated per project.
+   * Requests carry a cloned payload while source references remain available
+   * to dedupe immediate saves against trailing autosave emissions.
    */
-  // The last config whose save the SERVER confirmed. Used to dedupe the
-  // trailing autosave emission against an explicit flush/saveNow of the same
-  // object. Only advanced on a successful response (see saveProjectMediated),
-  // never optimistically, so a failed save is not mistaken for a saved one.
-  private lastSavedConfig: ProjectConfig | null = null;
-  // The config whose POST/PATCH is currently in flight. Dedupes concurrent
-  // saves of the same object without claiming it is saved; cleared on success
-  // (it becomes lastSavedConfig) and on failure (so a later flush/saveNow or
-  // the next autosave emission re-attempts the unsaved work).
-  private inFlightConfig: ProjectConfig | null = null;
+  private readonly projectSaveStates = new Map<string, ProjectSaveState>();
 
   constructor() {
     toObservable(this.projectConfig.value)
@@ -537,7 +555,7 @@ export class ConfigService {
         if (!config.id) {
           return;
         }
-        if (config === this.lastSavedConfig || config === this.inFlightConfig) {
+        if (this.isTrackedConfig(config)) {
           // Already persisted (or a save of this exact object is in flight);
           // avoid a duplicate save.
           return;
@@ -595,10 +613,79 @@ export class ConfigService {
     this.initFaviconListener();
   }
 
-  /** Saves one config object, marking it in-flight for dedupe. */
+  private saveState(projectId: string): ProjectSaveState {
+    let state = this.projectSaveStates.get(projectId);
+    if (!state) {
+      state = {
+        latestSource: null,
+        lastSavedSource: null,
+        inFlight: null,
+        pending: null,
+      };
+      this.projectSaveStates.set(projectId, state);
+    }
+    return state;
+  }
+
+  /**
+   * A GET started before a local save settles can return older project bytes.
+   * Keep this load on the newest local object until that save settles.
+   */
+  private projectWithUnsettledSave(projectId: string): ProjectConfig | null {
+    const state = this.projectSaveStates.get(projectId);
+    if (
+      !state?.latestSource ||
+      (!state.inFlight &&
+        !state.pending &&
+        state.latestSource === state.lastSavedSource)
+    ) {
+      return null;
+    }
+    return state.latestSource;
+  }
+
+  private isTrackedConfig(config: ProjectConfig): boolean {
+    const state = this.projectSaveStates.get(config.id);
+    return (
+      state !== undefined &&
+      (config === state.lastSavedSource ||
+        config === state.inFlight?.source ||
+        config === state.pending?.source)
+    );
+  }
+
+  private captureSave(source: ProjectConfig): ProjectSave {
+    return {source, payload: structuredClone(source)};
+  }
+
+  /** Starts a save or replaces the newest snapshot queued for its project. */
   private persistNow(config: ProjectConfig) {
-    this.inFlightConfig = config;
-    this.saveProjectMediated(config);
+    const state = this.saveState(config.id);
+    if (this.isTrackedConfig(config)) {
+      return;
+    }
+    state.latestSource = config;
+    const save = this.captureSave(config);
+    if (state.inFlight) {
+      state.pending = save;
+      return;
+    }
+    this.startSave(save, state);
+  }
+
+  private startSave(save: ProjectSave, state: ProjectSaveState) {
+    state.inFlight = save;
+    this.saveProjectMediated(save, state);
+  }
+
+  private startPendingSave(state: ProjectSaveState): boolean {
+    const pending = state.pending;
+    state.pending = null;
+    if (!pending) {
+      return false;
+    }
+    this.startSave(pending, state);
+    return true;
   }
 
   /**
@@ -610,12 +697,7 @@ export class ConfigService {
    */
   flushPendingSave() {
     const config = this.projectConfig.value();
-    if (
-      !this.shouldSave ||
-      !config.id ||
-      config === this.lastSavedConfig ||
-      config === this.inFlightConfig
-    ) {
+    if (!this.shouldSave || !config.id || this.isTrackedConfig(config)) {
       return;
     }
     config.lastEdited = new Date();
@@ -630,16 +712,12 @@ export class ConfigService {
    * Unlike flushPendingSave(), this does not require shouldSave to be set: a
    * brand-new project (setNewProject leaves shouldSave === false) must still
    * be created server-side on demand. It reuses persistNow()'s mechanics and
-   * records lastSavedConfig, so the trailing debounced emission for the SAME
-   * config object is deduped at the autosave guard — no double POST/PATCH.
+   * records the confirmed source reference, so the trailing debounced emission
+   * for the SAME config object is deduped — no double POST/PATCH.
    */
   saveNow() {
     const config = this.projectConfig.value();
-    if (
-      !config.id ||
-      config === this.lastSavedConfig ||
-      config === this.inFlightConfig
-    ) {
+    if (!config.id || this.isTrackedConfig(config)) {
       return;
     }
     config.lastEdited = new Date();
@@ -653,44 +731,50 @@ export class ConfigService {
    * Unlike the legacy silent path, failures surface a persistent snackbar
    * with a Retry affordance.
    */
-  private saveProjectMediated(config: ProjectConfig) {
-    const isPersisted = this.persistedProjectIds.has(config.id);
+  private saveProjectMediated(save: ProjectSave, state: ProjectSaveState) {
+    const projectId = save.source.id;
+    const isPersisted = this.persistedProjectIds.has(projectId);
     const request = isPersisted
-      ? this.httpClient.patch(`/api/projects/${config.id}`, config)
-      : this.httpClient.post<{id: string}>('/api/projects', config);
+      ? this.httpClient.patch(`/api/projects/${projectId}`, save.payload)
+      : this.httpClient.post<{id: string}>('/api/projects', save.payload);
     request.subscribe({
       next: () => {
-        this.persistedProjectIds.add(config.id);
+        this.persistedProjectIds.add(projectId);
         // Confirmed saved: now it is safe to dedupe future saves of this exact
         // object, and it is no longer in flight.
-        this.lastSavedConfig = config;
-        if (this.inFlightConfig === config) {
-          this.inFlightConfig = null;
+        state.lastSavedSource = save.source;
+        if (state.inFlight === save) {
+          state.inFlight = null;
         }
+        this.startPendingSave(state);
       },
       error: error => {
         // The save did NOT happen: clear the in-flight marker (without ever
-        // setting lastSavedConfig) so a later flush/saveNow or the next
+        // setting lastSavedSource) so a later flush/saveNow or the next
         // autosave emission re-attempts this work instead of skipping it.
-        if (this.inFlightConfig === config) {
-          this.inFlightConfig = null;
+        if (state.inFlight === save) {
+          state.inFlight = null;
         }
         // POST is create-only server-side, so a 409 means the project already
         // exists (e.g. an earlier POST landed but its response was lost, leaving
         // this client thinking the project is still new). Recover by marking it
-        // persisted and re-saving once via PATCH instead of looping on POST. Go
-        // through persistNow with the LATEST state (the user may have edited
-        // since the failed POST) so the retry sends current data and is tracked
-        // in inFlightConfig; the persisted-id guard makes this a single switch
-        // to PATCH, not a loop.
+        // persisted and retrying the newest queued snapshot via PATCH. The
+        // persisted-id guard makes this a single switch, not a loop.
         if (
           error instanceof HttpErrorResponse &&
           error.status === 409 &&
-          !this.persistedProjectIds.has(config.id)
+          !this.persistedProjectIds.has(projectId)
         ) {
-          this.persistedProjectIds.add(config.id);
-          const latest = this.projectConfig.value();
-          this.persistNow(latest.id === config.id ? latest : config);
+          this.persistedProjectIds.add(projectId);
+          if (!this.startPendingSave(state)) {
+            const latest = this.projectConfig.value();
+            const retrySource =
+              latest.id === projectId
+                ? latest
+                : (state.latestSource ?? save.source);
+            state.latestSource = retrySource;
+            this.startSave(this.captureSave(retrySource), state);
+          }
           return;
         }
         console.error('Error saving project config:', error);
@@ -700,13 +784,16 @@ export class ConfigService {
           {panelClass: ['error-snackbar']},
         );
         snackBarRef.onAction().subscribe(() => {
-          // Retry with the latest state if the user is still on this project,
-          // otherwise with the state captured at failure time. Go through
-          // persistNow so the retry is tracked in inFlightConfig and a
-          // concurrent save is still deduped.
+          // Retry the current state when still on this project, otherwise the
+          // newest source this project's queue has observed.
           const latest = this.projectConfig.value();
-          this.persistNow(latest.id === config.id ? latest : config);
+          this.persistNow(
+            latest.id === projectId
+              ? latest
+              : (state.latestSource ?? save.source),
+          );
         });
+        this.startPendingSave(state);
       },
     });
   }
@@ -852,5 +939,6 @@ export class ConfigService {
   async deleteProject(projectId: string) {
     await firstValueFrom(this.httpClient.delete(`/api/projects/${projectId}`));
     this.persistedProjectIds.delete(projectId);
+    this.projectSaveStates.delete(projectId);
   }
 }
