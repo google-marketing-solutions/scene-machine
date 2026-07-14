@@ -273,7 +273,14 @@ def supply_node_handler() -> flask_response:
           status=400,
           mimetype=ContentType.JSON.value,
       )
-  execution_id = orchestrator.supply_node(data, instance)
+  try:
+    execution_id = orchestrator.supply_node(data, instance)
+  except orchestrator.UndefinedActionError as error:
+    return flask_response(
+        json.dumps({'error': str(error)}),
+        status=404,
+        mimetype=ContentType.JSON.value,
+    )
   output = {Key.EXECUTION_ID.value: execution_id}
   return flask_response(
       json.dumps(output), status=200, mimetype=ContentType.JSON.value

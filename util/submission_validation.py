@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Checks a workflow submission against the model allowlist.
+"""Checks whether a workflow submission can be executed under server policy.
 
 Returns ``(message, code)`` for the first problem, or ``None`` if it passes.
 Codes are stable so tests and the UI can branch on them without depending on the
@@ -33,7 +33,12 @@ _ACTIONS_JSON = os.path.join(
 
 _MODEL_PARAM_NAMES = ('gemini_model', 'image_model', 'model')
 _EXECUTION_ID = 'executionId'
+_GROUP_ID = 'groupId'
+_INPUT_COUNT = 'inputCount'
+_WORKFLOW_ID = 'workflowId'
+_NODE_ID = 'nodeId'
 _WORKFLOW_DEFINITION = 'workflowDefinition'
+_WORKFLOW_PARAMS = 'workflowParams'
 _INPUT_FILES = 'inputFiles'
 _GCP_PROJECT = 'gcp_project'
 # Node input-edge keys (raw submission JSON; mirrors common.Key).
@@ -67,6 +72,26 @@ _MAX_QUANTITY = 100         # value of a variant/video quantity parameter
 _QUANTITY_PARAMS = (
     'video_variant_quantity', 'variant_quantity', 'story_variant_quantity')
 
+# Firestore document/collection IDs are one UTF-8 path segment of at most 1,500
+# bytes. The generated execution ID adds a timestamp prefix, separator, and
+# ten-character suffix around workflowId, leaving this many client bytes.
+_MAX_FIRESTORE_SEGMENT_BYTES = 1500
+_EXECUTION_ID_OVERHEAD_BYTES = 28
+_MAX_WORKFLOW_ID_BYTES = (
+    _MAX_FIRESTORE_SEGMENT_BYTES - _EXECUTION_ID_OVERHEAD_BYTES
+)
+# Task locks use ``<executionId>_<nodeId>_<groupId>``. Reserve separators and
+# the largest group ID permitted by the workflow fan-out limit.
+_MAX_WORKFLOW_AND_NODE_ID_BYTES = (
+    _MAX_FIRESTORE_SEGMENT_BYTES
+    - _EXECUTION_ID_OVERHEAD_BYTES
+    - 2
+    - len(str(_MAX_TOTAL_FAN_OUT - 1))
+)
+# Input keys are stored as ``<groupId>_<key>``. The total-fan-out cap allows
+# group IDs through 99,999, so reserve five digits plus the underscore.
+_MAX_INPUT_KEY_BYTES = _MAX_FIRESTORE_SEGMENT_BYTES - 6
+
 
 @functools.lru_cache(maxsize=1)
 def _load_actions_json() -> dict:
@@ -81,6 +106,36 @@ def _action_params(action: str, actions_json: dict) -> set[str]:
   if not isinstance(action_def, dict):
     return set()
   return set(action_def.get('parameters') or {}) | set(action_def.get('input') or {})
+
+
+def _is_firestore_segment(value: Any, *, max_bytes: int) -> bool:
+  """Whether value is one legal Firestore collection/document path segment."""
+  if (
+      not isinstance(value, str)
+      or not value.strip()
+      or '/' in value
+      or value in ('.', '..')
+      or (value.startswith('__') and value.endswith('__'))
+  ):
+    return False
+  try:
+    return len(value.encode('utf-8')) <= max_bytes
+  except UnicodeEncodeError:
+    return False
+
+
+def _node_output_names(node: dict, actions_json: dict) -> set[str]:
+  action = node.get('action')
+  if action == _PASS:
+    node_input = node.get(_INPUT)
+    return set(node_input) if isinstance(node_input, dict) else set()
+  if not isinstance(action, str):
+    return set()
+  action_def = actions_json.get(action, {})
+  if not isinstance(action_def, dict):
+    return set()
+  outputs = action_def.get('output')
+  return set(outputs) if isinstance(outputs, dict) else set()
 
 
 def _model_param_name(action: str, actions_json: dict) -> str | None:
@@ -118,56 +173,92 @@ def validate_submission(
   # included), so match it: reject on presence, not truthiness.
   if _EXECUTION_ID in data:
     return ('executionId is not allowed on this route', 'EXECUTION_ID_NOT_ALLOWED')
+  for field in (_GROUP_ID, _INPUT_COUNT):
+    if field in data:
+      return (f'{field} is not allowed on this route',
+              'SERVER_FIELD_NOT_ALLOWED')
 
-  # inputFiles is optional. Each group must be a list of file objects with a
+  workflow_id = data.get(_WORKFLOW_ID)
+  if not _is_firestore_segment(
+      workflow_id, max_bytes=_MAX_WORKFLOW_ID_BYTES
+  ):
+    return ('workflowId must be a valid Firestore path segment',
+            'MALFORMED_SUBMISSION')
+  selected_node_id = data.get(_NODE_ID)
+  if not _is_firestore_segment(
+      selected_node_id, max_bytes=_MAX_FIRESTORE_SEGMENT_BYTES
+  ):
+    return ('nodeId must be a valid Firestore path segment',
+            'MALFORMED_SUBMISSION')
+  if not isinstance(data.get(_WORKFLOW_PARAMS), dict):
+    return ('workflowParams is not an object', 'MALFORMED_SUBMISSION')
+
+  # Each inputFiles group must be a list of file objects with a
   # real file path -- the actions read entry['file'] (Key.FILE), so a non-list
   # group or an entry missing 'file' would crash the engine; fail closed. Record
   # each group's size for the DAG fan-out below.
   input_files = data.get(_INPUT_FILES)
   input_group_sizes = {}
-  if input_files is not None:
-    if not isinstance(input_files, dict):
-      return ('inputFiles is not an object', 'MALFORMED_SUBMISSION')
-    for key, files in input_files.items():
-      if not isinstance(files, list):
-        return (f'inputFiles {key!r} is not a list', 'MALFORMED_SUBMISSION')
-      dimension_keys = None
-      for entry in files:
-        if (not isinstance(entry, dict) or not isinstance(entry.get('file'), str)
-            or not entry['file'].strip()):
-          return (f'inputFiles {key!r} entries must each have a non-empty '
-                  f'file', 'MALFORMED_SUBMISSION')
-        # The engine groups on the non-file fields of the first entry and
-        # indexes every entry by them (group_input._group_dictionaries), so
-        # ragged keys raise KeyError there and a non-scalar value makes an
-        # unhashable group key. Fail closed on both shapes.
-        entry_keys = frozenset(entry) - {'file'}
-        if dimension_keys is None:
-          dimension_keys = entry_keys
-        elif entry_keys != dimension_keys:
-          return (f'inputFiles {key!r} entries carry inconsistent dimension '
-                  'keys', 'MALFORMED_SUBMISSION')
-        for field in entry_keys:
-          value = entry[field]
-          if value is not None and not isinstance(value, (str, int, float, bool)):
-            return (f'inputFiles {key!r} dimension {field!r} must be a scalar',
-                    'MALFORMED_SUBMISSION')
-      if len(files) > _MAX_INPUT_FILES:
-        return (f'inputFiles {key!r} has too many entries '
-                f'({len(files)} > {_MAX_INPUT_FILES})', 'TOO_MANY_INPUT_FILES')
-      # An empty group still becomes one grouping slot in the engine
-      # (group_input returns {(): []}), so counting it as 0 would zero out
-      # every downstream multiplier and hide real fan-out from the budget.
-      input_group_sizes[key] = max(1, len(files))
+  if not isinstance(input_files, dict):
+    return ('inputFiles is not an object', 'MALFORMED_SUBMISSION')
+  for key, files in input_files.items():
+    if not _is_firestore_segment(
+        key, max_bytes=_MAX_INPUT_KEY_BYTES
+    ):
+      return (f'inputFiles key {key!r} is not a valid Firestore path segment',
+              'MALFORMED_SUBMISSION')
+    if not isinstance(files, list):
+      return (f'inputFiles {key!r} is not a list', 'MALFORMED_SUBMISSION')
+    dimension_keys = None
+    for entry in files:
+      if (not isinstance(entry, dict) or not isinstance(entry.get('file'), str)
+          or not entry['file'].strip()):
+        return (f'inputFiles {key!r} entries must each have a non-empty '
+                f'file', 'MALFORMED_SUBMISSION')
+      # The engine groups on the non-file fields of the first entry and
+      # indexes every entry by them (group_input._group_dictionaries), so
+      # ragged keys raise KeyError there and a non-scalar value makes an
+      # unhashable group key. Fail closed on both shapes.
+      entry_keys = frozenset(entry) - {'file'}
+      if dimension_keys is None:
+        dimension_keys = entry_keys
+      elif entry_keys != dimension_keys:
+        return (f'inputFiles {key!r} entries carry inconsistent dimension '
+                'keys', 'MALFORMED_SUBMISSION')
+      for field in entry_keys:
+        value = entry[field]
+        if value is not None and not isinstance(value, (str, int, float, bool)):
+          return (f'inputFiles {key!r} dimension {field!r} must be a scalar',
+                  'MALFORMED_SUBMISSION')
+    if len(files) > _MAX_INPUT_FILES:
+      return (f'inputFiles {key!r} has too many entries '
+              f'({len(files)} > {_MAX_INPUT_FILES})', 'TOO_MANY_INPUT_FILES')
+    # An empty group still becomes one grouping slot in the engine
+    # (group_input returns {(): []}), so counting it as 0 would zero out
+    # every downstream multiplier and hide real fan-out from the budget.
+    input_group_sizes[key] = max(1, len(files))
 
   definition = data.get(_WORKFLOW_DEFINITION)
-  if definition is None:
-    definition = {}
   if not isinstance(definition, dict):
     return ('workflowDefinition is not an object', 'MALFORMED_SUBMISSION')
   if len(definition) > _MAX_NODES:
     return (f'workflow has too many nodes ({len(definition)} > {_MAX_NODES})',
             'TOO_MANY_NODES')
+  for node_id in definition:
+    if not _is_firestore_segment(
+        node_id, max_bytes=_MAX_FIRESTORE_SEGMENT_BYTES
+    ):
+      return (f'Node id {node_id!r} is not a valid Firestore path segment',
+              'MALFORMED_SUBMISSION')
+    if (
+        len(workflow_id.encode('utf-8')) + len(node_id.encode('utf-8'))
+        > _MAX_WORKFLOW_AND_NODE_ID_BYTES
+    ):
+      return (f'workflowId and Node id {node_id!r} are too long for a task '
+              'lock', 'MALFORMED_SUBMISSION')
+  if selected_node_id not in definition:
+    return (f'Node {selected_node_id!r} is not in workflowDefinition',
+            'MALFORMED_SUBMISSION')
 
   # Pass 1: per-node structural, model/location, and per-node-limit checks, in
   # node order. Collect each node's own fan-out (its list/quantity multiplier)
@@ -179,14 +270,38 @@ def validate_submission(
     action = node.get('action')
     if not isinstance(action, str):
       return (f'Node {node_id!r} has a non-string action', 'MALFORMED_SUBMISSION')
+    if action != _PASS and action not in actions_json:
+      return (f'Node {node_id!r} has an undefined action {action!r}',
+              'ACTION_UNDEFINED')
     node_input = node.get(_INPUT)
+    if node_input is not None and not isinstance(node_input, dict):
+      return (f'Node {node_id!r} input is not an object', 'MALFORMED_SUBMISSION')
+    if node_id == selected_node_id and set(input_files) != set(node_input or {}):
+      return (f'Node {node_id!r} inputs and inputFiles groups do not match',
+              'MALFORMED_SUBMISSION')
     if node_input is not None:
-      if not isinstance(node_input, dict):
-        return (f'Node {node_id!r} input is not an object', 'MALFORMED_SUBMISSION')
-      for source in node_input.values():
+      for input_key in node_input:
+        if not _is_firestore_segment(
+            input_key, max_bytes=_MAX_INPUT_KEY_BYTES
+        ):
+          return (f'Node {node_id!r} input {input_key!r} is not a valid '
+                  'Firestore path segment', 'MALFORMED_SUBMISSION')
+      if action != _PASS:
+        declared_inputs = actions_json[action].get(_INPUT) or {}
+        undeclared_inputs = set(node_input) - set(declared_inputs)
+        if undeclared_inputs:
+          return (f'Node {node_id!r} has an undeclared input '
+                  f'{sorted(undeclared_inputs)[0]!r}', 'MALFORMED_SUBMISSION')
+      for input_key, source in node_input.items():
+        if node_id == selected_node_id and source is not None:
+          return (f'Node {node_id!r} input {input_key!r} must have a null '
+                  'source', 'MALFORMED_SUBMISSION')
         # An edge is null (top-level input) or a {node, output} object; anything
         # else would crash the engine's map_output_to_input (.get on a non-dict).
         if source is None:
+          if node_id != selected_node_id:
+            return (f'Node {node_id!r} input {input_key!r} has a null source',
+                    'MALFORMED_SUBMISSION')
           continue
         if not isinstance(source, dict):
           return (f'Node {node_id!r} has a malformed input source',
@@ -194,11 +309,17 @@ def validate_submission(
         # A predecessor edge carries {node, output}; both must be non-empty
         # strings. A non-string node throws when hashed in the graph walk; a
         # missing/empty output raises KeyError mapping the predecessor output.
-        if _NODE in source or _OUTPUT in source:
-          if (not isinstance(source.get(_NODE), str) or not source.get(_NODE)
-              or not isinstance(source.get(_OUTPUT), str) or not source.get(_OUTPUT)):
-            return (f'Node {node_id!r} has a malformed input edge (node/output '
-                    f'must be non-empty strings)', 'MALFORMED_SUBMISSION')
+        if (not isinstance(source.get(_NODE), str) or not source.get(_NODE)
+            or not isinstance(source.get(_OUTPUT), str) or not source.get(_OUTPUT)):
+          return (f'Node {node_id!r} has a malformed input edge (node/output '
+                  f'must be non-empty strings)', 'MALFORMED_SUBMISSION')
+        predecessor = definition.get(source[_NODE])
+        if (isinstance(predecessor, dict)
+            and source[_OUTPUT] not in _node_output_names(
+                predecessor, actions_json
+            )):
+          return (f'Node {node_id!r} input {input_key!r} references undeclared '
+                  f'output {source[_OUTPUT]!r}', 'MALFORMED_SUBMISSION')
 
     # dimensionsMapping / dimensionsConsumed reach the worker unvalidated: the
     # orchestrator inverts the mapping ({v: k for k, v in mapping.items()}), which

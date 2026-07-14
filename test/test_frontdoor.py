@@ -218,7 +218,7 @@ def test_app_exposes_api_routes_not_worker_routes(
 
   # AUTH_MODE='none': /api/* passes through without credentials.
   captured = _capture_supply_node(monkeypatch, orch, 'exec-app')
-  response = client.post('/api/supplyNode', json={'nodeId': 'root'})
+  response = client.post('/api/supplyNode', json=_valid_app_submission())
   assert response.status_code == 200
   assert response.get_json() == {'executionId': 'exec-app'}
   assert captured['instance'] == worker_url
@@ -240,6 +240,51 @@ def test_worker_url_overrides_host_for_supply_node(
   response = client.post('/supplyNode', json={'nodeId': 'root'})
   assert response.status_code == 200
   assert captured['instance'] == worker_url
+
+
+def test_incomplete_join_returns_execution_id(
+    monkeypatch, orchestrator_module
+):
+  monkeypatch.setattr(
+      orchestrator_module.db, 'verify_input', lambda *args, **kwargs: (False, {})
+  )
+  result = orchestrator_module.supply_node(
+      {
+          'executionId': 'exec-join',
+          'nodeId': 'join',
+          'workflowDefinition': {
+              'join': {
+                  'action': 'pass',
+                  'input': {
+                      'image': {'node': 'predecessor', 'output': 'image'},
+                  },
+              },
+          },
+          'workflowParams': {},
+          'inputFiles': {},
+      },
+      instance='https://worker.example',
+  )
+  assert result == 'exec-join'
+
+
+def test_worker_maps_undefined_action_error(monkeypatch, orchestrator_module):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker', WORKER_URL='https://w.a.run.app')
+  response = orch.app.test_client().post(
+      '/supplyNode',
+      json={
+          'executionId': 'exec-undefined',
+          'nodeId': 'root',
+          'workflowDefinition': {
+              'root': {'action': 'definitely_not_an_action'},
+          },
+          'workflowParams': {},
+          'inputFiles': {},
+      },
+  )
+  assert response.status_code == 404
+  assert response.get_json() == {'error': 'Action undefined'}
 
 
 def _task_payload(
@@ -1954,7 +1999,7 @@ def test_app_worker_url_feeds_api_supply_node(monkeypatch, orchestrator_module):
 
   captured = _capture_supply_node(monkeypatch, orch, 'exec-api')
   client = orch.app.test_client()
-  response = client.post('/api/supplyNode', json={'nodeId': 'root'})
+  response = client.post('/api/supplyNode', json=_valid_app_submission())
   assert response.status_code == 200
   assert captured['instance'] == worker_url
 
@@ -2007,7 +2052,7 @@ def test_iap_auth_gates_api_routes(monkeypatch, orchestrator_module):
   _accept_iap(monkeypatch, orch)
   response = client.post(
       '/api/supplyNode',
-      json={'nodeId': 'root'},
+      json=_valid_app_submission(),
       headers={'X-Goog-IAP-JWT-Assertion': 'iap-jwt'},
   )
   assert response.status_code == 200
@@ -2077,7 +2122,7 @@ def test_iap_verifies_assertion_and_no_firebase_bridge(
   _capture_supply_node(monkeypatch, orch, 'exec-iap')
   response = client.post(
       '/api/supplyNode',
-      json={'nodeId': 'root'},
+      json=_valid_app_submission(),
       headers={'X-Goog-IAP-JWT-Assertion': 'iap-jwt-assertion'},
   )
   assert response.status_code == 200
@@ -2154,7 +2199,9 @@ def test_app_serves_definitions_and_status_viewer(
 # Helpers for the ROLE=app submission-validation tests below.
 def _video_node(model, location):
   return {
+      'workflowId': 'workflow-video-test',
       'nodeId': 'n',
+      'inputFiles': {},
       'workflowDefinition': {
           'n': {
               'action': 'generate_video',
@@ -2170,10 +2217,260 @@ def _app_submit(monkeypatch, orch, body):
   return response, captured
 
 
+def _app_submit_without_side_effects(monkeypatch, orch, body):
+  stored = []
+  tasks = []
+  monkeypatch.setattr(
+      orch.orchestrator.db,
+      'store_workflow',
+      lambda *args, **kwargs: stored.append((args, kwargs)),
+  )
+
+  class UnexpectedTasksClient:
+
+    def __init__(self, *args, **kwargs):
+      tasks.append((args, kwargs))
+
+  monkeypatch.setattr(
+      orch.orchestrator.tasks_v2, 'CloudTasksClient', UnexpectedTasksClient
+  )
+  response = orch.app.test_client().post('/api/supplyNode', json=body)
+  return response, stored, tasks
+
+
+def _valid_app_submission():
+  return {
+      'workflowId': 'workflow-test',
+      'nodeId': 'root',
+      'workflowDefinition': {'root': {'action': 'pass'}},
+      'inputFiles': {},
+  }
+
+
 # ---------------------------------------------------------------------------
 # (g) ROLE=app validates the submission against the model allowlist before
 # anything is stored or a task runs. The worker route is exempt by role.
 # ---------------------------------------------------------------------------
+def test_app_rejects_empty_submission_before_side_effects(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  response, stored, tasks = _app_submit_without_side_effects(
+      monkeypatch, orch, {}
+  )
+  assert response.status_code == 400
+  assert stored == []
+  assert tasks == []
+
+
+@pytest.mark.parametrize(
+    'missing_field',
+    ('workflowId', 'nodeId', 'workflowDefinition', 'inputFiles'),
+)
+def test_app_rejects_missing_required_field_before_side_effects(
+    monkeypatch, orchestrator_module, missing_field
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  body = _valid_app_submission()
+  del body[missing_field]
+  response, stored, tasks = _app_submit_without_side_effects(
+      monkeypatch, orch, body
+  )
+  assert response.status_code == 400
+  assert stored == []
+  assert tasks == []
+
+
+@pytest.mark.parametrize(
+    'mutate',
+    (
+        lambda body: body.update(workflowId='workflow/child'),
+        lambda body: body.update(
+            nodeId='root/child',
+            workflowDefinition={'root/child': {'action': 'pass'}},
+        ),
+        lambda body: body['workflowDefinition'].update(
+            {'later/node': {'action': 'pass'}},
+        ),
+        lambda body: body.update(
+            workflowDefinition={
+                'root': {'action': 'pass', 'input': {'image/main': None}},
+            },
+            inputFiles={'image/main': []},
+        ),
+        lambda body: body.update(groupId='group/child'),
+    ),
+)
+def test_app_rejects_firestore_hostile_paths_before_side_effects(
+    monkeypatch, orchestrator_module, mutate
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  body = _valid_app_submission()
+  mutate(body)
+  response, stored, tasks = _app_submit_without_side_effects(
+      monkeypatch, orch, body
+  )
+  assert response.status_code == 400
+  assert stored == []
+  assert tasks == []
+
+
+def test_app_rejects_unknown_action_before_side_effects(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  body = _valid_app_submission()
+  body['workflowDefinition']['root']['action'] = 'definitely_not_an_action'
+  response, stored, tasks = _app_submit_without_side_effects(
+      monkeypatch, orch, body
+  )
+  assert response.status_code == 400
+  assert response.get_json()['code'] == 'ACTION_UNDEFINED'
+  assert stored == []
+  assert tasks == []
+
+
+def test_app_rejects_empty_input_edge_before_side_effects(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  body = _valid_app_submission()
+  body['workflowDefinition']['root']['input'] = {'image': {}}
+  body['inputFiles'] = {'image': [{'file': 'gs://bucket/image.png'}]}
+  response, stored, tasks = _app_submit_without_side_effects(
+      monkeypatch, orch, body
+  )
+  assert response.status_code == 400
+  assert stored == []
+  assert tasks == []
+
+
+def test_app_rejects_missing_selected_input_group_before_side_effects(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  body = _valid_app_submission()
+  body['workflowDefinition']['root']['input'] = {'image': None}
+  response, stored, tasks = _app_submit_without_side_effects(
+      monkeypatch, orch, body
+  )
+  assert response.status_code == 400
+  assert stored == []
+  assert tasks == []
+
+
+def test_app_rejects_downstream_null_source_before_side_effects(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  body = _valid_app_submission()
+  body['workflowDefinition'] = {
+      'root': {'action': 'pass', 'input': {'image': None}},
+      'next': {'action': 'pass', 'input': {'image': None}},
+  }
+  body['inputFiles'] = {'image': [{'file': 'gs://bucket/image.png'}]}
+  response, stored, tasks = _app_submit_without_side_effects(
+      monkeypatch, orch, body
+  )
+  assert response.status_code == 400
+  assert stored == []
+  assert tasks == []
+
+
+def test_app_rejects_unknown_predecessor_output_before_side_effects(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  body = _valid_app_submission()
+  body['workflowDefinition'] = {
+      'root': {'action': 'pass', 'input': {'image': None}},
+      'next': {
+          'action': 'outpaint_image',
+          'input': {
+              'image': {'node': 'root', 'output': 'does_not_exist'},
+          },
+          'parameters': {
+              'image_model': 'gemini-3-pro-image',
+              'image_model_location': 'global',
+          },
+      },
+  }
+  body['inputFiles'] = {'image': [{'file': 'gs://bucket/image.png'}]}
+  response, stored, tasks = _app_submit_without_side_effects(
+      monkeypatch, orch, body
+  )
+  assert response.status_code == 400
+  assert stored == []
+  assert tasks == []
+
+
+def test_app_rejects_non_string_predecessor_action_before_side_effects(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  body = _valid_app_submission()
+  body['nodeId'] = 'a_root'
+  body['workflowDefinition'] = {
+      'a_root': {'action': 'pass', 'input': {'image': None}},
+      'b_next': {
+          'action': 'outpaint_image',
+          'input': {
+              'image': {'node': 'z_bad', 'output': 'image'},
+          },
+          'parameters': {
+              'image_model': 'gemini-3-pro-image',
+              'image_model_location': 'global',
+          },
+      },
+      'z_bad': {'action': ['generate_image']},
+  }
+  body['inputFiles'] = {'image': [{'file': 'gs://bucket/image.png'}]}
+  response, stored, tasks = _app_submit_without_side_effects(
+      monkeypatch, orch, body
+  )
+  assert response.status_code == 400
+  assert response.get_json()['code'] == 'MALFORMED_SUBMISSION'
+  assert stored == []
+  assert tasks == []
+
+
+def test_app_rejects_undeclared_consumer_input_before_side_effects(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  body = _valid_app_submission()
+  body['workflowDefinition'] = {
+      'root': {'action': 'pass', 'input': {'image': None}},
+      'next': {
+          'action': 'outpaint_image',
+          'input': {
+              'prompt': {'node': 'root', 'output': 'image'},
+          },
+          'parameters': {
+              'image_model': 'gemini-3-pro-image',
+              'image_model_location': 'global',
+          },
+      },
+  }
+  body['inputFiles'] = {'image': [{'file': 'gs://bucket/image.png'}]}
+  response, stored, tasks = _app_submit_without_side_effects(
+      monkeypatch, orch, body
+  )
+  assert response.status_code == 400
+  assert stored == []
+  assert tasks == []
+
+
 def test_app_rejects_rogue_model(monkeypatch, orchestrator_module):
   del orchestrator_module
   orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
