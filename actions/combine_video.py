@@ -32,8 +32,8 @@ actions.
 from __future__ import annotations
 
 import json
-import os
-import uuid
+import pathlib
+import tempfile
 
 from actions_lib.ffmpeg import FFMPEG
 from common import ContentType
@@ -88,72 +88,67 @@ def execute(
     logger.error('Error decoding arrangement json: %s', ex)
     raise ex
 
-  ffmpeg = FFMPEG()
-  ffmpeg.set_resolution(resolution)
-  files_to_delete = []
+  with tempfile.TemporaryDirectory() as workdir:
+    ffmpeg = FFMPEG()
+    ffmpeg.set_resolution(resolution)
 
-  for arr in arrangement_content:
-    skip_time = arr.get('skip_time', 0)
-    duration = arr.get('duration', -1)
-    offset_x = arr.get('offset_x', 0)
-    offset_y = arr.get('offset_y', 0)
+    for index, arr in enumerate(arrangement_content):
+      skip_time = arr.get('skip_time', 0)
+      duration = arr.get('duration', -1)
+      offset_x = arr.get('offset_x', 0)
+      offset_y = arr.get('offset_y', 0)
 
-    try:
-      local_path = arr['file_path'].replace('/', '_')
-    except KeyError as ke:
-      logger.error('Arrangement entry missing file_path.')
-      raise ke
+      try:
+        object_path = arr['file_path']
+      except KeyError as ke:
+        logger.error('Arrangement entry missing file_path.')
+        raise ke
+      basename = pathlib.PurePosixPath(object_path).name or 'input'
+      local_path = pathlib.Path(workdir, f'{index:04d}_{basename}')
 
-    gcs.save_locally(arr['file_path'], local_path)
-    files_to_delete.append(local_path)
-    if 'video' == arr['file_type']:
-      transition = arr.get('transition')
-      transition_overlap = arr.get('transition_overlap')
-      if transition and not transition_overlap:
-        transition_overlap = 0.5
+      gcs.save_locally(object_path, str(local_path))
+      if 'video' == arr['file_type']:
+        transition = arr.get('transition')
+        transition_overlap = arr.get('transition_overlap')
+        if transition and not transition_overlap:
+          transition_overlap = 0.5
 
-      ffmpeg.add_video(
-          path=local_path,
-          skip_time=skip_time,
-          duration=duration,
-          transition=transition,
-          transition_overlap=transition_overlap,
-      )
-    elif 'audio' == arr['file_type']:
-      ffmpeg.add_audio(local_path, arr['start_time'], skip_time, duration)
-    elif 'image' == arr['file_type']:
-      ffmpeg.add_image(
-          path=local_path,
-          start_time=arr['start_time'],
-          duration=duration,
-          offset_x=offset_x,
-          offset_y=offset_y,
-          width=arr['width'],
-          height=arr.get('height', -1),
-      )
-    else:
-      logger.error('Unsupported file type: %s', arr['file_type'])
-      raise ValueError('Unsupported file type')
-  output_filename = uuid.uuid4().hex + '_output.mp4'
+        ffmpeg.add_video(
+            path=str(local_path),
+            skip_time=skip_time,
+            duration=duration,
+            transition=transition,
+            transition_overlap=transition_overlap,
+        )
+      elif 'audio' == arr['file_type']:
+        ffmpeg.add_audio(
+            str(local_path), arr['start_time'], skip_time, duration
+        )
+      elif 'image' == arr['file_type']:
+        ffmpeg.add_image(
+            path=str(local_path),
+            start_time=arr['start_time'],
+            duration=duration,
+            offset_x=offset_x,
+            offset_y=offset_y,
+            width=arr['width'],
+            height=arr.get('height', -1),
+        )
+      else:
+        logger.error('Unsupported file type: %s', arr['file_type'])
+        raise ValueError('Unsupported file type')
 
-  logger.info('Combining video')
-  output_file_path = ffmpeg.combine(
-      output_filename, False, encoding_speed, quality_level
-  )
-  logger.info('Done')
-  files_to_delete.append(output_file_path)
-  with open(output_file_path, 'rb') as output_file:
-    output_file_bites = output_file.read()
+    output_filename = pathlib.Path(workdir, 'output.mp4')
+    logger.info('Combining video')
+    output_file_path = ffmpeg.combine(
+        str(output_filename), False, encoding_speed, quality_level
+    )
+    logger.info('Done')
 
-  logger.info('Read contents of combined video')
-  for file in set(files_to_delete):
-    os.remove(file)
-  logger.info('Deleted component videos locally')
-
-  return {
-      'video': [{
-          Key.FILE.value: gcs.store(
-              output_file_bites, 'output.mp4', str(ContentType.MP4.value)
-          )
-      }]
-  }
+    return {
+        'video': [{
+            Key.FILE.value: gcs.store_file(
+                output_file_path, 'output.mp4', str(ContentType.MP4.value)
+            )
+        }]
+    }

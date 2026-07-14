@@ -88,6 +88,15 @@ class GCS:
     self.path = f'{action}/{checksum}/'
     self.ttl_days = ttl_days
 
+  def _storage_target(self, name: str):
+    filepath = self.path + name
+    blob = self.gcs_bucket.blob(filepath)
+    time_to_delete = datetime.datetime.now(
+        datetime.timezone.utc
+    ) + datetime.timedelta(days=self.ttl_days)
+    blob.metadata = {'timeToDelete': time_to_delete.isoformat()}
+    return filepath, blob
+
   def store(self, data: Union[str, bytes], name: str, content_type: str) -> str:
     """Stores data at the default location.
 
@@ -99,18 +108,23 @@ class GCS:
     Returns:
         The path to the file written.
     """
-    filepath = self.path + name
-    file = self.gcs_bucket.blob(filepath)
-    metadata = {
-        'timeToDelete': (
-            (
-                datetime.datetime.now(datetime.timezone.utc)
-                + datetime.timedelta(days=self.ttl_days)
-            ).isoformat()
-        )
-    }
-    file.metadata = metadata
-    file.upload_from_string(data, content_type=content_type)
+    filepath, blob = self._storage_target(name)
+    blob.upload_from_string(data, content_type=content_type)
+    return filepath
+
+  def store_file(self, source: str, name: str, content_type: str) -> str:
+    """Stores a local file at the default location.
+
+    Args:
+        source: The local path to upload.
+        name: The filename to use in Cloud Storage.
+        content_type: The MIME type of the data.
+
+    Returns:
+        The path to the file written.
+    """
+    filepath, blob = self._storage_target(name)
+    blob.upload_from_filename(source, content_type=content_type)
     return filepath
 
   def load_text(self, filepath: str) -> str:

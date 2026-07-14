@@ -14,12 +14,180 @@
 
 """Tests for combine_video action."""
 
+import concurrent.futures
 import json
+import pathlib
+import threading
 import unittest
 from unittest import mock
 
+import pytest
+
 from actions import combine_video
 from common import Key
+
+
+def test_concurrent_repeated_inputs_use_distinct_request_local_paths(
+    monkeypatch, tmp_path
+):
+  arrangement = [
+      {'file_type': 'video', 'file_path': '../../clips/shared.mp4'},
+      {'file_type': 'video', 'file_path': '/absolute/shared.mp4'},
+  ]
+  input_groups = []
+  groups_lock = threading.Lock()
+  both_calls_ready = threading.Barrier(2)
+
+  class RecordingFFMPEG:
+
+    def __init__(self):
+      self.paths = []
+
+    def set_resolution(self, _resolution):
+      return self
+
+    def add_video(self, *, path, **_kwargs):
+      self.paths.append(path)
+
+    def combine(self, _output_name, *_args):
+      with groups_lock:
+        input_groups.append(list(self.paths))
+      both_calls_ready.wait(timeout=5)
+      output_path = pathlib.Path(self.paths[0]).parent / (
+          f'{threading.get_ident()}-output.mp4'
+      )
+      output_path.write_bytes(b'combined')
+      return str(output_path)
+
+  class FakeGCS:
+
+    def load_text(self, _path):
+      return json.dumps(arrangement)
+
+    def save_locally(self, _gcs_path, local_path):
+      pathlib.Path(local_path).write_bytes(b'input')
+
+    def store_file(self, source, name, _content_type):
+      assert pathlib.Path(source).is_file()
+      return f'combine_video/checksum/{name}'
+
+  monkeypatch.chdir(tmp_path)
+  monkeypatch.setattr(combine_video, 'FFMPEG', RecordingFFMPEG)
+
+  def run_combine():
+    return combine_video.execute(
+        FakeGCS(),
+        {},
+        [{Key.FILE.value: 'arrangement.json'}],
+        '1280:720',
+        6,
+        20,
+    )
+
+  with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+    results = list(executor.map(lambda _: run_combine(), range(2)))
+
+  all_paths = [path for group in input_groups for path in group]
+  assert len(all_paths) == 4
+  assert len(set(all_paths)) == 4
+  assert all(pathlib.Path(path).is_absolute() for path in all_paths)
+  for group in input_groups:
+    parents = {pathlib.Path(path).parent for path in group}
+    assert len(parents) == 1
+    assert not parents.pop().exists()
+  assert results == [
+      {'video': [{Key.FILE.value: 'combine_video/checksum/output.mp4'}]},
+      {'video': [{Key.FILE.value: 'combine_video/checksum/output.mp4'}]},
+  ]
+
+
+def test_combine_uploads_from_file_before_workspace_cleanup(monkeypatch):
+  uploaded_sources = []
+  arrangement = [{'file_type': 'video', 'file_path': 'clips/input.mp4'}]
+
+  class FileProducingFFMPEG:
+
+    def set_resolution(self, _resolution):
+      return self
+
+    def add_video(self, **_kwargs):
+      pass
+
+    def combine(self, output_path, *_args):
+      pathlib.Path(output_path).write_bytes(b'combined')
+      return output_path
+
+  class FakeGCS:
+
+    def load_text(self, _path):
+      return json.dumps(arrangement)
+
+    def save_locally(self, _gcs_path, local_path):
+      pathlib.Path(local_path).write_bytes(b'input')
+
+    def store_file(self, source, name, content_type):
+      source_path = pathlib.Path(source)
+      assert source_path.is_file()
+      assert name == 'output.mp4'
+      assert content_type == 'video/mp4'
+      uploaded_sources.append(source_path)
+      return f'combine_video/checksum/{name}'
+
+  monkeypatch.setattr(combine_video, 'FFMPEG', FileProducingFFMPEG)
+
+  result = combine_video.execute(
+      FakeGCS(),
+      {},
+      [{Key.FILE.value: 'arrangement.json'}],
+      '1280:720',
+      6,
+      20,
+  )
+
+  assert result == {
+      'video': [{Key.FILE.value: 'combine_video/checksum/output.mp4'}]
+  }
+  assert len(uploaded_sources) == 1
+  assert not uploaded_sources[0].parent.exists()
+
+
+def test_combine_cleans_workspace_when_ffmpeg_fails(monkeypatch):
+  workspace_paths = []
+  arrangement = [{'file_type': 'video', 'file_path': 'clips/input.mp4'}]
+
+  class FailingFFMPEG:
+
+    def set_resolution(self, _resolution):
+      return self
+
+    def add_video(self, *, path, **_kwargs):
+      workspace_paths.append(pathlib.Path(path))
+
+    def combine(self, _output_path, *_args):
+      raise RuntimeError('ffmpeg failed')
+
+  class FakeGCS:
+
+    def load_text(self, _path):
+      return json.dumps(arrangement)
+
+    def save_locally(self, _gcs_path, local_path):
+      pathlib.Path(local_path).write_bytes(b'input')
+
+  monkeypatch.setattr(combine_video, 'FFMPEG', FailingFFMPEG)
+
+  with pytest.raises(RuntimeError, match='ffmpeg failed'):
+    combine_video.execute(
+        FakeGCS(),
+        {},
+        [{Key.FILE.value: 'arrangement.json'}],
+        '1280:720',
+        6,
+        20,
+    )
+
+  assert len(workspace_paths) == 1
+  assert not workspace_paths[0].parent.exists()
 
 
 class TestCombineVideo(unittest.TestCase):
@@ -52,19 +220,14 @@ class TestCombineVideo(unittest.TestCase):
     # Mock GCS load to return valid JSON
     self.mock_gcs.load_text.return_value = json.dumps(arrangement)
 
-    # Mock open and os.remove since execute tries to files
-    with mock.patch(
-        'builtins.open', mock.mock_open(read_data=b'video_data')
-    ), mock.patch('os.remove'):
-      # Execute
-      combine_video.execute(
-          self.mock_gcs,
-          self.mock_workflow_params,
-          [{Key.FILE.value: 'arrangement.json'}],
-          '1280:720',
-          6,
-          20,
-      )
+    combine_video.execute(
+        self.mock_gcs,
+        self.mock_workflow_params,
+        [{Key.FILE.value: 'arrangement.json'}],
+        '1280:720',
+        6,
+        20,
+    )
 
     # Verify add_video called with overlap=0.5
     self.mock_ffmpeg.add_video.assert_called_with(

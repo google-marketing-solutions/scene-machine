@@ -14,10 +14,12 @@
 
 """Tests for FFMPEG utility class."""
 
+import json
 import unittest
 from unittest import mock
 
 from actions_lib.ffmpeg import FFMPEG
+from actions_lib.ffmpeg import get_video_properties
 
 
 class TestFFMPEG(unittest.TestCase):
@@ -26,6 +28,41 @@ class TestFFMPEG(unittest.TestCase):
   def setUp(self):
     super().setUp()
     self.ffmpeg = FFMPEG()
+
+  @mock.patch('actions_lib.ffmpeg.subprocess.run')
+  def test_reused_local_path_is_probed_again(self, mock_run):
+    mock_run.side_effect = [
+        mock.Mock(
+            stdout=json.dumps({
+                'format': {'duration': '1.0'},
+                'streams': [{
+                    'codec_type': 'video',
+                    'width': 640,
+                    'height': 360,
+                    'r_frame_rate': '24/1',
+                }],
+            })
+        ),
+        mock.Mock(
+            stdout=json.dumps({
+                'format': {'duration': '2.0'},
+                'streams': [{
+                    'codec_type': 'video',
+                    'width': 1280,
+                    'height': 720,
+                    'r_frame_rate': '30/1',
+                }],
+            })
+        ),
+    ]
+
+    first = get_video_properties('/tmp/reused-request-path.mp4')
+    second = get_video_properties('/tmp/reused-request-path.mp4')
+
+    self.assertEqual(first['duration'], 1.0)
+    self.assertEqual(second['duration'], 2.0)
+    self.assertEqual(second['dimensions'], '1280:720')
+    self.assertEqual(mock_run.call_count, 2)
 
   @mock.patch('actions_lib.ffmpeg.get_video_properties')
   @mock.patch('subprocess.run')
@@ -36,7 +73,7 @@ class TestFFMPEG(unittest.TestCase):
         'duration': 5.0,
         'dimensions': '1280:720',
         'fps': 30.0,
-        'has_audio': True
+        'has_audio': True,
     }
 
     # Add two videos
@@ -46,7 +83,7 @@ class TestFFMPEG(unittest.TestCase):
         skip_time=0,
         duration=5.0,
         transition=None,
-        transition_overlap=0
+        transition_overlap=0,
     )
 
     # Video 2: 'circlecrop' transition, 1.0s overlap
@@ -55,7 +92,7 @@ class TestFFMPEG(unittest.TestCase):
         skip_time=0,
         duration=5.0,
         transition='circlecrop',
-        transition_overlap=1.0
+        transition_overlap=1.0,
     )
 
     # Run combine
@@ -76,6 +113,7 @@ class TestFFMPEG(unittest.TestCase):
     self.assertIn('transition=circlecrop', full_command)
     self.assertIn('duration=1.0', full_command)
     self.assertIn('offset=4.0', full_command)
+
 
 if __name__ == '__main__':
   unittest.main()

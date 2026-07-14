@@ -25,8 +25,6 @@ from common import logger
 FFMPEG_PATH = 'ffmpeg'
 FFPROBE_PATH = 'ffprobe'
 
-properties_cache = {}
-
 
 def get_video_properties(file_path: str) -> Dict[str, Any]:
   """Gets video properties and checks for an audio stream in an ffprobe call.
@@ -37,9 +35,6 @@ def get_video_properties(file_path: str) -> Dict[str, Any]:
   Returns:
     dictionary with video properties
   """
-  if file_path in properties_cache:
-    return properties_cache[file_path]
-
   command = [
       FFPROBE_PATH,
       '-v',
@@ -79,7 +74,6 @@ def get_video_properties(file_path: str) -> Dict[str, Any]:
       elif stream.get('codec_type') == 'audio':
         video_info['has_audio'] = True
 
-  properties_cache[file_path] = video_info
   return video_info
 
 
