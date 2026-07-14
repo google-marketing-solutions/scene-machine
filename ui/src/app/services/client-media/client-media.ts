@@ -113,7 +113,8 @@ export class ClientMediaService {
           canvas.toBlob(
             blob => {
               if (!blob) {
-                throw new Error('Failed to generate thumbnail');
+                reject(new Error('Failed to generate thumbnail'));
+                return;
               }
               resolve(blob);
             },
@@ -175,7 +176,8 @@ export class ClientMediaService {
           canvas.toBlob(
             blob => {
               if (!blob) {
-                throw new Error('Failed to convert image');
+                reject(new Error('Failed to convert image'));
+                return;
               }
               resolve(blob);
             },

@@ -18,10 +18,6 @@ import {TestBed} from '@angular/core/testing';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ClientMediaService} from './client-media';
 
-// Note: convertImage / convertVideoToImage / canvasFromMedia draw to a real
-// canvas 2D context and wait for <img>/<video> load events, which jsdom does not
-// implement. Those are exercised in a real browser (and via the higher-level
-// composition specs); here we cover the pure/FileReader-backed helpers.
 describe('ClientMediaService', () => {
   let service: ClientMediaService;
 
@@ -34,6 +30,80 @@ describe('ClientMediaService', () => {
 
   it('should be created', () => {
     expect(service).toBeTruthy();
+  });
+
+  describe('canvas conversion failures', () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it('rejects convertImage when canvas encoding returns no blob', async () => {
+      const image = document.createElement('img');
+      Object.defineProperties(image, {
+        naturalWidth: {value: 16},
+        naturalHeight: {value: 9},
+      });
+      const canvas = document.createElement('canvas');
+      vi.spyOn(canvas, 'getContext').mockReturnValue({
+        drawImage: vi.fn(),
+        filter: '',
+      } as unknown as CanvasRenderingContext2D);
+      let encode: BlobCallback | undefined;
+      vi.spyOn(canvas, 'toBlob').mockImplementation(callback => {
+        encode = callback;
+      });
+      const createElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(((
+        tagName: string,
+        options?: ElementCreationOptions,
+      ) => {
+        if (tagName === 'img') return image;
+        if (tagName === 'canvas') return canvas;
+        return createElement(tagName, options);
+      }) as typeof document.createElement);
+
+      const conversion = service.convertImage('https://example.com/image');
+      image.onload?.(new Event('load'));
+
+      expect(encode).toBeDefined();
+      expect(() => encode?.(null)).not.toThrow();
+      await expect(conversion).rejects.toThrow('Failed to convert image');
+    });
+
+    it('rejects convertVideoToImage when thumbnail encoding returns no blob', async () => {
+      const video = document.createElement('video');
+      Object.defineProperties(video, {
+        videoWidth: {value: 16},
+        videoHeight: {value: 9},
+      });
+      const canvas = document.createElement('canvas');
+      vi.spyOn(canvas, 'getContext').mockReturnValue({
+        drawImage: vi.fn(),
+        filter: '',
+      } as unknown as CanvasRenderingContext2D);
+      let encode: BlobCallback | undefined;
+      vi.spyOn(canvas, 'toBlob').mockImplementation(callback => {
+        encode = callback;
+      });
+      const createElement = document.createElement.bind(document);
+      vi.spyOn(document, 'createElement').mockImplementation(((
+        tagName: string,
+        options?: ElementCreationOptions,
+      ) => {
+        if (tagName === 'video') return video;
+        if (tagName === 'canvas') return canvas;
+        return createElement(tagName, options);
+      }) as typeof document.createElement);
+
+      const conversion = service.convertVideoToImage(
+        'https://example.com/video',
+      );
+      video.onseeked?.(new Event('seeked'));
+
+      expect(encode).toBeDefined();
+      expect(() => encode?.(null)).not.toThrow();
+      await expect(conversion).rejects.toThrow('Failed to generate thumbnail');
+    });
   });
 
   describe('toFile', () => {

@@ -64,6 +64,11 @@ import {TemplateCard} from '../templates/template-card/template-card';
 import {ConfirmTemplateDialog} from './confirm-template-dialog/confirm-template-dialog';
 import {GenerateStoryboardDialog} from './generate-storyboard-dialog/generate-storyboard-dialog';
 
+interface FileProcessResult {
+  added: number;
+  failures: ImportFailure[];
+}
+
 /**
  * Component for the setup view.
  */
@@ -109,7 +114,7 @@ export class Setup {
 
   /** Per-product: true while that product's links are being fetched. */
   importingLinks = signal<Record<number, boolean>>({});
-  /** Per-product: links / base64 from the last import that could not be added. */
+  /** Per-product: images from the last import that could not be added. */
   importFailures = signal<Record<number, ImportFailure[]>>({});
   /** The product whose area was last interacted with — where a page-level
    * image paste lands. */
@@ -286,7 +291,7 @@ export class Setup {
       event.dataTransfer,
     );
     if (files.length > 0) {
-      this.processFiles(productId, files);
+      void this.processFiles(productId, files);
       return;
     }
     // Dragged from another tab: only the image's URL came across — fetch it,
@@ -300,58 +305,69 @@ export class Setup {
   onFileSelected(event: Event, productId: number) {
     const input = event.target as HTMLInputElement;
     if (input.files) {
-      this.processFiles(productId, input.files);
+      void this.processFiles(productId, input.files);
       input.value = ''; // Reset input to allow selecting the same file again
     }
   }
 
-  processFiles(productId: number, files: FileList | File[]) {
+  async processFiles(
+    productId: number,
+    files: FileList | File[],
+    reportResult = true,
+  ): Promise<FileProcessResult> {
     const fileArray = Array.from(files);
-    const oversizedFile = fileArray.find(
-      file => file.size > this.MAX_FILE_SIZE_BYTES,
+    const results = await Promise.allSettled(
+      fileArray.map(async originalFile => {
+        if (originalFile.size > this.MAX_FILE_SIZE_BYTES) {
+          throw new Error(`File exceeds the ${this.MAX_FILE_SIZE_MB}MB limit`);
+        }
+        if (!originalFile.type.startsWith('image/')) {
+          throw new Error('File is not an image');
+        }
+
+        let uploadFile = originalFile;
+        if (
+          !['image/jpeg', 'image/png', 'image/jpg'].includes(uploadFile.type)
+        ) {
+          const newFileName =
+            uploadFile.name.split('.').slice(0, -1).join('.') + '.jpeg';
+          uploadFile = new File(
+            [
+              await this.clientMediaService.convertImage(uploadFile, {
+                mimeType: 'image/jpeg',
+              }),
+            ],
+            newFileName,
+            {type: 'image/jpeg'},
+          );
+        }
+        const {path, url} =
+          await this.remixEngineService.uploadMedia(uploadFile);
+        return {
+          path,
+          url,
+          name: uploadFile.name,
+        };
+      }),
     );
 
-    if (oversizedFile) {
-      this.snackBar.open(
-        `File "${oversizedFile.name}" (${(oversizedFile.size / 1024 / 1024).toFixed(2)}MB) exceeds the ${this.MAX_FILE_SIZE_MB}MB limit.`,
-        'Close',
-        {
-          duration: 10000,
-        },
-      );
-      return;
-    }
+    const uploadedImages: GcsFile[] = [];
+    const failures: ImportFailure[] = [];
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        uploadedImages.push(result.value);
+        return;
+      }
+      failures.push({
+        source: fileArray[index].name,
+        reason:
+          result.reason instanceof Error
+            ? result.reason.message
+            : String(result.reason),
+      });
+    });
 
-    void Promise.all(
-      fileArray.map(async file => {
-        if (file.type.startsWith('image/')) {
-          if (!['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)) {
-            const newFileName =
-              file.name.split('.').slice(0, -1).join('.') + '.jpeg';
-            file = new File(
-              [
-                await this.clientMediaService.convertImage(file, {
-                  mimeType: 'image/jpeg',
-                }),
-              ],
-              newFileName,
-              {type: 'image/jpeg'},
-            );
-          }
-          const {path, url} = await this.remixEngineService.uploadMedia(file);
-          return {
-            path,
-            url,
-            name: file.name,
-          };
-        } else {
-          console.error(`File ${file.name} is not an image`);
-          return null;
-        }
-      }),
-    ).then(results => {
-      const uploadedImages: GcsFile[] = [];
-      uploadedImages.push(...results.filter(file => file !== null));
+    if (uploadedImages.length > 0) {
       this.config.updateProjectConfig({
         inputConfig: {
           ...this.config.projectConfig.value().inputConfig,
@@ -369,7 +385,23 @@ export class Setup {
       // document references the uploaded media right away rather than 5s later;
       // the trailing debounce is deduped on the same config. No-op in legacy.
       this.config.saveNow();
-    });
+    }
+
+    if (reportResult) {
+      this.importFailures.update(current => ({
+        ...current,
+        [productId]: failures,
+      }));
+      if (failures.length > 0) {
+        this.snackBar.open(
+          `${uploadedImages.length} image${uploadedImages.length === 1 ? '' : 's'} added. ${failures.length} could not be added.`,
+          'Close',
+          {duration: 6000},
+        );
+      }
+    }
+
+    return {added: uploadedImages.length, failures};
   }
 
   /**
@@ -390,19 +422,21 @@ export class Setup {
     this.importFailures.update(m => ({...m, [productId]: []}));
     try {
       const {files, failures} = await this.imageImport.importText(trimmed);
-      this.importFailures.update(m => ({...m, [productId]: failures}));
-      if (files.length > 0) {
-        this.processFiles(productId, files);
-      }
-      if (files.length > 0 || failures.length > 0) {
+      const uploadResult =
+        files.length > 0
+          ? await this.processFiles(productId, files, false)
+          : {added: 0, failures: []};
+      const allFailures = [...failures, ...uploadResult.failures];
+      this.importFailures.update(m => ({...m, [productId]: allFailures}));
+      if (uploadResult.added > 0 || allFailures.length > 0) {
         const parts: string[] = [];
-        if (files.length > 0) {
+        if (uploadResult.added > 0) {
           parts.push(
-            `Added ${files.length} image${files.length === 1 ? '' : 's'}.`,
+            `Added ${uploadResult.added} image${uploadResult.added === 1 ? '' : 's'}.`,
           );
         }
-        if (failures.length > 0) {
-          parts.push(`${failures.length} could not be added.`);
+        if (allFailures.length > 0) {
+          parts.push(`${allFailures.length} could not be added.`);
         }
         this.snackBar.open(parts.join(' '), 'Close', {duration: 6000});
       }
@@ -445,7 +479,7 @@ export class Setup {
     const target =
       products.find(p => p.id === this.activeProductId()) ?? products[0];
     event.preventDefault();
-    this.processFiles(target.id, images);
+    void this.processFiles(target.id, images);
   }
 
   removeImage(productId: number, imageIndex: number) {
