@@ -16,35 +16,54 @@
 
 import {provideHttpClient} from '@angular/common/http';
 import {provideHttpClientTesting} from '@angular/common/http/testing';
+import {signal, WritableSignal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {vi} from 'vitest';
-import {ConfigService} from '../services/config/config';
+import {ConfigService, RenderRun} from '../services/config/config';
 import {MediaService} from '../services/media/media';
 import {OutputVideo} from './output-video';
 
 describe('OutputVideo', () => {
   let component: OutputVideo;
   let fixture: ComponentFixture<OutputVideo>;
+  let projectConfig: WritableSignal<TestProject>;
+  let updateProjectConfig: ReturnType<typeof vi.fn>;
+
+  interface TestProject {
+    id: string;
+    name: string;
+    aspectRatio: string;
+    resolution: string;
+    renderRuns: RenderRun[];
+    storyboard: never[];
+  }
+
+  const run = (minute: number, isArchived = false): RenderRun => ({
+    createdAt: new Date(2026, 0, 1, 12, minute),
+    wasPlayed: true,
+    isArchived,
+    outputVideo: {path: `output/video-${minute}.mp4`, url: ''},
+  });
+
+  const project = (id: string, renderRuns: RenderRun[]): TestProject => ({
+    id,
+    name: 'Test Project',
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    renderRuns,
+    storyboard: [],
+  });
 
   beforeEach(async () => {
+    projectConfig = signal(project('project-1', [run(0)]));
+    updateProjectConfig = vi.fn((updates: Partial<TestProject>) => {
+      projectConfig.update(current => ({...current, ...updates}));
+    });
     const configServiceMock = {
       projectConfig: {
-        value: () => ({
-          title: 'Test Project',
-          outputVideoUrl: 'http://test.com/video.mp4',
-          aspectRatio: '16:9',
-          renderRuns: [
-            {
-              createdAt: 1,
-              wasPlayed: true,
-              isArchived: false,
-              outputVideo: {path: 'output/video.mp4'},
-            },
-          ],
-          storyboard: [],
-        }),
+        value: projectConfig,
       },
-      updateProjectConfig: vi.fn(),
+      updateProjectConfig,
       isGeneratedScene: () => false,
     };
 
@@ -88,5 +107,104 @@ describe('OutputVideo', () => {
     // playsinline must stay.
     expect(video!.hasAttribute('controls')).toBe(true);
     expect(video!.hasAttribute('playsinline')).toBe(true);
+  });
+
+  it('selects the first active render when project data arrives later', () => {
+    projectConfig.set(project('project-2', []));
+    const directRouteFixture = TestBed.createComponent(OutputVideo);
+    const directRouteComponent = directRouteFixture.componentInstance;
+    directRouteFixture.detectChanges();
+    expect(directRouteComponent.selectedRenderRun()).toBeUndefined();
+
+    const loaded = run(1);
+    projectConfig.set(project('project-2', [loaded]));
+    directRouteFixture.detectChanges();
+
+    expect(directRouteComponent.selectedRenderRun()).toBe(loaded);
+  });
+
+  it('preserves an explicit selection across same-project updates', () => {
+    const first = run(1);
+    const selected = run(2);
+    projectConfig.set(project('project-2', [first, selected]));
+    fixture.detectChanges();
+    component.selectedRenderRun.set(selected);
+
+    const refreshedFirst = {...first};
+    const refreshedSelected = {...selected};
+    projectConfig.set(
+      project('project-2', [refreshedFirst, refreshedSelected, run(3)]),
+    );
+    fixture.detectChanges();
+
+    expect(component.selectedRenderRun()).toBe(refreshedSelected);
+  });
+
+  it('falls back to the first active run when the selected run is archived', () => {
+    const selected = run(1);
+    const fallback = run(2);
+    projectConfig.set(project('project-2', [selected, fallback]));
+    fixture.detectChanges();
+    component.selectedRenderRun.set(selected);
+
+    component.setRenderRunArchiveStatus(selected, true);
+    fixture.detectChanges();
+
+    expect(component.selectedRenderRun()?.createdAt).toEqual(
+      fallback.createdAt,
+    );
+  });
+
+  it('selects nothing when every render is archived', () => {
+    const selected = run(1);
+    projectConfig.set(project('project-2', [selected]));
+    fixture.detectChanges();
+    component.selectedRenderRun.set(selected);
+
+    component.setRenderRunArchiveStatus(selected, true);
+    fixture.detectChanges();
+
+    expect(component.selectedRenderRun()).toBeUndefined();
+  });
+
+  it('falls back when the selected run is removed', () => {
+    const fallback = run(1);
+    const selected = run(2);
+    projectConfig.set(project('project-2', [fallback, selected]));
+    fixture.detectChanges();
+    component.selectedRenderRun.set(selected);
+
+    projectConfig.set(project('project-2', [fallback]));
+    fixture.detectChanges();
+
+    expect(component.selectedRenderRun()).toBe(fallback);
+  });
+
+  it('falls back when a project refresh archives the selected run', () => {
+    const selected = run(1);
+    const fallback = run(2);
+    projectConfig.set(project('project-2', [selected, fallback]));
+    fixture.detectChanges();
+    component.selectedRenderRun.set(selected);
+
+    projectConfig.set(
+      project('project-2', [{...selected, isArchived: true}, fallback]),
+    );
+    fixture.detectChanges();
+
+    expect(component.selectedRenderRun()).toBe(fallback);
+  });
+
+  it('does not carry a selection into another project', () => {
+    const firstProjectRun = run(1);
+    projectConfig.set(project('project-2', [firstProjectRun]));
+    fixture.detectChanges();
+    component.selectedRenderRun.set(firstProjectRun);
+
+    const secondProjectRun = {...firstProjectRun};
+    projectConfig.set(project('project-3', [secondProjectRun]));
+    fixture.detectChanges();
+
+    expect(component.selectedRenderRun()).toBe(secondProjectRun);
   });
 });

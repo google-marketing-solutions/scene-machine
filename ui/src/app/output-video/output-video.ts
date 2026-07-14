@@ -22,6 +22,7 @@ import {
   computed,
   effect,
   inject,
+  linkedSignal,
   signal,
 } from '@angular/core';
 import {MatBadgeModule} from '@angular/material/badge';
@@ -69,9 +70,30 @@ export class OutputVideo {
   private httpClient = inject(HttpClient);
   private mediaService = inject(MediaService);
 
-  selectedRenderRun = signal<RenderRun | undefined>(
-    this.configService.projectConfig.value().renderRuns?.[0],
-  );
+  selectedRenderRun = linkedSignal<
+    {projectId: string; renderRuns: RenderRun[]},
+    RenderRun | undefined
+  >({
+    source: () => {
+      const config = this.configService.projectConfig.value();
+      return {
+        projectId: config.id,
+        renderRuns: config.renderRuns ?? [],
+      };
+    },
+    computation: (source, previous) => {
+      if (previous?.source.projectId === source.projectId && previous.value) {
+        const selectedTime = previous.value.createdAt.getTime();
+        const selected = source.renderRuns.find(
+          run => run.createdAt.getTime() === selectedTime,
+        );
+        if (selected && !selected.isArchived) {
+          return selected;
+        }
+      }
+      return source.renderRuns.find(run => !run.isArchived);
+    },
+  });
   videoFile = computed(() => this.selectedRenderRun()?.outputVideo);
   previewAspectRatio = computed(() => {
     const ratio = this.configService.projectConfig.value().aspectRatio;
