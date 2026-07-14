@@ -119,11 +119,7 @@
 
         <div class="actions-panel">
           <span
-            [matTooltip]="
-              canRender()
-                ? ''
-                : 'Select or upload at least one scene video before rendering.'
-            "
+            [matTooltip]="renderDisabledReason()"
           >
             <button
               mat-flat-button
