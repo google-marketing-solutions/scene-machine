@@ -324,12 +324,44 @@ def trigger_action_handler() -> tuple[str, int]:
         node,
     )
     return 'Already Triggered', 200
+  task_data = copy.deepcopy(data)
   try:
     orchestrator.trigger_action(
-        copy.deepcopy(data),
+        task_data,
         instance,
         retry_count < _MAX_ALLOWED_RETRIES,
+        retry_count > 0,
     )
+  except util_errors.RetryableTaskRecoveryError as e:
+    if retry_count < _MAX_ALLOWED_RETRIES:
+      logger.error(
+          'Retrying forced action cache recovery for %s: %s',
+          data[Key.ACTION.value],
+          e.__cause__ or e,
+      )
+      orchestrator.db.release_task_lock(execution_id, node_id, group_id)
+      return 'Service Unavailable', 503
+    logger.error(
+        'Retry limit reached during forced action cache recovery for %s: %s',
+        data[Key.ACTION.value],
+        e.__cause__ or e,
+    )
+    return 'Internal Error', 200
+  except util_errors.RetryablePostActionError as e:
+    if retry_count < _MAX_ALLOWED_RETRIES:
+      logger.error(
+          'Retrying completed action %s after infrastructure failure: %s',
+          data[Key.ACTION.value],
+          e.__cause__ or e,
+      )
+      orchestrator.db.release_task_lock(execution_id, node_id, group_id)
+      return 'Service Unavailable', 503
+    logger.error(
+        'Retry limit reached after completed action %s: %s',
+        data[Key.ACTION.value],
+        e.__cause__ or e,
+    )
+    return 'Internal Error', 200
   except Exception as e:  # pylint: disable=broad-exception-caught
     if util_errors.is_retryable(e):
       logger.error('Retrying action %s: %s', data[Key.ACTION.value], e)

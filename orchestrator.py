@@ -16,6 +16,7 @@
 
 import copy
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -35,6 +36,7 @@ import google.oauth2.id_token
 import requests
 from util import database
 from util import dimensions as util_dimensions
+from util import errors as util_errors
 from util import gcs_wrapper
 from util import group_input
 from util import workflow as util_workflow
@@ -280,6 +282,7 @@ def trigger_action(
     data: dict[str, Any],
     instance: str | None = None,
     can_still_retry: bool = False,
+    recover_forced_cache: bool = False,
 ) -> None:
   """Triggers an action's execution.
 
@@ -287,6 +290,8 @@ def trigger_action(
     data: The workfload description.
     instance: The address of the Cloud Run instance to use.
     can_still_retry: Flag specifying whether failure would be final.
+    recover_forced_cache: Whether a redelivery may reuse this forced task's
+      completed cache output.
   """
   action = data[Key.ACTION.value]
   node_id = data[Key.NODE_ID.value]
@@ -305,6 +310,13 @@ def trigger_action(
     func = actwrap.wrapper(actwrap.get_action_by_name(action))
   else:  # For pass action, simply forward
     func = lambda input_files, *_: input_files
+  force_execution_token = hashlib.sha256(
+      json.dumps(
+          [execution_id, node_id, group_id],
+          ensure_ascii=True,
+          separators=(',', ':'),
+      ).encode('utf-8')
+  ).hexdigest()
   output = func(
       data[Key.INPUT_FILES.value],
       data.get(Key.PARAMETERS.value, {}),
@@ -313,11 +325,20 @@ def trigger_action(
       node.get(Key.DIMENSIONS_MAPPING.value, {}),
       data[Key.FORCE_EXECUTION.value],
       can_still_retry,
+      force_execution_token,
+      recover_forced_cache,
   )
 
-  db.store_output(execution_id, node_id, group_id, output)
-  logger.info((execution_id, 'PERFORMED', node, action, output))
-  _inform_successors(instance, data, output)
+  try:
+    db.store_output(execution_id, node_id, group_id, output)
+    logger.info((execution_id, 'PERFORMED', node, action, output))
+    _inform_successors(instance, data, output)
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    if util_errors.is_transient_infrastructure_error(e):
+      raise util_errors.RetryablePostActionError(
+          'Transient infrastructure failure after action completion'
+      ) from e
+    raise
 
 
 def get_status(

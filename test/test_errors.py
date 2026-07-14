@@ -22,6 +22,8 @@ import google.api_core.exceptions as google_exceptions
 from google.genai import errors as genai_errors
 
 from util.errors import is_retryable
+from util.errors import is_retryable_task_recovery_error
+from util.errors import is_transient_infrastructure_error
 
 
 def _genai_error(status_code):
@@ -56,6 +58,15 @@ def test_genai_400_is_not_retryable():
   assert is_retryable(_genai_error(400)) is False
 
 
+def test_genai_500_is_not_retryable():
+  e = genai_errors.ServerError(
+      500,
+      {'error': {'code': 500, 'status': 'INTERNAL', 'message': 'failed'}},
+      None,
+  )
+  assert is_retryable(e) is False
+
+
 def test_api_core_resource_exhausted_is_retryable():
   assert is_retryable(google_exceptions.ResourceExhausted('quota')) is True
 
@@ -70,3 +81,31 @@ def test_api_core_too_many_requests_is_retryable():
 
 def test_plain_exception_is_not_retryable():
   assert is_retryable(ValueError('nope')) is False
+
+
+def test_api_core_server_errors_are_transient_infrastructure():
+  for error in (
+      google_exceptions.DeadlineExceeded('deadline'),
+      google_exceptions.InternalServerError('internal'),
+      google_exceptions.ServiceUnavailable('unavailable'),
+  ):
+    assert is_transient_infrastructure_error(error) is True
+
+
+def test_api_core_retry_error_unwraps_transient_cause():
+  error = google_exceptions.RetryError(
+      'retry deadline exceeded',
+      cause=google_exceptions.ServiceUnavailable('unavailable'),
+  )
+  assert is_transient_infrastructure_error(error) is True
+
+
+def test_task_recovery_retries_exhausted_client_retries():
+  for cause in (
+      google_exceptions.TooManyRequests('quota'),
+      ConnectionError('connection reset'),
+  ):
+    error = google_exceptions.RetryError('retry deadline exceeded', cause=cause)
+    assert is_retryable_task_recovery_error(error) is True
+
+  assert is_retryable_task_recovery_error(ValueError('invalid cache')) is False

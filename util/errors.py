@@ -24,6 +24,21 @@ from google.api_core import exceptions as google_exceptions
 TOO_MANY_REQUESTS = 429
 
 
+class RetryablePostActionError(Exception):
+  """Marks a transient infrastructure failure after an action completed."""
+
+
+class RetryableTaskRecoveryError(Exception):
+  """Marks a transient failure while recovering a prior task delivery."""
+
+
+def is_transient_infrastructure_error(e: Exception) -> bool:
+  """Returns whether an infrastructure error is safe to retry by its stage."""
+  if isinstance(e, google_exceptions.RetryError):
+    e = e.cause
+  return isinstance(e, google_exceptions.ServerError)
+
+
 def get_compact_callstack(start_function_name: str) -> str:
   """Returns a compact version of the current call stack.
 
@@ -70,3 +85,17 @@ def is_retryable(e: Exception) -> bool:
       # Removed because this would need to be retried much later:
       # isinstance(e, RuntimeError) and 'try again later' in repr(e).lower(),
   ])
+
+
+def is_retryable_task_recovery_error(e: Exception) -> bool:
+  """Returns whether a cache-recovery failure is safe to redeliver.
+
+  Unlike action execution, cache inspection has not started paid work in the
+  current delivery. Exhausted client-library retries are therefore safe to
+  retry regardless of their final transport cause.
+  """
+  return (
+      isinstance(e, google_exceptions.RetryError)
+      or is_transient_infrastructure_error(e)
+      or is_retryable(e)
+  )

@@ -33,6 +33,7 @@ from common import Key
 from common import logger
 from common import NodeOutput
 from common import TypeNames
+from google.api_core import exceptions as google_exceptions
 from google.cloud import storage
 from util import checksum as util_checksum
 from util import dimensions as util_dimensions
@@ -42,6 +43,7 @@ from util.gcs_wrapper import GCS
 
 
 ActionFunction = Callable[..., NodeOutput]
+_FORCE_EXECUTION_TOKEN_METADATA_KEY = 'forceExecutionToken'
 
 
 def get_action_by_name(action_name: str) -> ActionFunction:
@@ -142,15 +144,20 @@ def _generate_error_output(
   return util_dimensions.rename_dimensions(final_output, dimensions_mapping)
 
 
-def _update(file: storage.Blob, final_output: dict[str, Any]) -> None:
+def _update(
+    file: storage.Blob,
+    final_output: dict[str, Any],
+    force_execution_token: str | None = None,
+) -> None:
   """Update the file with the generated output.
 
   Args:
     file: the file to update
     final_output: the output to store
+    force_execution_token: stable task token proving a forced action completed
   """
   json_string = json.dumps(final_output, indent=4)
-  file.metadata = {
+  metadata = {
       'timeToDelete': (
           (
               datetime.datetime.now(datetime.timezone.utc)
@@ -158,6 +165,9 @@ def _update(file: storage.Blob, final_output: dict[str, Any]) -> None:
           ).isoformat()
       )
   }
+  if force_execution_token:
+    metadata[_FORCE_EXECUTION_TOKEN_METADATA_KEY] = force_execution_token
+  file.metadata = metadata
   file.upload_from_string(json_string, content_type=ContentType.JSON.value)
 
 
@@ -180,6 +190,8 @@ def wrapper(func: ActionFunction) -> Callable[..., NodeOutput]:
       dimensions_mapping: dict[str, str],
       force_execution: bool = False,
       forward_retryable_error: bool = False,
+      force_execution_token: str | None = None,
+      recover_forced_cache: bool = False,
   ) -> NodeOutput:
     """Returns the result of function func.
 
@@ -199,6 +211,10 @@ def wrapper(func: ActionFunction) -> Callable[..., NodeOutput]:
         forward_retryable_error: Flag deciding whether to forward errors that
           are in principle retryable. A reason not to may be that the maximal
           number of attempts has been reached.
+        force_execution_token: Stable task token used to recover output only
+          when this forced execution previously completed.
+        recover_forced_cache: Whether this is a redelivery that may recover a
+          completed forced execution from cache.
 
     Returns:
         The output of the (potentially earlier) call to func.
@@ -216,13 +232,53 @@ def wrapper(func: ActionFunction) -> Callable[..., NodeOutput]:
     )
     filepath = f'{action_name}/{input_checksum}.json'
     file = gcs.gcs_bucket.blob(filepath)
-    if not force_execution and file.exists():
+    cache_exists = False
+    reuse_cache = False
+    cache_generation = None
+    if not force_execution or recover_forced_cache:
+      try:
+        cache_exists = file.exists()
+      except Exception as e:  # pylint: disable=broad-exception-caught
+        if force_execution and util_errors.is_retryable_task_recovery_error(e):
+          raise util_errors.RetryableTaskRecoveryError(
+              f'Failed to inspect forced-action cache {filepath}'
+          ) from e
+        raise
+      reuse_cache = cache_exists and not force_execution
+    if cache_exists and force_execution and force_execution_token:
+      try:
+        file.reload()
+        cache_generation = file.generation
+        reuse_cache = bool(
+            file.metadata
+            and file.metadata.get(_FORCE_EXECUTION_TOKEN_METADATA_KEY)
+            == force_execution_token
+            and cache_generation is not None
+        )
+      except Exception as e:  # pylint: disable=broad-exception-caught
+        if isinstance(e, google_exceptions.NotFound):
+          reuse_cache = False
+        elif util_errors.is_retryable_task_recovery_error(e):
+          raise util_errors.RetryableTaskRecoveryError(
+              f'Failed to inspect forced-action cache {filepath}'
+          ) from e
+        else:
+          raise
+    if reuse_cache:
       print(f'Reading cache {filepath}')
       # In case of cache-loading errors, treat the cache as non-existent:
       try:
+        if cache_generation is not None:
+          return json.loads(
+              file.download_as_string(if_generation_match=cache_generation)
+          )
         return json.loads(file.download_as_string())
       except Exception as e:  # pylint: disable=broad-exception-caught
         logger.warning('Failed to read cache file %s: %s', filepath, e)
+        if force_execution and util_errors.is_retryable_task_recovery_error(e):
+          raise util_errors.RetryableTaskRecoveryError(
+              f'Failed to read forced-action cache {filepath}'
+          ) from e
     # Function needs to be called, so see if it works:
     try:
       output = _generic_function_caller(
@@ -251,7 +307,9 @@ def wrapper(func: ActionFunction) -> Callable[..., NodeOutput]:
     final_output = util_dimensions.rename_dimensions(
         final_output, dimensions_mapping
     )
-    _update(file, final_output)
+    _update(
+        file, final_output, force_execution_token if force_execution else None
+    )
     print(f'Wrote file {filepath}')
     return final_output
 

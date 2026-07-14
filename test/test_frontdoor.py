@@ -31,6 +31,7 @@ import json
 import pathlib
 import sys
 
+from google.api_core import exceptions as google_exceptions
 import pytest
 
 from test import firestore_fake
@@ -240,18 +241,90 @@ def test_worker_url_overrides_host_for_supply_node(
 
 
 def _task_payload(
-    execution_id='exec-worker', node_id='node-1', group_id='group-1'
+    execution_id='exec-worker',
+    node_id='node-1',
+    group_id='group-1',
+    action='pass',
+    force_execution=False,
 ):
   """A valid Cloud Tasks /triggerAction payload, including the PR #113 lock
   fields (executionId / nodeId / groupId / workflowDefinition)."""
   return {
-      'action': 'pass',
+      'action': action,
       'inputFiles': {},
       'executionId': execution_id,
       'nodeId': node_id,
       'groupId': group_id,
-      'workflowDefinition': {node_id: {'action': 'pass'}},
+      'workflowDefinition': {node_id: {'action': action}},
+      'workflowParams': {'gcsBucket': 'test-bucket'},
+      'forceExecution': force_execution,
   }
+
+
+def _install_action_cache(
+    monkeypatch,
+    orch,
+    cache,
+    *,
+    exists_errors=None,
+    download_errors=None,
+    download_overwrite=None,
+):
+  """Installs an in-memory action cache for trigger-action tests."""
+  cache_metadata = {}
+  cache_generations = {}
+  pending_exists_errors = list(exists_errors or [])
+  pending_download_errors = list(download_errors or [])
+  overwrite_pending = download_overwrite is not None
+
+  class CacheBlob:
+
+    def __init__(self, path):
+      self.path = path
+      self.metadata = None
+      self.generation = None
+
+    def exists(self):
+      if pending_exists_errors:
+        raise pending_exists_errors.pop(0)
+      return self.path in cache
+
+    def reload(self):
+      self.metadata = cache_metadata.get(self.path)
+      self.generation = cache_generations.get(self.path)
+
+    def download_as_string(self, if_generation_match=None, **_kwargs):
+      nonlocal overwrite_pending
+      if pending_download_errors:
+        raise pending_download_errors.pop(0)
+      if overwrite_pending:
+        cache[self.path] = json.dumps(download_overwrite)
+        cache_metadata[self.path] = {}
+        cache_generations[self.path] = cache_generations.get(self.path, 0) + 1
+        overwrite_pending = False
+      if (
+          if_generation_match is not None
+          and if_generation_match != cache_generations.get(self.path)
+      ):
+        raise google_exceptions.PreconditionFailed('generation changed')
+      return cache[self.path]
+
+    def upload_from_string(self, data, **_kwargs):
+      cache[self.path] = data
+      cache_metadata[self.path] = self.metadata
+      cache_generations[self.path] = cache_generations.get(self.path, 0) + 1
+
+  class CacheBucket:
+
+    def blob(self, path):
+      return CacheBlob(path)
+
+  class CacheGcs:
+
+    def __init__(self, *_args, **_kwargs):
+      self.gcs_bucket = CacheBucket()
+
+  monkeypatch.setattr(orch.orchestrator.actwrap.gcs_wrapper, 'GCS', CacheGcs)
 
 
 def test_worker_url_overrides_host_for_trigger_action(
@@ -263,10 +336,11 @@ def test_worker_url_overrides_host_for_trigger_action(
 
   captured = {}
 
-  def fake_trigger_action(data, instance, may_retry):
+  def fake_trigger_action(data, instance, may_retry, recover_forced_cache):
     captured['data'] = data
     captured['instance'] = instance
     captured['may_retry'] = may_retry
+    captured['recover_forced_cache'] = recover_forced_cache
 
   monkeypatch.setattr(orch.orchestrator, 'trigger_action', fake_trigger_action)
   # First valid delivery acquires the PR #113 Cloud Tasks lock and runs.
@@ -278,6 +352,7 @@ def test_worker_url_overrides_host_for_trigger_action(
   assert response.status_code == 200
   assert captured['instance'] == worker_url
   assert captured['may_retry'] is True
+  assert captured['recover_forced_cache'] is False
 
 
 def test_trigger_action_duplicate_delivery_is_skipped(
@@ -331,6 +406,330 @@ def test_trigger_action_retryable_error_releases_lock(
   response = client.post('/triggerAction', json=_task_payload())
   assert response.status_code == 429
   assert len(released) == 1
+
+
+def test_trigger_action_post_action_deadline_releases_lock(
+    monkeypatch, orchestrator_module
+):
+  """A transient output-write failure is retried after the action completes."""
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  released = []
+  monkeypatch.setattr(
+      orch.orchestrator.db, 'acquire_task_lock', lambda *a, **k: True
+  )
+  monkeypatch.setattr(
+      orch.orchestrator.db,
+      'release_task_lock',
+      lambda *a, **k: released.append(a),
+  )
+
+  def unavailable(*_args, **_kwargs):
+    raise google_exceptions.DeadlineExceeded('Firestore deadline exceeded')
+
+  monkeypatch.setattr(orch.orchestrator.db, 'store_output', unavailable)
+
+  response = orch.app.test_client().post('/triggerAction', json=_task_payload())
+
+  assert response.status_code == 503
+  assert released == [('exec-worker', 'node-1', 'group-1')]
+
+
+@pytest.mark.parametrize(
+    'scenario',
+    ('normal', 'lookup_error', 'download_error', 'generation_race'),
+)
+def test_trigger_action_redelivery_recovers_forced_action_cache(
+    monkeypatch, orchestrator_module, scenario
+):
+  """Forced recovery is task-scoped, race-safe, and retryable."""
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  first_output = {'outpainted_image': [{'file': 'generated/first.png'}]}
+  rerun_output = {'outpainted_image': [{'file': 'generated/rerun.png'}]}
+  concurrent_output = {'outpainted_image': [{'file': 'other/task.png'}]}
+  cache = {}
+  action_calls = []
+  released = []
+  stored_outputs = []
+  store_attempts = 0
+
+  def paid_action(_gcs, _workflow_params):
+    action_calls.append('called')
+    return first_output if len(action_calls) == 1 else rerun_output
+
+  paid_action.__module__ = 'actions.outpaint_image'
+  monkeypatch.setattr(
+      orch.orchestrator.actwrap, 'get_action_by_name', lambda _name: paid_action
+  )
+  _install_action_cache(
+      monkeypatch,
+      orch,
+      cache,
+      exists_errors=(
+          [
+              google_exceptions.RetryError(
+                  'GCS retry deadline exhausted',
+                  google_exceptions.TooManyRequests('GCS quota exhausted'),
+              )
+          ]
+          if scenario == 'lookup_error'
+          else None
+      ),
+      download_errors=(
+          [
+              google_exceptions.RetryError(
+                  'GCS retry deadline exhausted',
+                  ConnectionError('GCS connection reset'),
+              )
+          ]
+          if scenario == 'download_error'
+          else None
+      ),
+      download_overwrite=(
+          concurrent_output if scenario == 'generation_race' else None
+      ),
+  )
+  monkeypatch.setattr(
+      orch.orchestrator.db, 'acquire_task_lock', lambda *_a, **_k: True
+  )
+  monkeypatch.setattr(
+      orch.orchestrator.db,
+      'release_task_lock',
+      lambda *args, **_kwargs: released.append(args),
+  )
+
+  def store_once(*args):
+    nonlocal store_attempts
+    store_attempts += 1
+    if store_attempts == 1:
+      raise google_exceptions.DeadlineExceeded('Firestore deadline exceeded')
+    stored_outputs.append(args[-1])
+
+  monkeypatch.setattr(orch.orchestrator.db, 'store_output', store_once)
+  payload = _task_payload(action='outpaint_image', force_execution=True)
+  checksum = orch.orchestrator.actwrap.util_checksum.compute_object_checksum(
+      (payload['inputFiles'], payload.get('parameters', {}))
+  )
+  cache_path = f'outpaint_image/{checksum}.json'
+  client = orch.app.test_client()
+
+  recovery_error = scenario in ('lookup_error', 'download_error')
+  delivery_count = 3 if recovery_error else 2
+  responses = []
+  for retry_count in range(delivery_count):
+    headers = (
+        {'X-CloudTasks-TaskRetryCount': str(retry_count)}
+        if retry_count
+        else None
+    )
+    responses.append(
+        client.post('/triggerAction', json=payload, headers=headers)
+    )
+
+  expected_statuses = [503, 503, 200] if recovery_error else [503, 200]
+  expected_output = (
+      rerun_output if scenario == 'generation_race' else first_output
+  )
+  expected_action_calls = 2 if scenario == 'generation_race' else 1
+
+  assert [response.status_code for response in responses] == expected_statuses
+  assert released == [('exec-worker', 'node-1', 'group-1')] * (
+      len(expected_statuses) - 1
+  )
+  assert action_calls == ['called'] * expected_action_calls
+  assert store_attempts == 2
+  assert stored_outputs == [expected_output]
+  assert json.loads(cache[cache_path]) == expected_output
+
+
+def test_trigger_action_redelivery_reruns_failed_forced_action(
+    monkeypatch, orchestrator_module
+):
+  """A forced attempt that fails mid-action cannot expose stale cache."""
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  stale_output = {'outpainted_image': [{'file': 'stale/image.png'}]}
+  fresh_output = {'outpainted_image': [{'file': 'generated/image.png'}]}
+  cache = {}
+  action_calls = []
+  released = []
+  stored_outputs = []
+
+  def paid_action(_gcs, _workflow_params):
+    action_calls.append('called')
+    if len(action_calls) == 1:
+      raise google_exceptions.ResourceExhausted('temporary quota exhaustion')
+    return fresh_output
+
+  paid_action.__module__ = 'actions.outpaint_image'
+  monkeypatch.setattr(
+      orch.orchestrator.actwrap, 'get_action_by_name', lambda _name: paid_action
+  )
+  _install_action_cache(monkeypatch, orch, cache)
+  monkeypatch.setattr(
+      orch.orchestrator.db, 'acquire_task_lock', lambda *_a, **_k: True
+  )
+  monkeypatch.setattr(
+      orch.orchestrator.db,
+      'release_task_lock',
+      lambda *args, **_kwargs: released.append(args),
+  )
+  monkeypatch.setattr(
+      orch.orchestrator.db,
+      'store_output',
+      lambda *args: stored_outputs.append(args[-1]),
+  )
+
+  payload = _task_payload(action='outpaint_image', force_execution=True)
+  checksum = orch.orchestrator.actwrap.util_checksum.compute_object_checksum(
+      (payload['inputFiles'], payload.get('parameters', {}))
+  )
+  cache_path = f'outpaint_image/{checksum}.json'
+  cache[cache_path] = json.dumps(stale_output)
+  client = orch.app.test_client()
+
+  first = client.post('/triggerAction', json=payload)
+  retry = client.post(
+      '/triggerAction',
+      json=payload,
+      headers={'X-CloudTasks-TaskRetryCount': '1'},
+  )
+
+  assert first.status_code == 429
+  assert retry.status_code == 200
+  assert released == [('exec-worker', 'node-1', 'group-1')]
+  assert action_calls == ['called', 'called']
+  assert stored_outputs == [fresh_output]
+  assert json.loads(cache[cache_path]) == fresh_output
+
+
+def test_trigger_action_non_forced_reuses_legacy_cache(
+    monkeypatch, orchestrator_module
+):
+  """Cache entries written before task tokens remain reusable."""
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  legacy_output = {'outpainted_image': [{'file': 'legacy/image.png'}]}
+  cache = {}
+  action_calls = []
+  stored_outputs = []
+
+  def paid_action(_gcs, _workflow_params):
+    action_calls.append('called')
+    return {'outpainted_image': [{'file': 'unexpected/image.png'}]}
+
+  paid_action.__module__ = 'actions.outpaint_image'
+  monkeypatch.setattr(
+      orch.orchestrator.actwrap, 'get_action_by_name', lambda _name: paid_action
+  )
+  _install_action_cache(monkeypatch, orch, cache)
+  monkeypatch.setattr(
+      orch.orchestrator.db, 'acquire_task_lock', lambda *_a, **_k: True
+  )
+  monkeypatch.setattr(
+      orch.orchestrator.db,
+      'store_output',
+      lambda *args: stored_outputs.append(args[-1]),
+  )
+
+  payload = _task_payload(action='outpaint_image')
+  checksum = orch.orchestrator.actwrap.util_checksum.compute_object_checksum(
+      (payload['inputFiles'], payload.get('parameters', {}))
+  )
+  cache[f'outpaint_image/{checksum}.json'] = json.dumps(legacy_output)
+
+  response = orch.app.test_client().post('/triggerAction', json=payload)
+
+  assert response.status_code == 200
+  assert action_calls == []
+  assert stored_outputs == [legacy_output]
+
+
+def test_trigger_action_enqueue_retry_completes_successor_once(
+    monkeypatch, orchestrator_module
+):
+  """An ambiguous successor enqueue is contained by the existing join seal."""
+  del orchestrator_module
+  orch = _load_orch(monkeypatch)
+  successor_deliveries = []
+  action_deliveries = []
+  locks = set()
+
+  class FakeTasksClient:
+
+    def queue_path(self, *_args):
+      return 'projects/test/locations/test/queues/test'
+
+    def create_task(self, *, parent, task):
+      del parent
+      payload = json.loads(bytes(task.http_request.body))
+      if task.http_request.url.endswith('/supplyNode'):
+        successor_deliveries.append(payload)
+        if len(successor_deliveries) == 1:
+          raise google_exceptions.ServiceUnavailable(
+              'task accepted before response failed'
+          )
+      else:
+        action_deliveries.append(payload)
+
+  def acquire_lock(execution_id, node_id, group_id):
+    key = (execution_id, node_id, str(group_id))
+    if key in locks:
+      return False
+    locks.add(key)
+    return True
+
+  def release_lock(execution_id, node_id, group_id):
+    locks.discard((execution_id, node_id, str(group_id)))
+
+  monkeypatch.setattr(
+      orch.orchestrator.tasks_v2, 'CloudTasksClient', FakeTasksClient
+  )
+  monkeypatch.setattr(
+      orch.orchestrator, 'service_account_email', 'worker@example.com'
+  )
+  monkeypatch.setattr(orch.orchestrator.db, 'acquire_task_lock', acquire_lock)
+  monkeypatch.setattr(orch.orchestrator.db, 'release_task_lock', release_lock)
+
+  payload = _task_payload(execution_id='enqueue-retry', node_id='source')
+  payload.update({
+      'inputFiles': {'image': [{'file': 'uploads/source.png'}]},
+      'siblingActions': 1,
+      'workflowDefinition': {
+          'source': {'action': 'pass', 'input': {'image': None}},
+          'sink': {
+              'action': 'pass',
+              'input': {
+                  'image': {'node': 'source', 'output': 'image'},
+              },
+          },
+      },
+      'workflowParams': {
+          'gcpProject': 'test-project',
+          'gcpLocation': 'us-central1',
+          'gcsBucket': 'test-bucket',
+          'tasksQueuePrefix': 'test-',
+      },
+  })
+  client = orch.app.test_client()
+
+  first = client.post('/triggerAction', json=payload)
+  retry = client.post(
+      '/triggerAction',
+      json=payload,
+      headers={'X-CloudTasks-TaskRetryCount': '1'},
+  )
+  for successor_payload in successor_deliveries:
+    assert client.post('/supplyNode', json=successor_payload).status_code == 200
+  assert len(action_deliveries) == 1
+  assert client.post('/triggerAction', json=action_deliveries[0]).status_code == 200
+  status = client.get('/getStatus?executionId=enqueue-retry').get_json()
+
+  assert first.status_code == 503
+  assert retry.status_code == 200
+  assert len(successor_deliveries) == 2
+  assert list(status['sink']['output']) == ['0']
 
 
 def test_trigger_action_non_retryable_error_keeps_lock(
