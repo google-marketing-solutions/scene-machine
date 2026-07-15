@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import pathlib
 import tempfile
 
 from actions_lib.ffmpeg import FFMPEG
@@ -25,6 +24,7 @@ from common import Key
 from common import NodeInput
 from common import NodeOutput
 from common import Params
+from util.gcs_wrapper import download_distinct_inputs
 from util.gcs_wrapper import GCS
 
 
@@ -47,14 +47,13 @@ def execute(
     A NodeOutput object containing the path to the converted video file.
   """
   file_path = file[0][Key.FILE.value]
-  basename = pathlib.PurePosixPath(file_path).name or 'input'
   with tempfile.TemporaryDirectory() as workdir:
-    local_path = pathlib.Path(workdir, f'0000_{basename}')
-    gcs.save_locally(file_path, str(local_path))
+    local_paths = download_distinct_inputs(gcs, [file_path], workdir)
+    local_path = local_paths[file_path]
 
     ffmpeg = FFMPEG().set_resolution(output_file_dimension)
     converted_video_path = ffmpeg.convert_video(
-        str(local_path), output_file_extension
+        local_path, output_file_extension
     )
 
     return {

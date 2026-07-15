@@ -42,6 +42,7 @@ from common import logger
 from common import NodeInput
 from common import NodeOutput
 from common import Params
+from util.gcs_wrapper import download_distinct_inputs
 from util.gcs_wrapper import GCS
 
 
@@ -88,25 +89,27 @@ def execute(
     logger.error('Error decoding arrangement json: %s', ex)
     raise ex
 
+  object_paths = []
+  for arr in arrangement_content:
+    try:
+      object_paths.append(arr['file_path'])
+    except KeyError as ke:
+      logger.error('Arrangement entry missing file_path.')
+      raise ke
+
   with tempfile.TemporaryDirectory() as workdir:
+    local_paths = download_distinct_inputs(gcs, object_paths, workdir)
     ffmpeg = FFMPEG()
     ffmpeg.set_resolution(resolution)
 
-    for index, arr in enumerate(arrangement_content):
+    for arr in arrangement_content:
       skip_time = arr.get('skip_time', 0)
       duration = arr.get('duration', -1)
       offset_x = arr.get('offset_x', 0)
       offset_y = arr.get('offset_y', 0)
 
-      try:
-        object_path = arr['file_path']
-      except KeyError as ke:
-        logger.error('Arrangement entry missing file_path.')
-        raise ke
-      basename = pathlib.PurePosixPath(object_path).name or 'input'
-      local_path = pathlib.Path(workdir, f'{index:04d}_{basename}')
-
-      gcs.save_locally(object_path, str(local_path))
+      object_path = arr['file_path']
+      local_path = local_paths[object_path]
       if 'video' == arr['file_type']:
         transition = arr.get('transition')
         transition_overlap = arr.get('transition_overlap')
@@ -114,19 +117,17 @@ def execute(
           transition_overlap = 0.5
 
         ffmpeg.add_video(
-            path=str(local_path),
+            path=local_path,
             skip_time=skip_time,
             duration=duration,
             transition=transition,
             transition_overlap=transition_overlap,
         )
       elif 'audio' == arr['file_type']:
-        ffmpeg.add_audio(
-            str(local_path), arr['start_time'], skip_time, duration
-        )
+        ffmpeg.add_audio(local_path, arr['start_time'], skip_time, duration)
       elif 'image' == arr['file_type']:
         ffmpeg.add_image(
-            path=str(local_path),
+            path=local_path,
             start_time=arr['start_time'],
             duration=duration,
             offset_x=offset_x,
