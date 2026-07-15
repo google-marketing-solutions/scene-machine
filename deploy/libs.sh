@@ -27,25 +27,32 @@
 # Core retry+backoff loop shared by every add-*-iam-binding wrapper below.
 # Background GCP work (service-agent provisioning) modifies IAM
 # policies in parallel with our sequential read-modify-writes, occasionally
-# racing our etag; the gcloud error itself recommends "retry with exponential
-# backoff", which this does. It retries ONLY on concurrent-modification/etag
-# races and fails fast on real errors (permission-denied, bad argument).
+# racing our etag. A newly created runtime SA can also pass `describe` before
+# project IAM accepts it as a policy member. This retries those two exact
+# transient cases and fails fast on real errors (permission, bad argument).
 #   $1     - log label, e.g. " (for roles/run.invoker on app)"
-#   $2..   - the full gcloud argv to run (--quiet is appended)
+#   $2     - expected newly-created runtime SA email, or empty
+#   $3..   - the full gcloud argv to run (--quiet is appended)
 # Used by add_iam_binding (project), add_run_invoker_binding (run service), and
 # add_sa_iam_binding (service-account resource) so all three share one tested
 # retry path instead of three hand-rolled raw calls. (D1/D2)
 _retry_iam_write() {
   local label="$1"
-  shift
+  local propagating_runtime_sa="$2"
+  shift 2
 
   # Capture stderr in a variable (stdout discarded) rather than a temp file +
   # RETURN trap: a RETURN trap set in this helper would also fire on the
   # CALLER wrapper's return, dereferencing an out-of-scope var under `set -u`
   # and aborting the deploy.
-  local err
+  local err retry_kind
   local attempt=1
-  local max_attempts=6
+  local conflict_max_attempts=6
+  # Fourteen attempts with the capped backoff below wait roughly 9 minutes
+  # before the final write, matching the fresh-project SA visibility budget.
+  local propagation_max_attempts=14
+  local propagation_seen=0
+
   while true; do
     if err=$("$@" --quiet 2>&1 >/dev/null); then
       if [ $attempt -gt 1 ]; then
@@ -54,16 +61,42 @@ _retry_iam_write() {
       return 0
     fi
 
-    # Only retry on concurrent-modification / etag races. Permission, argument,
-    # and not-found errors won't fix themselves — surface them immediately.
-    if ! grep -qiE 'concurrent|aborted|etag|stale' <<<"$err"; then
+    retry_kind=""
+    if [ -n "$propagating_runtime_sa" ]; then
+      local missing_sa_error
+      local policy_error_preamble
+      local conflict_error
+      missing_sa_error="ERROR: (gcloud.projects.add-iam-policy-binding) INVALID_ARGUMENT: Service account ${propagating_runtime_sa} does not exist."
+      policy_error_preamble='ERROR: Policy modification failed. For a binding with condition, run "gcloud alpha iam policies lint-condition" to identify issues in condition.'
+      conflict_error="${err//${propagating_runtime_sa}/<runtime-sa>}"
+      if [ "$err" = "$missing_sa_error" ] \
+          || [ "$err" = "${policy_error_preamble}"$'\n'"${missing_sa_error}" ]; then
+        retry_kind="runtime SA propagation"
+        propagation_seen=1
+      elif grep -Fqx "$missing_sa_error" <<<"$err"; then
+        # Unexpected extra output around the known status fails closed instead
+        # of falling through to the broader conflict classifier.
+        retry_kind=""
+      elif ! grep -qiE 'permission_denied|forbidden|unauthorized' <<<"$err" \
+          && grep -qiE 'concurrent|aborted|etag|stale' <<<"$conflict_error"; then
+        retry_kind="conflict"
+      fi
+    elif grep -qiE 'concurrent|aborted|etag|stale' <<<"$err"; then
+      retry_kind="conflict"
+    fi
+
+    if [ -z "$retry_kind" ]; then
       echo "  ERROR: IAM binding${label} failed with a non-retryable error:" >&2
       echo "$err" >&2
       return 1
     fi
 
+    local max_attempts=$conflict_max_attempts
+    if [ $propagation_seen -eq 1 ]; then
+      max_attempts=$propagation_max_attempts
+    fi
     if [ $attempt -ge $max_attempts ]; then
-      echo "  ERROR: IAM binding${label} still conflicting after $max_attempts attempts:" >&2
+      echo "  ERROR: IAM binding${label} still failing with a retryable error after $max_attempts attempts:" >&2
       echo "$err" >&2
       return 1
     fi
@@ -74,8 +107,12 @@ _retry_iam_write() {
     local jitter=$((RANDOM % (base / 2 + 1) - base / 4))
     local backoff=$((base + jitter))
     [ $backoff -lt 1 ] && backoff=1
+    if [ $propagation_seen -eq 1 ] \
+        && [ $backoff -gt 60 ]; then
+      backoff=60
+    fi
 
-    echo "  IAM binding${label} hit a transient conflict — retrying in ${backoff}s (attempt $attempt/$max_attempts)..."
+    echo "  IAM binding${label} hit a transient ${retry_kind} error — retrying in ${backoff}s (attempt $attempt/$max_attempts)..."
     sleep $backoff
     attempt=$((attempt + 1))
   done
@@ -137,6 +174,11 @@ add_iam_binding() {
   done
   local label="${role:+ (for $role)}"
   local project="$1"  # first positional arg
+  local propagating_runtime_sa=""
+  local expected_runtime_sa="sm-runtime@${project}.iam.gserviceaccount.com"
+  if [ "$member" = "serviceAccount:${expected_runtime_sa}" ]; then
+    propagating_runtime_sa="$expected_runtime_sa"
+  fi
 
   if [ -n "$role" ] && [ -n "$member" ] && [ -n "$project" ]; then
     if gcloud projects get-iam-policy "$project" \
@@ -148,7 +190,8 @@ add_iam_binding() {
     fi
   fi
 
-  _retry_iam_write "$label" gcloud projects add-iam-policy-binding "$@"
+  _retry_iam_write "$label" "$propagating_runtime_sa" \
+    gcloud projects add-iam-policy-binding "$@"
 }
 
 # Service-scoped run.invoker on a Cloud Run SERVICE, with the same pre-check +
@@ -168,7 +211,7 @@ add_run_invoker_binding() {
     return 0
   fi
 
-  _retry_iam_write "$label" \
+  _retry_iam_write "$label" "" \
     gcloud run services add-iam-policy-binding "$service" \
     --region="$region" --project="$project" \
     --member="$member" --role="roles/run.invoker"
@@ -190,7 +233,7 @@ add_sa_iam_binding() {
     return 0
   fi
 
-  _retry_iam_write "$label" \
+  _retry_iam_write "$label" "" \
     gcloud iam service-accounts add-iam-policy-binding "$sa" \
     --member="$member" --role="$role" --project="$project"
 }
