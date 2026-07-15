@@ -800,7 +800,7 @@
                       [ngModel]="config.projectConfig.value().model"
                       (ngModelChange)="config.updateProjectConfig({model: $event})"
                     >
-                      @for (model of config.VIDEO_GENERATION_MODELS; track model) {
+                      @for (model of config.videoModels(); track model) {
                         <mat-option [value]="model">{{ model }}</mat-option>
                       }
                     </mat-select>

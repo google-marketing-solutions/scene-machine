@@ -67,6 +67,7 @@ from google.oauth2 import id_token as google_id_token
 import orchestrator
 from util import database as util_database
 from util import errors as util_errors
+from util import model_allowlist
 from util import submission_validation
 from werkzeug.security import safe_join
 
@@ -676,16 +677,24 @@ def sign_url_handler() -> flask_response:
 
 
 def ui_config_handler() -> flask_response:
-  """Returns the config/global document from the UI database verbatim."""
+  """Returns the config/global document plus the model catalog.
+
+  config/global is served verbatim. modelCatalog comes from the shared
+  allowlist loader (the live config/models doc, or the shipped file on
+  fallback -- modelCatalogSource says which), so the UI's dropdowns read
+  exactly what the submission validator enforces.
+  """
   ui_db = _get_ui_db()
   if ui_db is None:
     return _json_error('FIRESTORE_DB_UI not configured', 500)
   snapshot = ui_db.collection('config').document('global').get()
   if not snapshot.exists:
     return _json_error('Config not seeded', 404)
-  return _json_response(
-      util_database.firestore_to_json_serialisable(snapshot.to_dict())
-  )
+  payload = util_database.firestore_to_json_serialisable(snapshot.to_dict())
+  catalog, source = model_allowlist.load_allowlist_with_source()
+  payload['modelCatalog'] = catalog
+  payload['modelCatalogSource'] = source
+  return _json_response(payload)
 
 
 # --- Project persistence: storyboard split ---------------------------------

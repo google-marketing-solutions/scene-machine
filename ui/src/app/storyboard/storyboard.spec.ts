@@ -65,6 +65,7 @@ describe('Storyboard', () => {
     updateProjectConfig: (partial: Partial<ProjectConfig>) => {
       projectConfigSignal.update(config => ({...config, ...partial}));
     },
+    videoModels: () => [],
     sceneIdCounter: sceneIdCounterSignal,
     primaryColor: signal('theme-green'),
     isGeneratedScene: (
@@ -103,6 +104,7 @@ describe('Storyboard', () => {
       updateProjectConfig: (partial: Partial<ProjectConfig>) => {
         projectConfigSignal.update(config => ({...config, ...partial}));
       },
+      videoModels: () => [],
       sceneIdCounter: sceneIdCounterSignal,
       primaryColor: signal('theme-green'),
       isGeneratedScene: (

@@ -32,6 +32,7 @@ import uuid
 
 # Reused module-scoped fixture; pytest picks it up from this namespace.
 from test.test_frontdoor import orchestrator_module  # noqa: F401  pylint: disable=unused-import
+from util import model_allowlist
 
 _REPO = pathlib.Path(__file__).resolve().parent.parent
 _BUCKET = 'frontdoor-data-test-bucket'
@@ -942,9 +943,19 @@ def test_templates_crud_and_read_only_guard(monkeypatch, orchestrator_module):
 # ---------------------------------------------------------------------------
 # /api/config
 # ---------------------------------------------------------------------------
-def test_config_returns_seeded_doc(monkeypatch, orchestrator_module):
+def test_config_returns_seeded_doc_plus_model_catalog(
+    monkeypatch, orchestrator_module
+):
   del orchestrator_module
   orch, fake_db, _ = _load_app(monkeypatch)
+  # The catalog loader has its own Firestore client (it is shared with the
+  # validator, not the handler's _ui_db); give it a live doc without network.
+  live_catalog = model_allowlist.load_shipped_allowlist()
+  live_catalog['models']['veo-live-hotfix'] = {
+      'family': 'veo', 'actions': ['generate_video'],
+      'locations': ['global'], 'capabilities': {}}
+  monkeypatch.setattr(
+      model_allowlist, '_fetch_live_catalog', lambda: live_catalog)
   client = orch.app.test_client()
 
   response = client.get('/api/config')
@@ -960,7 +971,45 @@ def test_config_returns_seeded_doc(monkeypatch, orchestrator_module):
   fake_db.collection('config').docs['global'] = seeded
   response = client.get('/api/config')
   assert response.status_code == 200
-  assert response.get_json() == seeded  # verbatim
+  payload = response.get_json()
+  assert payload['modelCatalogSource'] == 'firestore'
+  assert 'veo-live-hotfix' in payload['modelCatalog']['models']
+  for key, value in seeded.items():
+    assert payload[key] == value  # the global doc itself stays verbatim
+
+
+def test_config_serves_shipped_catalog_when_the_live_doc_is_unusable(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  def unreachable():
+    raise RuntimeError('firestore down')
+  monkeypatch.setattr(model_allowlist, '_fetch_live_catalog', unreachable)
+  fake_db.collection('config').docs['global'] = {'gcpProject': 'p'}
+  client = orch.app.test_client()
+
+  payload = client.get('/api/config').get_json()
+  assert payload['modelCatalogSource'] == 'shipped'
+  assert payload['modelCatalog'] == model_allowlist.load_shipped_allowlist()
+
+
+def test_config_survives_a_console_edit_with_a_firestore_typed_value(
+    monkeypatch, orchestrator_module
+):
+  # A timestamp planted anywhere in the live doc must degrade to the shipped
+  # catalog -- never a serialization 500 for every /api/config caller.
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  live = model_allowlist.load_shipped_allowlist()
+  live['updated_at'] = datetime.datetime(2026, 7, 1)
+  monkeypatch.setattr(model_allowlist, '_fetch_live_catalog', lambda: live)
+  fake_db.collection('config').docs['global'] = {'gcpProject': 'p'}
+  client = orch.app.test_client()
+
+  response = client.get('/api/config')
+  assert response.status_code == 200
+  assert response.get_json()['modelCatalogSource'] == 'shipped'
 
 
 # ---------------------------------------------------------------------------

@@ -49,7 +49,7 @@ describe('Setup image upload', () => {
     projectConfig: {value: ReturnType<typeof signal<Partial<ProjectConfig>>>};
     updateProjectConfig: ReturnType<typeof vi.fn>;
     saveNow: ReturnType<typeof vi.fn>;
-    VIDEO_GENERATION_MODELS: string[];
+    videoModels: () => string[];
   };
   let remixMock: {uploadMedia: ReturnType<typeof vi.fn>};
 
@@ -71,9 +71,8 @@ describe('Setup image upload', () => {
         projectConfig.update(c => ({...c, ...partial})),
       ),
       saveNow: vi.fn(),
-      // The component's model effect reads this; empty keeps the effect's
-      // guard (length > 0) false so it does not fire an extra config update.
-      VIDEO_GENERATION_MODELS: [],
+      // The template's model dropdown reads this.
+      videoModels: () => [],
     };
     remixMock = {
       uploadMedia: vi

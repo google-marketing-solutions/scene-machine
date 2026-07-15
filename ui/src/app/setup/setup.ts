@@ -181,17 +181,6 @@ export class Setup {
         });
       }
     });
-
-    effect(() => {
-      const project = this.config.projectConfig.value();
-      const availableModels = this.config.VIDEO_GENERATION_MODELS;
-
-      if (project.id && availableModels.length > 0) {
-        if (!project.model || !availableModels.includes(project.model)) {
-          this.config.updateProjectConfig({model: availableModels[0]});
-        }
-      }
-    });
   }
 
   aspectRatioUpdated(aspectRatio: AspectRatio) {

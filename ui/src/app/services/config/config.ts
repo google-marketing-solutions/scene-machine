@@ -58,13 +58,21 @@ export interface GcsFile {
 }
 
 /**
- * List of available video generation models.
+ * One model's entry in the catalog served by /api/config (the same catalog
+ * the backend validator enforces, so the dropdowns cannot drift from it).
  */
-export const VIDEO_GENERATION_MODELS = [
-  'veo-3.1-generate-001',
-  'veo-3.1-fast-generate-001',
-  'veo-3.1-lite-generate-001',
-];
+export interface ModelCatalogEntry {
+  family: string;
+  actions: string[];
+  locations: string[];
+  capabilities?: Record<string, unknown>;
+}
+
+export interface ModelCatalog {
+  defaults: Record<string, string>;
+  actions: Record<string, {location_param: string | null; default_key: string}>;
+  models: Record<string, ModelCatalogEntry>;
+}
 
 interface GlobalConfig {
   // GCP
@@ -95,6 +103,11 @@ interface GlobalConfig {
   // FFmpeg
   encodingSpeed: number;
   qualityLevel: number;
+
+  // Model catalog (merged into the response by the backend; 'firestore' when
+  // the live config/models doc was served, 'shipped' on fallback).
+  modelCatalog?: ModelCatalog;
+  modelCatalogSource?: 'firestore' | 'shipped';
 }
 
 /**
@@ -368,7 +381,46 @@ export class ConfigService {
    */
   private persistedProjectIds = new Set<string>();
 
-  readonly VIDEO_GENERATION_MODELS = VIDEO_GENERATION_MODELS;
+  /**
+   * Video models compatible with the configured Veo location.
+   * Matches the backend model/location validator. Sorted: Firestore returns
+   * map keys sorted, the shipped fallback keeps file order.
+   */
+  readonly videoModels = computed(() => {
+    const config = this.globalConfig.value();
+    const catalog = config?.modelCatalog;
+    const location = config?.veoLocation;
+    if (!catalog || !location) {
+      return [];
+    }
+    return Object.entries(catalog.models)
+      .filter(
+        ([, model]) =>
+          model.actions.includes('generate_video') &&
+          model.locations.includes(location),
+      )
+      .map(([id]) => id)
+      .sort();
+  });
+
+  /**
+   * Only choose replacements from the live catalog.
+   * The shipped fallback can be stale and must not change project models.
+   */
+  private liveCatalogVideoFallback(): string | undefined {
+    const config = this.globalConfig.value();
+    const catalog = config?.modelCatalog;
+    const models = this.videoModels();
+    if (
+      config?.modelCatalogSource !== 'firestore' ||
+      !catalog ||
+      models.length === 0
+    ) {
+      return undefined;
+    }
+    const veoDefault = catalog.defaults['veo'];
+    return veoDefault && models.includes(veoDefault) ? veoDefault : models[0];
+  }
 
   globalConfig = resource({
     loader: () => this.loadGlobalConfig(),
@@ -506,6 +558,39 @@ export class ConfigService {
         ...ConfigService.THEME_COLORS,
       );
       this.document.documentElement.classList.add(this.primaryColor());
+    });
+    // Replace unavailable project models in this service; not every project
+    // route creates the setup component.
+    effect(() => {
+      const project = this.projectConfig.value();
+      const config = this.globalConfig.value();
+      const models = this.videoModels();
+      const fallback = this.liveCatalogVideoFallback();
+      if (!project.id || !fallback) {
+        return;
+      }
+      if (project.model && models.includes(project.model)) {
+        return;
+      }
+      const previous = project.model;
+      const isPersistedProject = this.persistedProjectIds.has(project.id);
+      const isUnsavedDeployDefault =
+        previous === config?.veoModel && !isPersistedProject;
+      const shouldPersistCorrection =
+        isPersistedProject || (!!previous && !isUnsavedDeployDefault);
+      if (shouldPersistCorrection) {
+        this.updateProjectConfig({model: fallback});
+        const unavailableModel = previous
+          ? `Video model ${previous}`
+          : 'The saved video model';
+        this.matSnackBar.open(
+          `${unavailableModel} is no longer available; switched to ${fallback}.`,
+          'OK',
+        );
+      } else {
+        // A catalog correction alone must not create a new project.
+        this.projectConfig.value.update(c => ({...c, model: fallback}));
+      }
     });
     this.initFaviconListener();
   }
@@ -696,12 +781,19 @@ export class ConfigService {
     // Not persisted yet: the first autosave POSTs /api/projects, where the
     // server stamps createdBy from the verified identity. Left undefined here.
     this.persistedProjectIds.delete(uuid);
-    this.projectConfig.set({
+    const project = {
       ...this.DEFAULT_PROJECT_CONFIG(),
       id: uuid,
       name: 'Untitled Project',
       createdBy: undefined,
-    });
+    };
+    if (!this.videoModels().includes(project.model)) {
+      const fallback = this.liveCatalogVideoFallback();
+      if (fallback) {
+        project.model = fallback;
+      }
+    }
+    this.projectConfig.set(project);
     this.shouldSave = false;
   }
 

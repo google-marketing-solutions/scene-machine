@@ -44,8 +44,6 @@ from util.model_allowlist import (
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _ACTIONS_JSON = os.path.join(_REPO, 'ui', 'definitions', 'actions.json')
 _CONFIG_TEMPLATE = os.path.join(_REPO, 'config.template.txt')
-_CONFIG_TS = os.path.join(
-    _REPO, 'ui', 'src', 'app', 'services', 'config', 'config.ts')
 
 # Param names that mark a model-parameterized action in actions.json.
 _MODEL_PARAM_NAMES = {'gemini_model', 'image_model', 'model'}
@@ -179,8 +177,9 @@ _MODEL_ID_RE = re.compile(r'^[a-z][a-z0-9.]*-[a-z0-9.\-]+$')
 
 def _shipped_models():
   """Model IDs the product actually offers: config.template.txt 'Recommended
-  models' lines and the config.ts video-model dropdown. If one of these is not
-  allowlisted, it is rejected for every user the moment enforcement is on."""
+  models' lines. (The UI dropdown reads the catalog from /api/config, so it
+  can no longer drift.) If one of these is not allowlisted, it is rejected
+  for every user the moment enforcement is on."""
   ids = set()
   with open(_CONFIG_TEMPLATE, encoding='utf-8') as f:
     for line in f:
@@ -191,10 +190,6 @@ def _shipped_models():
         token = re.sub(r'\(.*?\)', '', token).strip()  # drop "(Nano Banana Pro)"
         if _MODEL_ID_RE.match(token):
           ids.add(token)
-  with open(_CONFIG_TS, encoding='utf-8') as f:
-    block = re.search(r'VIDEO_GENERATION_MODELS\s*=\s*\[(.*?)]', f.read(), re.DOTALL)
-  assert block, 'VIDEO_GENERATION_MODELS array not found in config.ts (renamed?)'
-  ids.update(re.findall(r"'([^']+)'", block.group(1)))
   return ids
 
 
