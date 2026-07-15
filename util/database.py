@@ -26,6 +26,18 @@ from google.cloud.firestore import DocumentSnapshot
 
 MAX_ATTEMPTS = 75
 TASK_LOCK_EXPIRATION_HOURS = 12
+TASK_LEASE_SECONDS = 1860
+
+TASK_LOCK_ACQUIRED = 'acquired'
+TASK_LOCK_ACQUIRED_RECOVERY = 'acquired-recovery'
+TASK_LOCK_BUSY = 'busy'
+TASK_LOCK_DUPLICATE = 'duplicate'
+TASK_LOCK_TERMINAL = 'terminal'
+
+_TASK_STATE_RUNNING = 'running'
+_TASK_STATE_RETRYABLE = 'retryable'
+_TASK_STATE_SUCCEEDED = 'succeeded'
+_TASK_STATE_FAILED = 'failed'
 
 
 def firestore_to_json_serialisable(data: Any) -> Any:
@@ -386,55 +398,222 @@ class Database:
       execution_id: str,
       node_id: str,
       group_id: typing.Union[str, int],
-  ) -> bool:
-    """Acquires a lock for a task transactionally.
+      task_token: str,
+      owner_token: str,
+      attempt: int,
+  ) -> str:
+    """Claims a task for one delivery transactionally.
 
     Args:
       execution_id: The workflow's execution ID.
       node_id: The node ID.
       group_id: The group ID.
+      task_token: Stable identity shared by redeliveries of one Cloud Task.
+      owner_token: Unique identity for this delivery.
+      attempt: One-based Cloud Tasks delivery attempt.
 
     Returns:
-      True if the lock was successfully acquired (first to trigger),
-      False otherwise.
+      One of the TASK_LOCK_* outcomes defined in this module.
     """
     doc_ref = self._get_task_lock_ref(execution_id, node_id, group_id)
-    expires_at = datetime.datetime.now(
-        datetime.timezone.utc
-    ) + datetime.timedelta(hours=TASK_LOCK_EXPIRATION_HOURS)
+    now = datetime.datetime.now(datetime.timezone.utc)
 
     @firestore.transactional
-    def create_if_not_exists(
+    def claim_if_available(
         transaction: firestore.Transaction,
         doc_ref: firestore.DocumentReference,
-        expires_at: datetime.datetime,
-    ) -> bool:
+        now: datetime.datetime,
+    ) -> str:
       snapshot = doc_ref.get(transaction=transaction)
+      current = snapshot.to_dict() or {}
+      recovery_only = False
       if snapshot.exists:
-        return False
-      transaction.set(doc_ref, {'expiresAt': expires_at})
-      return True
+        current_task_token = current.get('taskToken')
+        current_state = current.get('state')
+        # Locks written by older releases have no ownership or state. Treat
+        # them as terminal rather than risk repeating completed paid work.
+        if not current_task_token or not current_state:
+          return TASK_LOCK_TERMINAL
+        if current_task_token != task_token:
+          return TASK_LOCK_DUPLICATE
+        if current_state not in (
+            _TASK_STATE_RUNNING,
+            _TASK_STATE_RETRYABLE,
+            _TASK_STATE_SUCCEEDED,
+            _TASK_STATE_FAILED,
+        ):
+          return TASK_LOCK_TERMINAL
+        if current_state in (_TASK_STATE_SUCCEEDED, _TASK_STATE_FAILED):
+          return TASK_LOCK_TERMINAL
+        lease_expires_at = current.get('leaseExpiresAt')
+        lease_expired = (
+            isinstance(lease_expires_at, datetime.datetime)
+            and lease_expires_at <= now
+        )
+        if current_state != _TASK_STATE_RETRYABLE and not lease_expired:
+          return TASK_LOCK_BUSY
+        if current_state == _TASK_STATE_RETRYABLE:
+          # Only an explicit boolean false proves the prior failure happened
+          # before paid work. Missing or malformed values fail cost-first.
+          recovery_only = current.get('recoveryOnly') is not False
+        else:
+          recovery_only = lease_expired
 
-    return create_if_not_exists(
+      transaction.set(
+          doc_ref,
+          {
+              'taskToken': task_token,
+              'ownerToken': owner_token,
+              'attempt': attempt,
+              'state': _TASK_STATE_RUNNING,
+              'recoveryOnly': recovery_only,
+              'leaseExpiresAt': (
+                  now + datetime.timedelta(seconds=TASK_LEASE_SECONDS)
+              ),
+              'updatedAt': now,
+              'expiresAt': (
+                  now + datetime.timedelta(hours=TASK_LOCK_EXPIRATION_HOURS)
+              ),
+          },
+      )
+      return (
+          TASK_LOCK_ACQUIRED_RECOVERY if recovery_only else TASK_LOCK_ACQUIRED
+      )
+
+    return claim_if_available(
         self.db.transaction(max_attempts=MAX_ATTEMPTS),
         doc_ref,
-        expires_at,
+        now,
     )
 
-  def release_task_lock(
+  def _transition_task_lock(
       self,
       execution_id: str,
       node_id: str,
       group_id: typing.Union[str, int],
-  ) -> None:
-    """Releases the lock for a task.
+      task_token: str,
+      owner_token: str,
+      state: str,
+      attempt: int,
+      error: str | None = None,
+      recovery_only: bool | None = None,
+  ) -> bool:
+    """Moves a task owned by this delivery to another durable state.
 
     Args:
       execution_id: The workflow's execution ID.
       node_id: The node ID.
       group_id: The group ID.
+      task_token: Stable identity shared by redeliveries of one Cloud Task.
+      owner_token: Unique identity for this delivery.
+      state: Destination state.
+      attempt: One-based Cloud Tasks delivery attempt.
+      error: Optional compact failure description.
+      recovery_only: Whether later deliveries must only recover saved output.
+
+    Returns:
+      Whether this delivery still owned the task and changed its state.
     """
-    self._get_task_lock_ref(execution_id, node_id, group_id).delete()
+    doc_ref = self._get_task_lock_ref(execution_id, node_id, group_id)
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    @firestore.transactional
+    def transition_if_owner(
+        transaction: firestore.Transaction,
+        doc_ref: firestore.DocumentReference,
+    ) -> bool:
+      snapshot = doc_ref.get(transaction=transaction)
+      current = snapshot.to_dict() or {}
+      if (
+          current.get('taskToken') != task_token
+          or current.get('ownerToken') != owner_token
+          or current.get('state') != _TASK_STATE_RUNNING
+      ):
+        return False
+      update = {
+          'attempt': attempt,
+          'state': state,
+          'updatedAt': now,
+          'expiresAt': (
+              now + datetime.timedelta(hours=TASK_LOCK_EXPIRATION_HOURS)
+          ),
+      }
+      if error is not None:
+        update['error'] = error
+      if recovery_only is not None:
+        update['recoveryOnly'] = recovery_only
+      transaction.set(doc_ref, update, merge=True)
+      return True
+
+    return transition_if_owner(
+        self.db.transaction(max_attempts=MAX_ATTEMPTS), doc_ref
+    )
+
+  def mark_task_retryable(
+      self,
+      execution_id: str,
+      node_id: str,
+      group_id: typing.Union[str, int],
+      task_token: str,
+      owner_token: str,
+      attempt: int,
+      error: str,
+      recovery_only: bool = False,
+  ) -> bool:
+    """Makes a task claimable by its next delivery."""
+    return self._transition_task_lock(
+        execution_id,
+        node_id,
+        group_id,
+        task_token,
+        owner_token,
+        _TASK_STATE_RETRYABLE,
+        attempt,
+        error,
+        recovery_only,
+    )
+
+  def mark_task_succeeded(
+      self,
+      execution_id: str,
+      node_id: str,
+      group_id: typing.Union[str, int],
+      task_token: str,
+      owner_token: str,
+      attempt: int,
+  ) -> bool:
+    """Records that this delivery completed the task."""
+    return self._transition_task_lock(
+        execution_id,
+        node_id,
+        group_id,
+        task_token,
+        owner_token,
+        _TASK_STATE_SUCCEEDED,
+        attempt,
+    )
+
+  def mark_task_failed(
+      self,
+      execution_id: str,
+      node_id: str,
+      group_id: typing.Union[str, int],
+      task_token: str,
+      owner_token: str,
+      attempt: int,
+      error: str,
+  ) -> bool:
+    """Records that no delivery will retry the task."""
+    return self._transition_task_lock(
+        execution_id,
+        node_id,
+        group_id,
+        task_token,
+        owner_token,
+        _TASK_STATE_FAILED,
+        attempt,
+        error,
+    )
 
   def get_documents(self, execution_id: str) -> typing.Iterable[typing.Any]:
     """Gets all node state documents within the specified workflow execution.

@@ -43,6 +43,7 @@ optional; the defaults reproduce the single-service behavior exactly):
 
 import copy
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -70,8 +71,8 @@ from util import errors as util_errors
 from util import submission_validation
 from werkzeug.security import safe_join
 
-# At most the queue's allowed attempts minus one, so the workflow proceeds:
-_MAX_ALLOWED_RETRIES = 10
+# deploy.sh configures every worker queue with 30 total attempts.
+_MAX_TASK_ATTEMPTS = 30
 
 _ROLE = os.environ.get('ROLE', 'all')
 _AUTH_MODE = os.environ.get('AUTH_MODE', 'none')
@@ -307,14 +308,62 @@ def trigger_action_handler() -> tuple[str, int]:
     # Malformed task payload (e.g. missing the Cloud Tasks lock fields): reject
     # cleanly instead of raising a KeyError below and returning a 500.
     return 'Bad Request', 400
-  retry_count = int(flask_request.headers.get('X-CloudTasks-TaskRetryCount', 0))
+  try:
+    retry_count = int(
+        flask_request.headers.get('X-CloudTasks-TaskRetryCount', 0)
+    )
+  except (TypeError, ValueError):
+    return 'Bad Request', 400
+  if retry_count < 0:
+    return 'Bad Request', 400
   if retry_count > 0:
     logger.info('Retried %s %s times', data[Key.ACTION.value], retry_count)
+  attempt = retry_count + 1
+  can_retry = attempt < _MAX_TASK_ATTEMPTS
   execution_id = data[Key.EXECUTION_ID.value]
   node_id = data[Key.NODE_ID.value]
   group_id = data[Key.GROUP_ID.value]
   node = data[Key.WORKFLOW_DEF.value][node_id]
-  if not orchestrator.db.acquire_task_lock(execution_id, node_id, group_id):
+  queue_name = flask_request.headers.get('X-CloudTasks-QueueName')
+  task_name = flask_request.headers.get('X-CloudTasks-TaskName')
+  if bool(queue_name) != bool(task_name):
+    return 'Bad Request', 400
+  task_identity = (
+      ['cloud-tasks', queue_name, task_name]
+      if queue_name and task_name
+      else ['local']
+  )
+  task_identity.extend([execution_id, node_id, str(group_id)])
+  task_token = hashlib.sha256(
+      json.dumps(
+          task_identity, ensure_ascii=True, separators=(',', ':')
+      ).encode('utf-8')
+  ).hexdigest()
+  owner_token = uuid.uuid4().hex
+  try:
+    lock_outcome = orchestrator.db.acquire_task_lock(
+        execution_id,
+        node_id,
+        group_id,
+        task_token,
+        owner_token,
+        attempt,
+    )
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.error('Failed to claim action %s: %s', data[Key.ACTION.value], e)
+    return 'Service Unavailable', 503
+  if lock_outcome == util_database.TASK_LOCK_BUSY:
+    logger.warning(
+        '[%s] Node %s (group %s) is still running. Requesting redelivery.',
+        execution_id,
+        node_id,
+        group_id,
+    )
+    return 'Service Unavailable', 503
+  if lock_outcome not in (
+      util_database.TASK_LOCK_ACQUIRED,
+      util_database.TASK_LOCK_ACQUIRED_RECOVERY,
+  ):
     logger.warning(
         '[%s] Node %s (group %s) was already triggered. Skipping execution.'
         ' (%s)',
@@ -324,53 +373,123 @@ def trigger_action_handler() -> tuple[str, int]:
         node,
     )
     return 'Already Triggered', 200
+  recovery_only = lock_outcome == util_database.TASK_LOCK_ACQUIRED_RECOVERY
+
+  def error_summary(error: Exception) -> str:
+    cause = error.__cause__ or error
+    return f'{type(cause).__name__}: {cause}'[:1000]
+
+  def mark_retryable(
+      error: Exception, recovery_only: bool = False
+  ) -> bool:
+    try:
+      return orchestrator.db.mark_task_retryable(
+          execution_id,
+          node_id,
+          group_id,
+          task_token,
+          owner_token,
+          attempt,
+          error_summary(error),
+          recovery_only,
+      )
+    except Exception as state_error:  # pylint: disable=broad-exception-caught
+      logger.error(
+          'Failed to record retryable task state for %s: %s',
+          data[Key.ACTION.value],
+          state_error,
+      )
+      return False
+
+  def mark_failed(error: Exception) -> bool:
+    try:
+      return orchestrator.db.mark_task_failed(
+          execution_id,
+          node_id,
+          group_id,
+          task_token,
+          owner_token,
+          attempt,
+          error_summary(error),
+      )
+    except Exception as state_error:  # pylint: disable=broad-exception-caught
+      logger.error(
+          'Failed to record terminal task state for %s: %s',
+          data[Key.ACTION.value],
+          state_error,
+      )
+      return False
+
   task_data = copy.deepcopy(data)
   try:
     orchestrator.trigger_action(
         task_data,
         instance,
-        retry_count < _MAX_ALLOWED_RETRIES,
-        retry_count > 0,
+        can_retry,
+        task_token,
+        recovery_only,
     )
-  except util_errors.RetryableTaskRecoveryError as e:
-    if retry_count < _MAX_ALLOWED_RETRIES:
+  except (
+      util_errors.RetryableTaskRecoveryError,
+      util_errors.RetryablePostActionError,
+  ) as e:
+    if can_retry:
       logger.error(
-          'Retrying forced action cache recovery for %s: %s',
+          'Retrying task %s after infrastructure failure: %s',
           data[Key.ACTION.value],
           e.__cause__ or e,
       )
-      orchestrator.db.release_task_lock(execution_id, node_id, group_id)
+      mark_retryable(e, True)
       return 'Service Unavailable', 503
     logger.error(
-        'Retry limit reached during forced action cache recovery for %s: %s',
+        'Retry limit reached for task %s after infrastructure failure: %s',
         data[Key.ACTION.value],
         e.__cause__ or e,
     )
-    return 'Internal Error', 200
-  except util_errors.RetryablePostActionError as e:
-    if retry_count < _MAX_ALLOWED_RETRIES:
-      logger.error(
-          'Retrying completed action %s after infrastructure failure: %s',
-          data[Key.ACTION.value],
-          e.__cause__ or e,
-      )
-      orchestrator.db.release_task_lock(execution_id, node_id, group_id)
-      return 'Service Unavailable', 503
-    logger.error(
-        'Retry limit reached after completed action %s: %s',
-        data[Key.ACTION.value],
-        e.__cause__ or e,
-    )
-    return 'Internal Error', 200
+    if mark_failed(e):
+      return 'Internal Error', 200
+    return 'Service Unavailable', 503
   except Exception as e:  # pylint: disable=broad-exception-caught
     if util_errors.is_retryable(e):
-      logger.error('Retrying action %s: %s', data[Key.ACTION.value], e)
-      # Release the lock so that the retry can proceed
-      orchestrator.db.release_task_lock(execution_id, node_id, group_id)
-      return 'Quota Exceeded', 429  # Cloud Tasks may retry this
+      if can_retry:
+        logger.error('Retrying action %s: %s', data[Key.ACTION.value], e)
+        if mark_retryable(e):
+          return 'Quota Exceeded', 429
+        return 'Service Unavailable', 503
+      logger.error(
+          'Retry limit reached for action %s: %s',
+          data[Key.ACTION.value],
+          e,
+      )
+      if mark_failed(e):
+        return 'Internal Error', 200
+      return 'Service Unavailable', 503
     else:
       logger.error('Fatal error for action %s: %s', data[Key.ACTION.value], e)
+      mark_failed(e)
       return 'Internal Error', 200  # Cloud Tasks will NOT retry this
+  try:
+    task_succeeded = orchestrator.db.mark_task_succeeded(
+        execution_id,
+        node_id,
+        group_id,
+        task_token,
+        owner_token,
+        attempt,
+    )
+  except Exception as e:  # pylint: disable=broad-exception-caught
+    logger.error(
+        'Failed to record completed task state for %s: %s',
+        data[Key.ACTION.value],
+        e,
+    )
+    return 'Service Unavailable', 503
+  if not task_succeeded:
+    logger.error(
+        'Task ownership changed before completion was recorded for %s',
+        data[Key.ACTION.value],
+    )
+    return 'Service Unavailable', 503
   return (
       (
           f'Action {data[Key.ACTION.value]} triggered for'

@@ -100,6 +100,15 @@ def test_api_core_retry_error_unwraps_transient_cause():
   assert is_transient_infrastructure_error(error) is True
 
 
+def test_api_core_retry_error_unwraps_resource_exhausted():
+  error = google_exceptions.RetryError(
+      'retry deadline exceeded',
+      cause=google_exceptions.ResourceExhausted('quota'),
+  )
+  assert is_transient_infrastructure_error(error) is True
+  assert is_retryable(error) is True
+
+
 def test_task_recovery_retries_exhausted_client_retries():
   for cause in (
       google_exceptions.TooManyRequests('quota'),

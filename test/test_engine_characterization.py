@@ -76,27 +76,52 @@ def _wait_for(predicate, timeout=_DEADLINE_SECONDS, interval=0.02):
 
 
 class _FakeBlob:
-  """Cache blob that never exists and swallows writes."""
+  """In-memory blob with create-only and generation-match behavior."""
 
-  def __init__(self):
+  def __init__(self, path, objects, generations):
+    self.path = path
+    self.objects = objects
+    self.generations = generations
     self.metadata = None
+    self.generation = None
 
   def exists(self):
-    return False
+    return self.path in self.objects
 
-  def upload_from_string(self, *_args, **_kwargs):
-    pass
+  def reload(self):
+    if self.path not in self.objects:
+      raise google_exceptions.NotFound('object not found')
+    self.generation = self.generations[self.path]
 
-  def download_as_string(self):
-    raise AssertionError('cache read attempted on a non-existent fake blob')
+  def upload_from_string(self, data, if_generation_match=None, **_kwargs):
+    if if_generation_match == 0 and self.path in self.objects:
+      raise google_exceptions.PreconditionFailed('object already exists')
+    self.objects[self.path] = data
+    self.generations[self.path] = self.generations.get(self.path, 0) + 1
+    self.generation = self.generations[self.path]
+
+  def download_as_string(self, if_generation_match=None):
+    if self.path not in self.objects:
+      raise google_exceptions.NotFound('object not found')
+    if (
+        if_generation_match is not None
+        and if_generation_match != self.generations[self.path]
+    ):
+      raise google_exceptions.PreconditionFailed('generation changed')
+    return self.objects[self.path]
 
 
 class _FakeGCS:
   """Stand-in for util.gcs_wrapper.GCS in the action wrapper."""
 
+  objects = {}
+  generations = {}
+
   def __init__(self, *_args, **_kwargs):
     self.gcs_bucket = mock.Mock()
-    self.gcs_bucket.blob = lambda _path: _FakeBlob()
+    self.gcs_bucket.blob = lambda path: _FakeBlob(
+        path, self.objects, self.generations
+    )
 
 
 @pytest.fixture(scope='module')
@@ -148,6 +173,8 @@ def engine(orch, monkeypatch):
   actions_wrapper_module = importlib.import_module('actions_wrapper')
 
   fresh_db = database_module.Database('characterization-test')
+  _FakeGCS.objects = {}
+  _FakeGCS.generations = {}
   monkeypatch.setattr(orch, 'db', fresh_db)
   monkeypatch.setattr(gcs_wrapper_module, 'GCS', _FakeGCS)
 
@@ -412,12 +439,6 @@ def test_join_seal_rejects_late_arrivals(engine):
   assert files == {}
 
 
-# ---------------------------------------------------------------------------
-# INVARIANT: once an action has returned, a transient output-write failure is
-# marked for the HTTP handler to release the task lock and request redelivery.
-# Local mode has no Cloud Tasks retry loop, so this test pins the orchestration
-# boundary; handler-driven recovery is covered in test_frontdoor.py.
-# ---------------------------------------------------------------------------
 def test_store_output_deadline_is_marked_after_action_completion(
     engine, monkeypatch
 ):

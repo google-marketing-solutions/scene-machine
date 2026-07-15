@@ -32,11 +32,18 @@ class RetryableTaskRecoveryError(Exception):
   """Marks a transient failure while recovering a prior task delivery."""
 
 
+class TaskCompletionWriteError(Exception):
+  """Marks an unproven completion that must not rerun paid work."""
+
+
 def is_transient_infrastructure_error(e: Exception) -> bool:
   """Returns whether an infrastructure error is safe to retry by its stage."""
   if isinstance(e, google_exceptions.RetryError):
     e = e.cause
-  return isinstance(e, google_exceptions.ServerError)
+  return isinstance(
+      e,
+      (google_exceptions.ServerError, google_exceptions.ResourceExhausted),
+  )
 
 
 def get_compact_callstack(start_function_name: str) -> str:
@@ -70,6 +77,8 @@ def is_retryable(e: Exception) -> bool:
   Returns:
     True if the exception is retryable, False otherwise
   """
+  if isinstance(e, google_exceptions.RetryError):
+    e = e.cause
   code_attr = getattr(e, 'code', None)
   return any([
       isinstance(e, google_exceptions.ResourceExhausted),
