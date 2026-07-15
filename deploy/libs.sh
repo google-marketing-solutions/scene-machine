@@ -66,19 +66,24 @@ _retry_iam_write() {
       local missing_sa_error
       local policy_error_preamble
       local conflict_error
+      local propagating_project
       missing_sa_error="ERROR: (gcloud.projects.add-iam-policy-binding) INVALID_ARGUMENT: Service account ${propagating_runtime_sa} does not exist."
       policy_error_preamble='ERROR: Policy modification failed. For a binding with condition, run "gcloud alpha iam policies lint-condition" to identify issues in condition.'
+      propagating_project="${propagating_runtime_sa#sm-runtime@}"
+      propagating_project="${propagating_project%.iam.gserviceaccount.com}"
       conflict_error="${err//${propagating_runtime_sa}/<runtime-sa>}"
+      conflict_error="${conflict_error//${propagating_project}/<project>}"
       if [ "$err" = "$missing_sa_error" ] \
           || [ "$err" = "${policy_error_preamble}"$'\n'"${missing_sa_error}" ]; then
         retry_kind="runtime SA propagation"
         propagation_seen=1
-      elif grep -Fqx "$missing_sa_error" <<<"$err"; then
-        # Unexpected extra output around the known status fails closed instead
-        # of falling through to the broader conflict classifier.
+      elif grep -qiE \
+          'permission_denied|forbidden|unauthorized|invalid_argument|not_found|not found|does not exist' \
+          <<<"$err"; then
+        # Permanent auth, argument, and missing-resource failures must not
+        # inherit the longer budget after an earlier propagation miss.
         retry_kind=""
-      elif ! grep -qiE 'permission_denied|forbidden|unauthorized' <<<"$err" \
-          && grep -qiE 'concurrent|aborted|etag|stale' <<<"$conflict_error"; then
+      elif grep -qiE 'concurrent|aborted|etag|stale' <<<"$conflict_error"; then
         retry_kind="conflict"
       fi
     elif grep -qiE 'concurrent|aborted|etag|stale' <<<"$err"; then

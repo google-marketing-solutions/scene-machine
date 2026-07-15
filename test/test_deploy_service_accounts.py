@@ -261,6 +261,60 @@ def test_runtime_sa_propagation_budget_survives_later_etag_conflict(tmp_path):
   assert 'succeeded on attempt 7' in result.stdout
 
 
+def test_fatal_error_after_propagation_does_not_inherit_long_retry_budget(
+    tmp_path,
+):
+  project = 'stale-project'
+  fatal_error = f'ERROR: project {project} was not found.'
+  result, calls = _run_project_iam_binding(
+      tmp_path,
+      write_error='',
+      failures_before_success=0,
+      project=project,
+      write_errors=(_runtime_sa_iam_lag(project), fatal_error),
+  )
+
+  assert result.returncode == 1
+  assert calls.count('add-binding') == 2
+  assert sum(call.startswith('sleep:') for call in calls) == 1
+  assert fatal_error in result.stderr
+
+
+def test_unrelated_error_after_propagation_masks_retry_word_in_project_id(
+    tmp_path,
+):
+  project = 'stale-project'
+  unrelated_error = (
+      f'ERROR: RESOURCE_EXHAUSTED: quota exceeded for project {project}.'
+  )
+  result, calls = _run_project_iam_binding(
+      tmp_path,
+      write_error='',
+      failures_before_success=0,
+      project=project,
+      write_errors=(_runtime_sa_iam_lag(project), unrelated_error),
+  )
+
+  assert result.returncode == 1
+  assert calls.count('add-binding') == 2
+  assert sum(call.startswith('sleep:') for call in calls) == 1
+  assert unrelated_error in result.stderr
+
+
+def test_known_missing_sa_line_with_conflict_output_fails_closed(tmp_path):
+  missing_sa_line = _RUNTIME_SA_IAM_LAG.splitlines()[-1]
+  write_error = f'{missing_sa_line}\nABORTED: stale etag'
+  result, calls = _run_project_iam_binding(
+      tmp_path,
+      write_error=write_error,
+      failures_before_success=1,
+  )
+
+  assert result.returncode == 1
+  assert calls == ['get-policy', 'add-binding']
+  assert write_error in result.stderr
+
+
 def test_runtime_sa_mixed_permission_error_fails_in_stale_named_project(
     tmp_path,
 ):
