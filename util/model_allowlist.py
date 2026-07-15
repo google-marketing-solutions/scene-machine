@@ -39,6 +39,7 @@ import copy
 import functools
 import json
 import logging
+import math
 import os
 from typing import TYPE_CHECKING
 
@@ -53,6 +54,8 @@ _ALLOWLIST_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     'ui', 'definitions', 'models.json',
 )
+_LIVE_CATALOG_RPC_TIMEOUT_SECONDS = 2.0
+_LIVE_CATALOG_RETRY_TIMEOUT_SECONDS = 3.0
 
 _catalog_db = None
 
@@ -84,7 +87,17 @@ def _get_catalog_db() -> 'firestore.Client':
 
 
 def _fetch_live_catalog() -> dict:
-  snapshot = _get_catalog_db().collection('config').document('models').get()
+  from google.api_core import retry as api_retry
+
+  snapshot = _get_catalog_db().collection('config').document('models').get(
+      retry=api_retry.Retry(
+          initial=0.1,
+          maximum=0.5,
+          multiplier=2.0,
+          timeout=_LIVE_CATALOG_RETRY_TIMEOUT_SECONDS,
+      ),
+      timeout=_LIVE_CATALOG_RPC_TIMEOUT_SECONDS,
+  )
   if not snapshot.exists:
     raise LookupError('config/models is not seeded')
   return snapshot.to_dict()
@@ -99,6 +112,8 @@ def _first_non_json_value(value: object, path: str) -> str | None:
   as SDK objects and would crash json serialization downstream, so the
   whole catalog must be JSON-typed.
   """
+  if isinstance(value, float) and not math.isfinite(value):
+    return f'{path} (non-finite float)'
   if value is None or isinstance(value, (bool, int, float, str)):
     return None
   if isinstance(value, list):
@@ -145,13 +160,14 @@ def validate_catalog_shape(catalog: object, shipped_actions: dict) -> str | None
       if (not isinstance(values, list)
           or not all(isinstance(v, str) for v in values)):
         return f'model {mid!r}: {field!r} is not a list of strings'
-    if not isinstance(model.get('capabilities', {}), dict):
-      return f'model {mid!r}: capabilities is not an object'
+    capabilities = model.get('capabilities')
+    if not isinstance(capabilities, dict):
+      return f'model {mid!r}: capabilities is missing or not an object'
     # veo.generate applies these with `is True`; a string "false" is a
     # console-edit mistake, not a policy. Required-and-boolean is the
     # snapshot PR's job; present-implies-boolean holds the line here.
     for flag in ('supports_audio', 'enhance_prompt_locked'):
-      flag_value = model.get('capabilities', {}).get(flag)
+      flag_value = capabilities.get(flag)
       if flag_value is not None and not isinstance(flag_value, bool):
         return f'model {mid!r}: {flag} must be a boolean'
   for family, mid in catalog['defaults'].items():
@@ -171,14 +187,22 @@ def load_allowlist_with_source() -> tuple[dict, str]:
   if os.environ.get('ROLE', 'all') == 'app':
     try:
       catalog = _fetch_live_catalog()
-      problem = validate_catalog_shape(
-          catalog, _parse_allowlist(_ALLOWLIST_PATH)['actions'])
-      if problem:
-        raise ValueError(problem)
-      return catalog, 'firestore'
-    except Exception as error:  # any failure -> serve the last-known-good file
+    except Exception as error:  # any read failure -> last-known-good file
       logger.exception(
           'config/models unusable (%s); serving the shipped allowlist', error)
+      return load_shipped_allowlist(), 'shipped'
+    try:
+      problem = validate_catalog_shape(
+          catalog, _parse_allowlist(_ALLOWLIST_PATH)['actions'])
+    except Exception as error:  # unexpected validation failure -> safe fallback
+      logger.exception(
+          'config/models unusable (%s); serving the shipped allowlist', error)
+      return load_shipped_allowlist(), 'shipped'
+    if problem:
+      logger.error(
+          'config/models unusable (%s); serving the shipped allowlist', problem)
+      return load_shipped_allowlist(), 'shipped'
+    return catalog, 'firestore'
   return load_shipped_allowlist(), 'shipped'
 
 

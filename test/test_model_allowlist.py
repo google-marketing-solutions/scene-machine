@@ -26,6 +26,11 @@ import json
 import os
 import re
 
+from google.api_core.retry import Retry
+from google.auth.credentials import AnonymousCredentials
+from google.cloud import firestore
+import pytest
+
 from util import model_allowlist
 from util.model_allowlist import (
     is_pair_allowed,
@@ -244,6 +249,10 @@ def test_app_role_falls_back_on_a_fetch_error(monkeypatch, caplog):
   assert source == 'shipped'
   assert catalog == load_shipped_allowlist()
   assert 'config/models unusable' in caplog.text
+  record = next(
+      record for record in caplog.records
+      if 'config/models unusable' in record.getMessage())
+  assert record.exc_info is not None
 
 
 def test_app_role_falls_back_on_a_malformed_doc(monkeypatch, caplog):
@@ -253,6 +262,35 @@ def test_app_role_falls_back_on_a_malformed_doc(monkeypatch, caplog):
   _, source = load_allowlist_with_source()
   assert source == 'shipped'
   assert 'not an object' in caplog.text
+  record = next(
+      record for record in caplog.records
+      if 'config/models unusable' in record.getMessage())
+  assert record.exc_info is None
+
+
+def test_live_catalog_read_has_short_sdk_retry_and_rpc_timeouts(monkeypatch):
+  client = firestore.Client(
+      project='test-project',
+      credentials=AnonymousCredentials(),
+      database='test-database',
+  )
+  captured = {}
+
+  def empty_batch_get(*, request, metadata, retry, timeout):
+    captured.update(
+        request=request, metadata=metadata, retry=retry, timeout=timeout)
+    return iter(())
+
+  monkeypatch.setattr(
+      client._firestore_api, 'batch_get_documents', empty_batch_get)
+  monkeypatch.setattr(model_allowlist, '_get_catalog_db', lambda: client)
+
+  with pytest.raises(LookupError, match='not seeded'):
+    model_allowlist._fetch_live_catalog()
+
+  assert captured['timeout'] == 2.0
+  assert isinstance(captured['retry'], Retry)
+  assert captured['retry'].timeout == 3.0
 
 
 def test_app_role_rejects_a_tampered_actions_section(monkeypatch, caplog):
@@ -325,6 +363,15 @@ def test_shape_rejects_malformed_model_entries():
     assert validate_catalog_shape(catalog, _MODELS['actions'])
 
 
+def test_shape_requires_capabilities():
+  catalog = load_shipped_allowlist()
+  del catalog['models']['veo-3.1-generate-001']['capabilities']
+
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+
+  assert problem and 'capabilities' in problem
+
+
 def test_shape_rejects_broken_defaults():
   catalog = load_shipped_allowlist()
   catalog['defaults']['veo'] = 'not-a-model'
@@ -350,6 +397,16 @@ def test_shape_rejects_firestore_only_values_anywhere():
     plant(catalog)
     problem = validate_catalog_shape(catalog, _MODELS['actions'])
     assert problem and 'non-JSON' in problem
+
+
+def test_shape_rejects_non_finite_floats():
+  for value in (float('nan'), float('inf'), float('-inf')):
+    catalog = load_shipped_allowlist()
+    catalog['models']['veo-3.1-generate-001']['capabilities']['limit'] = value
+
+    problem = validate_catalog_shape(catalog, _MODELS['actions'])
+
+    assert problem and 'non-finite float' in problem
 
 
 def test_shape_rejects_non_boolean_capability_flags():
