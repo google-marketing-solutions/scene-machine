@@ -801,6 +801,79 @@ def test_trigger_action_post_action_deadline_records_retryable_state(
   assert transitions[0][1][-1] is True
 
 
+@pytest.mark.parametrize(
+    ('manifest_on_retry', 'expected_action_calls'),
+    ((False, ['called']), (True, [])),
+    ids=('manifest-missing-executes-once', 'manifest-present-skips-action'),
+)
+def test_fresh_manifest_probe_retry_rechecks_before_action(
+    monkeypatch,
+    orchestrator_module,
+    manifest_on_retry,
+    expected_action_calls,
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  cache = {}
+  output = {'outpainted_image': [{'file': 'generated/image.png'}]}
+  action_calls = []
+  stored_outputs = []
+
+  def paid_action(_gcs, _workflow_params):
+    action_calls.append('called')
+    return output
+
+  paid_action.__module__ = 'actions.outpaint_image'
+  monkeypatch.setattr(
+      orch.orchestrator.actwrap, 'get_action_by_name', lambda _name: paid_action
+  )
+  cache_state = _install_action_cache(
+      monkeypatch,
+      orch,
+      cache,
+      reload_errors=[google_exceptions.ServiceUnavailable('GCS unavailable')],
+  )
+  monkeypatch.setattr(
+      orch.orchestrator.db,
+      'store_output',
+      lambda *args: stored_outputs.append(args[-1]),
+  )
+  payload = _task_payload(
+      execution_id=f'fresh-probe-{manifest_on_retry}',
+      action='outpaint_image',
+      force_execution=True,
+  )
+  headers = {
+      'X-CloudTasks-QueueName': 'queue-fresh-probe',
+      'X-CloudTasks-TaskName': f'task-{manifest_on_retry}',
+  }
+  client = orch.app.test_client()
+
+  first = client.post('/triggerAction', json=payload, headers=headers)
+  lock_ref = orch.orchestrator.db._get_task_lock_ref(
+      payload['executionId'], 'node-1', 'group-1'
+  )
+  retryable_state = lock_ref.get().to_dict()
+  completion_path = f'_task-completions/{retryable_state["taskToken"]}.json'
+  if manifest_on_retry:
+    cache[completion_path] = json.dumps(output)
+    cache_state['generations'][completion_path] = 1
+  retry = client.post(
+      '/triggerAction',
+      json=payload,
+      headers={**headers, 'X-CloudTasks-TaskRetryCount': '1'},
+  )
+  final_state = lock_ref.get().to_dict()
+
+  assert first.status_code == 503
+  assert retry.status_code == 200
+  assert action_calls == expected_action_calls
+  assert stored_outputs == [output]
+  assert retryable_state['state'] == 'retryable'
+  assert retryable_state['recoveryOnly'] is False
+  assert final_state['state'] == 'succeeded'
+
+
 @pytest.mark.parametrize('transition_failure', ('exception', 'lost-owner'))
 def test_fatal_action_is_acknowledged_without_retrying_paid_work(
     monkeypatch, orchestrator_module, transition_failure

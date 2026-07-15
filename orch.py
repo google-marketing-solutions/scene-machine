@@ -430,6 +430,7 @@ def trigger_action_handler() -> tuple[str, int]:
         recovery_only,
     )
   except (
+      util_errors.RetryablePreActionProbeError,
       util_errors.RetryableTaskRecoveryError,
       util_errors.RetryablePostActionError,
   ) as e:
@@ -439,7 +440,10 @@ def trigger_action_handler() -> tuple[str, int]:
           data[Key.ACTION.value],
           e.__cause__ or e,
       )
-      mark_retryable(e, True)
+      mark_retryable(
+          e,
+          not isinstance(e, util_errors.RetryablePreActionProbeError),
+      )
       return 'Service Unavailable', 503
     logger.error(
         'Retry limit reached for task %s after infrastructure failure: %s',

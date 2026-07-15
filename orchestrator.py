@@ -414,7 +414,14 @@ def trigger_action(
   else:  # For pass action, simply forward
     func = lambda input_files, *_: input_files
   task_token = task_token or _local_task_token(data)
-  output = _load_task_completion(data, task_token, recovery_only)
+  try:
+    output = _load_task_completion(data, task_token, recovery_only)
+  except util_errors.RetryableTaskRecoveryError as e:
+    if recovery_only:
+      raise
+    raise util_errors.RetryablePreActionProbeError(str(e)) from (
+        e.__cause__ or e
+    )
   if output is None:
     output = func(
         data[Key.INPUT_FILES.value],

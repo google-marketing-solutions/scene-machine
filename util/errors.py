@@ -28,6 +28,10 @@ class RetryablePostActionError(Exception):
   """Marks a transient infrastructure failure after an action completed."""
 
 
+class RetryablePreActionProbeError(Exception):
+  """Marks a transient completion probe failure before an action starts."""
+
+
 class RetryableTaskRecoveryError(Exception):
   """Marks a transient failure while recovering a prior task delivery."""
 
