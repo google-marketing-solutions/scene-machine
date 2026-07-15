@@ -158,9 +158,9 @@ def test_allowlist_generate_video_models_carry_capability_flags():
   invariant must cover every generate_video model, not just family=='veo' --
   otherwise an entry checked in with a mistyped family and empty capabilities
   escapes the net and silently fails open."""
-  from util.model_allowlist import load_allowlist
+  from util.model_allowlist import load_shipped_allowlist
   video_models = {
-      mid: m for mid, m in load_allowlist()['models'].items()
+      mid: m for mid, m in load_shipped_allowlist()['models'].items()
       if 'generate_video' in m.get('actions', [])}
   assert video_models, 'no generate_video models in the allowlist'
   for mid, m in video_models.items():

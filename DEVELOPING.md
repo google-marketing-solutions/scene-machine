@@ -127,6 +127,17 @@ Today `deploy.sh` builds **one** image and runs it as two Cloud Run services via
 
 If deploy speed ever becomes the main bottleneck, the two services could be built as separate images: a small `app` image (Flask, `/api`, static UI) and a heavier `worker` image (action execution, ffmpeg, generation libraries). The services already differ only by `ROLE`, so this is mostly a packaging change. It is deferred because it raises operational complexity: two images to build, tag, version, and keep in sync, and more branches in the deploy path. Do it only after the local UI loop and the layer cache, which capture most of the day-to-day speed win at far lower risk.
 
+## Editing the model catalog at runtime
+
+The model catalog — which models exist, their locations and capabilities, and the per-family defaults — lives in the repo at `ui/definitions/models.json` and is written to the `config/models` Firestore document on every deploy. The app service reads the live document on every request, so anyone with Firestore access can change the served catalog without a deploy:
+
+- **Editable live:** the `models` and `defaults` sections — add a model, remove one, fix a location or a capability flag.
+- **Not editable live:** the `actions` section. It wires the catalog to `actions.json` parameter names; if the live document's copy differs from the shipped one, the app rejects the whole document and falls back to the shipped file. Change it in the repo.
+- **Edits are temporary.** The next deploy overwrites `config/models` from the repo (after showing a diff at the confirmation prompt). To make a change permanent, land it in `ui/definitions/models.json`.
+- **A malformed edit is safe but ignored.** The app logs `config/models unusable (...)` and keeps serving the catalog that shipped with the deploy — check the app service logs if an edit doesn't seem to apply.
+- **The worker does not see live edits.** Capability flags read at execution time (for example `supports_audio`) come from the shipped file until the next deploy. Live edits change which submissions are accepted immediately; they change execution behavior only after a deploy. (Exception: local dev runs everything in one `ROLE=app` process, so in-process actions there read the live doc.)
+- Consider enabling Firestore point-in-time recovery on the UI database as a general safety net for console edits.
+
 ## Creating Applications
 
 [< Local Development](#local-development-and-faster-deploys) • [Top](#developing-top) • [Modules not used by Scene Machine >](#modules-not-used-by-scene-machine)

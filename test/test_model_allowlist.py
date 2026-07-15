@@ -20,15 +20,20 @@ is exercised and cannot drift from what the runtime uses. CI is the single
 strictness point for the allowlist.
 """
 
+import datetime
 import glob
 import json
 import os
 import re
 
+from util import model_allowlist
 from util.model_allowlist import (
     is_pair_allowed,
     load_allowlist,
+    load_allowlist_with_source,
+    load_shipped_allowlist,
     models_for_action,
+    validate_catalog_shape,
 )
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -40,7 +45,7 @@ _CONFIG_TS = os.path.join(
 # Param names that mark a model-parameterized action in actions.json.
 _MODEL_PARAM_NAMES = {'gemini_model', 'image_model', 'model'}
 
-_MODELS = load_allowlist()  # through the shared loader (exercises it)
+_MODELS = load_shipped_allowlist()  # the checked-in file; CI pins this one
 with open(_ACTIONS_JSON, encoding='utf-8') as _f:
   _ACTIONS = json.load(_f)
 
@@ -64,18 +69,12 @@ def _model_parameterized_actions():
 
 # --- allowlist structure -----------------------------------------------------
 
-def test_parses_and_has_sections():
-  assert 'actions' in _MODELS and 'models' in _MODELS
-
-
-def test_defaults_reference_real_models_of_their_family():
-  defaults = _MODELS.get('defaults', {})
-  assert defaults, 'no defaults declared'
-  for family, model_id in defaults.items():
-    model = _MODELS['models'].get(model_id)
-    assert model is not None, f'default {model_id!r} is not a real model'
-    assert model['family'] == family, (
-        f'default {model_id!r} is family {model["family"]!r}, not {family!r}')
+def test_shipped_catalog_passes_the_runtime_shape_check():
+  # Sections, model-entry fields, and family-correct defaults -- via the same
+  # function the app-role loader runs on live Firestore reads, so the shipped
+  # file can never fail the runtime's own fallback rules.
+  assert _MODELS.get('defaults'), 'no defaults declared'
+  assert validate_catalog_shape(_MODELS, _MODELS['actions']) is None
 
 
 def test_outpaint_models_cover_2k_and_4k():
@@ -201,11 +200,11 @@ def test_every_shipped_model_is_allowlisted():
   assert not missing, f'shipped but not allowlisted (outage on enforcement): {missing}'
 
 
-def test_load_allowlist_returns_defensive_copy():
-  a = load_allowlist()
+def test_load_shipped_allowlist_returns_defensive_copy():
+  a = load_shipped_allowlist()
   a['models'].clear()
   a['actions'].clear()
-  b = load_allowlist()
+  b = load_shipped_allowlist()
   assert b['models'] and b['actions'], 'mutation leaked into the cached allowlist'
 
 
@@ -215,3 +214,157 @@ def test_validator_and_test_share_model_param_names():
   # two can't silently diverge and hide an action from both.
   from util.submission_validation import _MODEL_PARAM_NAMES as validator_names
   assert set(validator_names) == _MODEL_PARAM_NAMES
+
+
+# --- runtime source: the live config/models doc (ROLE=app only) ---------------
+
+def _live_catalog_with_hotfix():
+  catalog = load_shipped_allowlist()
+  catalog['models']['veo-live-hotfix'] = {
+      'family': 'veo', 'actions': ['generate_video'],
+      'locations': ['global'], 'capabilities': {}}
+  return catalog
+
+
+def test_app_role_serves_the_live_catalog(monkeypatch):
+  monkeypatch.setenv('ROLE', 'app')
+  monkeypatch.setattr(
+      model_allowlist, '_fetch_live_catalog', _live_catalog_with_hotfix)
+  catalog, source = load_allowlist_with_source()
+  assert source == 'firestore'
+  assert 'veo-live-hotfix' in catalog['models']
+
+
+def test_app_role_falls_back_on_a_fetch_error(monkeypatch, caplog):
+  monkeypatch.setenv('ROLE', 'app')
+  def unreachable():
+    raise RuntimeError('firestore down')
+  monkeypatch.setattr(model_allowlist, '_fetch_live_catalog', unreachable)
+  catalog, source = load_allowlist_with_source()
+  assert source == 'shipped'
+  assert catalog == load_shipped_allowlist()
+  assert 'config/models unusable' in caplog.text
+
+
+def test_app_role_falls_back_on_a_malformed_doc(monkeypatch, caplog):
+  monkeypatch.setenv('ROLE', 'app')
+  monkeypatch.setattr(
+      model_allowlist, '_fetch_live_catalog', lambda: {'models': 'oops'})
+  _, source = load_allowlist_with_source()
+  assert source == 'shipped'
+  assert 'not an object' in caplog.text
+
+
+def test_app_role_rejects_a_tampered_actions_section(monkeypatch, caplog):
+  monkeypatch.setenv('ROLE', 'app')
+  def tampered():
+    catalog = load_shipped_allowlist()
+    catalog['actions'] = {}
+    return catalog
+  monkeypatch.setattr(model_allowlist, '_fetch_live_catalog', tampered)
+  _, source = load_allowlist_with_source()
+  assert source == 'shipped'
+  assert "'actions' differs" in caplog.text
+
+
+def test_other_roles_never_touch_firestore(monkeypatch):
+  # Counted, not raised: an exception sentinel would be swallowed by the
+  # loader's catch-everything fallback and the test would pass vacuously.
+  calls = []
+  def counting():
+    calls.append(1)
+    return _live_catalog_with_hotfix()
+  monkeypatch.setattr(model_allowlist, '_fetch_live_catalog', counting)
+  for role in ('worker', 'all'):
+    monkeypatch.setenv('ROLE', role)
+    assert load_allowlist_with_source()[1] == 'shipped'
+  monkeypatch.delenv('ROLE')
+  assert load_allowlist_with_source()[1] == 'shipped'
+  assert not calls, 'only ROLE=app may read Firestore'
+
+
+def test_app_role_fetches_fresh_per_call(monkeypatch):
+  # Live edits apply on the next submission; there is no cache to invalidate.
+  calls = []
+  def counting():
+    calls.append(1)
+    return _live_catalog_with_hotfix()
+  monkeypatch.setenv('ROLE', 'app')
+  monkeypatch.setattr(model_allowlist, '_fetch_live_catalog', counting)
+  load_allowlist()
+  load_allowlist()
+  assert len(calls) == 2
+
+
+# --- validate_catalog_shape: what a console edit must satisfy -----------------
+
+def test_shape_rejects_a_non_object():
+  assert validate_catalog_shape('nope', _MODELS['actions'])
+
+
+def test_shape_rejects_missing_sections():
+  for section in ('defaults', 'actions', 'models'):
+    catalog = load_shipped_allowlist()
+    del catalog[section]
+    problem = validate_catalog_shape(catalog, _MODELS['actions'])
+    assert problem and section in problem
+
+
+def test_shape_rejects_malformed_model_entries():
+  mutations = (
+      lambda m: 'not-an-object',
+      lambda m: {**m, 'family': None},
+      lambda m: {**m, 'actions': 'generate_video'},
+      lambda m: {**m, 'locations': [1]},
+      lambda m: {**m, 'capabilities': 'fast'},
+  )
+  for mutate in mutations:
+    catalog = load_shipped_allowlist()
+    catalog['models']['veo-3.1-generate-001'] = mutate(
+        catalog['models']['veo-3.1-generate-001'])
+    assert validate_catalog_shape(catalog, _MODELS['actions'])
+
+
+def test_shape_rejects_broken_defaults():
+  catalog = load_shipped_allowlist()
+  catalog['defaults']['veo'] = 'not-a-model'
+  assert 'not in models' in validate_catalog_shape(catalog, _MODELS['actions'])
+  catalog = load_shipped_allowlist()
+  catalog['defaults']['veo'] = 'gemini-3.5-flash'  # real model, wrong family
+  assert 'family' in validate_catalog_shape(catalog, _MODELS['actions'])
+
+
+def test_shape_rejects_firestore_only_values_anywhere():
+  # A console edit can add a timestamp/bytes field in spots the structural
+  # checks don't pin. Such a doc must be rejected wholesale: it would crash
+  # json serialization wherever the catalog is served.
+  timestamp = datetime.datetime(2026, 7, 1)
+  for plant in (
+      lambda c: c.__setitem__('updated_at', timestamp),  # extra top-level key
+      lambda c: c['models']['veo-3.1-generate-001']['capabilities']
+      .__setitem__('added_at', timestamp),               # capability value
+      lambda c: c['models']['veo-3.1-generate-001']
+      .__setitem__('note', [b'bytes']),                  # extra model field
+  ):
+    catalog = load_shipped_allowlist()
+    plant(catalog)
+    problem = validate_catalog_shape(catalog, _MODELS['actions'])
+    assert problem and 'non-JSON' in problem
+
+
+def test_shape_rejects_non_boolean_capability_flags():
+  # veo.generate applies these with `is True`; a console-edited string
+  # "false" must reject the doc, not silently disable the behavior.
+  for flag in ('supports_audio', 'enhance_prompt_locked'):
+    catalog = load_shipped_allowlist()
+    catalog['models']['veo-3.1-generate-001']['capabilities'][flag] = 'false'
+    problem = validate_catalog_shape(catalog, _MODELS['actions'])
+    assert problem and 'boolean' in problem
+
+
+def test_shape_allows_json_typed_extra_fields():
+  # Extra keys that are plain JSON are harmless (e.g. _notes strings) and
+  # must not reject the doc.
+  catalog = load_shipped_allowlist()
+  catalog['_notes'] = 'operator scratch note'
+  assert validate_catalog_shape(catalog, _MODELS['actions']) is None

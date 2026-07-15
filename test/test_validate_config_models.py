@@ -18,7 +18,7 @@ import os
 import re
 
 from scripts import validate_config_models
-from util.model_allowlist import load_allowlist
+from util.model_allowlist import load_shipped_allowlist
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -89,4 +89,4 @@ def test_config_template_defaults_pass_real_allowlist():
   # (e.g. a model bumped in the template but not the allowlist) fails here.
   env = _parse_shell_env(os.path.join(_REPO, 'config.template.txt'))
   assert validate_config_models.collect_errors(
-      env, load_allowlist()['models']) == []
+      env, load_shipped_allowlist()['models']) == []

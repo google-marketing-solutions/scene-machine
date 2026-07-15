@@ -27,7 +27,10 @@ from collections.abc import Mapping
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from util.model_allowlist import load_allowlist  # noqa: E402
+# The check validates config.txt against what THIS deploy ships, so it
+# reads the repo file explicitly -- never the live Firestore doc, which
+# may hold operator edits the seed is about to replace.
+from util.model_allowlist import load_shipped_allowlist  # noqa: E402
 
 # (model env var, region env var, expected family, human label)
 _CHECKS = (
@@ -70,7 +73,7 @@ def collect_errors(env: Mapping[str, str], models: dict) -> list[str]:
 
 
 def main() -> None:
-  errors = collect_errors(os.environ, load_allowlist()['models'])
+  errors = collect_errors(os.environ, load_shipped_allowlist()['models'])
   if errors:
     sys.stderr.write('Model/region config check FAILED:\n')
     for error in errors:
