@@ -67,16 +67,30 @@ _retry_iam_write() {
       local policy_error_preamble
       local conflict_error
       local propagating_project
+      local propagation_residual
+      local line
       missing_sa_error="ERROR: (gcloud.projects.add-iam-policy-binding) INVALID_ARGUMENT: Service account ${propagating_runtime_sa} does not exist."
       policy_error_preamble='ERROR: Policy modification failed. For a binding with condition, run "gcloud alpha iam policies lint-condition" to identify issues in condition.'
       propagating_project="${propagating_runtime_sa#sm-runtime@}"
       propagating_project="${propagating_project%.iam.gserviceaccount.com}"
-      conflict_error="${err//${propagating_runtime_sa}/<runtime-sa>}"
-      conflict_error="${conflict_error//${propagating_project}/<project>}"
-      if [ "$err" = "$missing_sa_error" ] \
-          || [ "$err" = "${policy_error_preamble}"$'\n'"${missing_sa_error}" ]; then
-        retry_kind="runtime SA propagation"
-        propagation_seen=1
+      conflict_error="${err//"$propagating_runtime_sa"/<runtime-sa>}"
+      conflict_error="${conflict_error//"$propagating_project"/<project>}"
+      if grep -Fqx "$missing_sa_error" <<<"$err"; then
+        propagation_residual=""
+        while IFS= read -r line; do
+          if [ "$line" != "$missing_sa_error" ] \
+              && [ "$line" != "$policy_error_preamble" ]; then
+            propagation_residual="${propagation_residual}${line}"$'\n'
+          fi
+        done <<<"$err"
+        if ! grep -qiE \
+            'permission_denied|forbidden|unauthorized|invalid_argument|not_found|not found|does not exist|resource_exhausted|quota|concurrent|aborted|etag|stale' \
+            <<<"$propagation_residual" \
+            && ! grep -qE '^[[:space:]]*(ERROR|FATAL):' \
+              <<<"$propagation_residual"; then
+          retry_kind="runtime SA propagation"
+          propagation_seen=1
+        fi
       elif grep -qiE \
           'permission_denied|forbidden|unauthorized|invalid_argument|not_found|not found|does not exist' \
           <<<"$err"; then

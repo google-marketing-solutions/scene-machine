@@ -229,6 +229,55 @@ def test_runtime_sa_project_binding_retries_until_iam_accepts_member(
   assert 'succeeded on attempt 3' in result.stdout
 
 
+@pytest.mark.parametrize(
+    'write_error',
+    [
+        f'WARNING: Google Cloud CLI update available.\n{_RUNTIME_SA_IAM_LAG}',
+        f'{_RUNTIME_SA_IAM_LAG}\nNOTICE: diagnostic details omitted.',
+    ],
+)
+def test_runtime_sa_project_binding_tolerates_benign_extra_output(
+    tmp_path, write_error
+):
+  result, calls = _run_project_iam_binding(
+      tmp_path,
+      write_error=write_error,
+      failures_before_success=1,
+  )
+
+  assert result.returncode == 0, result.stderr
+  assert calls[0] == 'get-policy'
+  assert calls.count('add-binding') == 2
+  assert sum(call.startswith('sleep:') for call in calls) == 1
+  assert 'succeeded on attempt 2' in result.stdout
+
+
+@pytest.mark.parametrize(
+    'extra_error',
+    [
+        'PERMISSION_DENIED: access denied',
+        'ABORTED: stale etag',
+        'ERROR: RESOURCE_EXHAUSTED',
+    ],
+)
+def test_runtime_sa_project_binding_rejects_extra_error_output(
+    tmp_path, extra_error
+):
+  write_error = (
+      'WARNING: Google Cloud CLI update available.\n'
+      f'{_RUNTIME_SA_IAM_LAG}\n{extra_error}'
+  )
+  result, calls = _run_project_iam_binding(
+      tmp_path,
+      write_error=write_error,
+      failures_before_success=1,
+  )
+
+  assert result.returncode == 1
+  assert calls == ['get-policy', 'add-binding']
+  assert write_error in result.stderr
+
+
 def test_runtime_sa_propagation_budget_ignores_retry_words_in_project_id(
     tmp_path,
 ):
