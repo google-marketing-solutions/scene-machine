@@ -110,6 +110,10 @@ class _FakeBlob:
       raise google_exceptions.PreconditionFailed('generation changed')
     return self.objects[self.path]
 
+  def download_as_bytes(self):
+    data = self.download_as_string()
+    return data.encode('utf-8') if isinstance(data, str) else data
+
 
 class _FakeGCS:
   """Stand-in for util.gcs_wrapper.GCS in the action wrapper."""

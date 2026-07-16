@@ -52,7 +52,6 @@ _TASKS_QUEUE_CLASS_DEFAULT = 'Other'
 _TASK_DISPATCH_DEADLINE_SECONDS = 1800
 _GCS_HOST = 'https://storage.mtls.cloud.google.com/'
 _TASK_COMPLETION_PREFIX = '_task-completions'
-_TASK_COMPLETION_TTL_DAYS = 14
 
 
 if os.environ.get('K_SERVICE'):
@@ -304,7 +303,6 @@ def _task_completion_blob(data: dict[str, Any], task_token: str):
       _TASK_COMPLETION_PREFIX,
       task_token,
       bucket_name,
-      _TASK_COMPLETION_TTL_DAYS,
   )
   return gcs.gcs_bucket.blob(f'{_TASK_COMPLETION_PREFIX}/{task_token}.json')
 
@@ -315,7 +313,7 @@ def _load_task_completion(
   """Loads an immutable task output without falling back to execution."""
   blob = _task_completion_blob(data, task_token)
   try:
-    blob.reload()
+    manifest = blob.download_as_bytes()
   except google_exceptions.NotFound:
     if recovery_only:
       raise util_errors.RetryableTaskRecoveryError(
@@ -324,20 +322,10 @@ def _load_task_completion(
     return None
   except Exception as e:  # pylint: disable=broad-exception-caught
     raise util_errors.RetryableTaskRecoveryError(
-        'Failed to inspect task completion output'
+        'Failed to read task completion output'
     ) from e
-
-  generation = blob.generation
-  if (
-      isinstance(generation, bool)
-      or not isinstance(generation, int)
-      or generation <= 0
-  ):
-    raise util_errors.RetryableTaskRecoveryError(
-        'Task completion output has an invalid generation'
-    )
   try:
-    output = json.loads(blob.download_as_string(if_generation_match=generation))
+    output = json.loads(manifest)
     if not isinstance(output, dict):
       raise TypeError('Task completion output must be a JSON object')
     return output
@@ -352,14 +340,6 @@ def _store_task_completion(
 ) -> dict[str, Any]:
   """Creates the immutable output used by later task deliveries."""
   blob = _task_completion_blob(data, task_token)
-  blob.metadata = {
-      'timeToDelete': (
-          (
-              datetime.datetime.now(datetime.timezone.utc)
-              + datetime.timedelta(days=_TASK_COMPLETION_TTL_DAYS)
-          ).isoformat()
-      )
-  }
   try:
     blob.upload_from_string(
         json.dumps(output),

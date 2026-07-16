@@ -263,63 +263,61 @@ def _task_payload(
   }
 
 
+def _task_headers(
+    queue_name='queue-test', task_name='task-test', retry_count=0
+):
+  return {
+      'X-CloudTasks-QueueName': queue_name,
+      'X-CloudTasks-TaskName': task_name,
+      'X-CloudTasks-TaskRetryCount': str(retry_count),
+  }
+
+
 def _install_action_cache(
     monkeypatch,
     orch,
     cache,
     *,
     exists_errors=None,
-    reload_errors=None,
     download_errors=None,
-    download_overwrite=None,
     action_upload_errors=None,
     completion_upload_errors=None,
 ):
   """Installs an in-memory action cache for trigger-action tests."""
   cache_metadata = {}
-  cache_generations = {}
+  completion_downloads = []
   pending_exists_errors = list(exists_errors or [])
-  pending_reload_errors = list(reload_errors or [])
   pending_download_errors = list(download_errors or [])
   pending_action_upload_errors = list(action_upload_errors or [])
   pending_completion_upload_errors = list(completion_upload_errors or [])
-  overwrite_pending = download_overwrite is not None
 
   class CacheBlob:
 
     def __init__(self, path):
       self.path = path
       self.metadata = None
-      self.generation = None
 
     def exists(self):
       if pending_exists_errors:
         raise pending_exists_errors.pop(0)
       return self.path in cache
 
-    def reload(self):
-      if pending_reload_errors:
-        raise pending_reload_errors.pop(0)
-      if self.path not in cache:
-        raise google_exceptions.NotFound('cache object not found')
-      self.metadata = cache_metadata.get(self.path)
-      self.generation = cache_generations.get(self.path)
-
-    def download_as_string(self, if_generation_match=None, **_kwargs):
-      nonlocal overwrite_pending
+    def _download(self):
       if pending_download_errors:
         raise pending_download_errors.pop(0)
-      if overwrite_pending:
-        cache[self.path] = json.dumps(download_overwrite)
-        cache_metadata[self.path] = {}
-        cache_generations[self.path] = cache_generations.get(self.path, 0) + 1
-        overwrite_pending = False
-      if (
-          if_generation_match is not None
-          and if_generation_match != cache_generations.get(self.path)
-      ):
-        raise google_exceptions.PreconditionFailed('generation changed')
+      if self.path not in cache:
+        raise google_exceptions.NotFound('cache object not found')
       return cache[self.path]
+
+    def download_as_string(self, **_kwargs):
+      if self.path.startswith('_task-completions/'):
+        raise AssertionError('completion manifests must use download_as_bytes')
+      return self._download()
+
+    def download_as_bytes(self, **_kwargs):
+      completion_downloads.append(self.path)
+      data = self._download()
+      return data.encode('utf-8') if isinstance(data, str) else data
 
     def upload_from_string(self, data, if_generation_match=None, **_kwargs):
       if (
@@ -336,7 +334,6 @@ def _install_action_cache(
         raise google_exceptions.PreconditionFailed('object already exists')
       cache[self.path] = data
       cache_metadata[self.path] = self.metadata
-      cache_generations[self.path] = cache_generations.get(self.path, 0) + 1
 
   class CacheBucket:
 
@@ -350,8 +347,8 @@ def _install_action_cache(
 
   monkeypatch.setattr(orch.orchestrator.actwrap.gcs_wrapper, 'GCS', CacheGcs)
   return {
+      'completion_downloads': completion_downloads,
       'metadata': cache_metadata,
-      'generations': cache_generations,
   }
 
 
@@ -461,7 +458,7 @@ def test_task_state_ambiguous_retryable_state_is_recovery_only(
   )
 
 
-def test_task_completion_is_create_only_and_generation_pinned(
+def test_task_completion_is_create_only_without_false_expiry_metadata(
     monkeypatch, orchestrator_module
 ):
   del orchestrator_module
@@ -477,12 +474,10 @@ def test_task_completion_is_create_only_and_generation_pinned(
       == output
   )
   completion_path = f'_task-completions/{task_token}.json'
-  first_generation = cache_state['generations'][completion_path]
   assert (
       orch.orchestrator._store_task_completion(payload, task_token, output)
       == output
   )
-  assert cache_state['generations'][completion_path] == first_generation
   competing_output = {'video': [{'file': 'generated/other.mp4'}]}
   assert (
       orch.orchestrator._store_task_completion(
@@ -490,11 +485,12 @@ def test_task_completion_is_create_only_and_generation_pinned(
       )
       == output
   )
-  assert cache_state['generations'][completion_path] == first_generation
-
-  cache_state['generations'][completion_path] = True
-  with pytest.raises(orch.util_errors.RetryableTaskRecoveryError):
-    orch.orchestrator._load_task_completion(payload, task_token)
+  assert json.loads(cache[completion_path]) == output
+  assert cache_state['completion_downloads'] == [
+      completion_path,
+      completion_path,
+  ]
+  assert cache_state['metadata'][completion_path] is None
 
 
 def test_task_completion_upload_error_refuses_automatic_action_retry(
@@ -554,10 +550,7 @@ def test_manifest_upload_failure_records_terminal_without_rerunning_action(
       action='outpaint_image',
       force_execution=True,
   )
-  headers = {
-      'X-CloudTasks-QueueName': 'queue-upload',
-      'X-CloudTasks-TaskName': 'task-upload',
-  }
+  headers = _task_headers('queue-upload', 'task-upload')
   client = orch.app.test_client()
 
   first = client.post('/triggerAction', json=payload, headers=headers)
@@ -618,10 +611,7 @@ def test_action_cache_upload_failure_records_terminal_without_rerunning_action(
       action='outpaint_image',
       force_execution=True,
   )
-  headers = {
-      'X-CloudTasks-QueueName': 'queue-action-cache',
-      'X-CloudTasks-TaskName': 'task-action-cache',
-  }
+  headers = _task_headers('queue-action-cache', 'task-action-cache')
   client = orch.app.test_client()
 
   first = client.post('/triggerAction', json=payload, headers=headers)
@@ -648,67 +638,6 @@ def test_action_cache_upload_failure_records_terminal_without_rerunning_action(
   assert 'GCS write quota exhausted' in state['error']
 
 
-def test_task_completion_generation_race_retries_without_running_action(
-    monkeypatch, orchestrator_module
-):
-  del orchestrator_module
-  orch = _load_orch(monkeypatch, ROLE='worker')
-  payload = _task_payload(
-      execution_id='completion-generation-race',
-      action='outpaint_image',
-      force_execution=True,
-  )
-  headers = {
-      'X-CloudTasks-QueueName': 'queue-generation',
-      'X-CloudTasks-TaskName': 'task-generation',
-  }
-  task_token = hashlib.sha256(
-      json.dumps(
-          [
-              'cloud-tasks',
-              'queue-generation',
-              'task-generation',
-              'completion-generation-race',
-              'node-1',
-              'group-1',
-          ],
-          ensure_ascii=True,
-          separators=(',', ':'),
-      ).encode('utf-8')
-  ).hexdigest()
-  completion_path = f'_task-completions/{task_token}.json'
-  original_output = {'outpainted_image': [{'file': 'generated/first.png'}]}
-  cache = {completion_path: json.dumps(original_output)}
-  cache_state = _install_action_cache(
-      monkeypatch,
-      orch,
-      cache,
-      download_overwrite={
-          'outpainted_image': [{'file': 'generated/replaced.png'}]
-      },
-  )
-  cache_state['generations'][completion_path] = 1
-  action_calls = []
-
-  def paid_action(_gcs, _workflow_params):
-    action_calls.append('called')
-    return original_output
-
-  paid_action.__module__ = 'actions.outpaint_image'
-  monkeypatch.setattr(
-      orch.orchestrator.actwrap, 'get_action_by_name', lambda _name: paid_action
-  )
-  transitions = _install_task_state(monkeypatch, orch)
-
-  response = orch.app.test_client().post(
-      '/triggerAction', json=payload, headers=headers
-  )
-
-  assert response.status_code == 503
-  assert action_calls == []
-  assert [state for state, _args in transitions] == ['retryable']
-
-
 def test_worker_url_overrides_host_for_trigger_action(
     monkeypatch, orchestrator_module
 ):
@@ -728,7 +657,11 @@ def test_worker_url_overrides_host_for_trigger_action(
   monkeypatch.setattr(orch.orchestrator, 'trigger_action', fake_trigger_action)
   transitions = _install_task_state(monkeypatch, orch)
   client = orch.app.test_client()
-  response = client.post('/triggerAction', json=_task_payload())
+  response = client.post(
+      '/triggerAction',
+      json=_task_payload(),
+      headers=_task_headers('queue-worker-url', 'task-worker-url'),
+  )
   assert response.status_code == 200
   assert captured['instance'] == worker_url
   assert captured['recovery_only'] is False
@@ -755,7 +688,11 @@ def test_trigger_action_duplicate_delivery_is_skipped(
       monkeypatch, orch, outcome=orch.util_database.TASK_LOCK_TERMINAL
   )
   client = orch.app.test_client()
-  response = client.post('/triggerAction', json=_task_payload())
+  response = client.post(
+      '/triggerAction',
+      json=_task_payload(),
+      headers=_task_headers('queue-duplicate', 'task-duplicate'),
+  )
   assert response.status_code == 200
   assert response.get_data(as_text=True) == 'Already Triggered'
   assert called['trigger'] is False
@@ -774,7 +711,11 @@ def test_trigger_action_retryable_error_records_retryable_state(
   monkeypatch.setattr(orch.orchestrator, 'trigger_action', boom)
   monkeypatch.setattr(orch.util_errors, 'is_retryable', lambda _e: True)
   client = orch.app.test_client()
-  response = client.post('/triggerAction', json=_task_payload())
+  response = client.post(
+      '/triggerAction',
+      json=_task_payload(),
+      headers=_task_headers('queue-retryable', 'task-retryable'),
+  )
   assert response.status_code == 429
   assert [state for state, _args in transitions] == ['retryable']
   assert transitions[0][1][-1] is False
@@ -794,7 +735,11 @@ def test_trigger_action_post_action_deadline_records_retryable_state(
 
   monkeypatch.setattr(orch.orchestrator.db, 'store_output', unavailable)
 
-  response = orch.app.test_client().post('/triggerAction', json=_task_payload())
+  response = orch.app.test_client().post(
+      '/triggerAction',
+      json=_task_payload(),
+      headers=_task_headers('queue-post-action', 'task-post-action'),
+  )
 
   assert response.status_code == 503
   assert [state for state, _args in transitions] == ['retryable']
@@ -827,11 +772,11 @@ def test_fresh_manifest_probe_retry_rechecks_before_action(
   monkeypatch.setattr(
       orch.orchestrator.actwrap, 'get_action_by_name', lambda _name: paid_action
   )
-  cache_state = _install_action_cache(
+  _install_action_cache(
       monkeypatch,
       orch,
       cache,
-      reload_errors=[google_exceptions.ServiceUnavailable('GCS unavailable')],
+      download_errors=[google_exceptions.ServiceUnavailable('GCS unavailable')],
   )
   monkeypatch.setattr(
       orch.orchestrator.db,
@@ -843,10 +788,7 @@ def test_fresh_manifest_probe_retry_rechecks_before_action(
       action='outpaint_image',
       force_execution=True,
   )
-  headers = {
-      'X-CloudTasks-QueueName': 'queue-fresh-probe',
-      'X-CloudTasks-TaskName': f'task-{manifest_on_retry}',
-  }
+  headers = _task_headers('queue-fresh-probe', f'task-{manifest_on_retry}')
   client = orch.app.test_client()
 
   first = client.post('/triggerAction', json=payload, headers=headers)
@@ -857,7 +799,6 @@ def test_fresh_manifest_probe_retry_rechecks_before_action(
   completion_path = f'_task-completions/{retryable_state["taskToken"]}.json'
   if manifest_on_retry:
     cache[completion_path] = json.dumps(output)
-    cache_state['generations'][completion_path] = 1
   retry = client.post(
       '/triggerAction',
       json=payload,
@@ -896,10 +837,7 @@ def test_fatal_action_is_acknowledged_without_retrying_paid_work(
       orch.orchestrator.db, 'mark_task_failed', fail_terminal_transition
   )
   payload = _task_payload(execution_id=f'fatal-{transition_failure}')
-  headers = {
-      'X-CloudTasks-QueueName': 'queue-fatal',
-      'X-CloudTasks-TaskName': f'task-fatal-{transition_failure}',
-  }
+  headers = _task_headers('queue-fatal', f'task-fatal-{transition_failure}')
   client = orch.app.test_client()
 
   first = client.post('/triggerAction', json=payload, headers=headers)
@@ -967,10 +905,7 @@ def test_failed_retryable_transition_never_drops_or_releases_new_owner(
       action='outpaint_image',
       force_execution=True,
   )
-  headers = {
-      'X-CloudTasks-QueueName': 'queue-state',
-      'X-CloudTasks-TaskName': 'task-state',
-  }
+  headers = _task_headers('queue-state', 'task-state')
   client = orch.app.test_client()
 
   first = client.post('/triggerAction', json=payload, headers=headers)
@@ -1019,9 +954,8 @@ def test_failed_retryable_transition_never_drops_or_releases_new_owner(
   assert late_transition is False
 
 
-@pytest.mark.parametrize('transition_failure', ('exception', 'lost-owner'))
-def test_failed_success_transition_redelivers_and_recovers_manifest(
-    monkeypatch, orchestrator_module, transition_failure
+def test_success_transition_error_marks_task_recovery_only(
+    monkeypatch, orchestrator_module
 ):
   del orchestrator_module
   orch = _load_orch(monkeypatch, ROLE='worker')
@@ -1046,23 +980,139 @@ def test_failed_success_transition_redelivers_and_recovers_manifest(
     nonlocal transition_attempts
     transition_attempts += 1
     if transition_attempts == 1:
-      if transition_failure == 'exception':
-        raise google_exceptions.DeadlineExceeded('Firestore unavailable')
-      return False
+      raise google_exceptions.DeadlineExceeded('Firestore unavailable')
     return real_mark_succeeded(*args, **kwargs)
 
   monkeypatch.setattr(
       orch.orchestrator.db, 'mark_task_succeeded', fail_first_transition
   )
   payload = _task_payload(
-      execution_id=f'success-transition-{transition_failure}',
+      execution_id='success-transition-error',
       action='outpaint_image',
       force_execution=True,
   )
-  headers = {
-      'X-CloudTasks-QueueName': 'queue-success-state',
-      'X-CloudTasks-TaskName': f'task-success-{transition_failure}',
-  }
+  headers = _task_headers('queue-success-state', 'task-success-error')
+  client = orch.app.test_client()
+
+  first = client.post('/triggerAction', json=payload, headers=headers)
+  lock_ref = orch.orchestrator.db._get_task_lock_ref(
+      payload['executionId'], 'node-1', 'group-1'
+  )
+  retryable_state = lock_ref.get().to_dict()
+  recovered = client.post(
+      '/triggerAction',
+      json=payload,
+      headers={**headers, 'X-CloudTasks-TaskRetryCount': '1'},
+  )
+  final_state = lock_ref.get().to_dict()
+
+  assert first.status_code == 503
+  assert recovered.status_code == 200
+  assert action_calls == ['called']
+  assert transition_attempts == 2
+  assert retryable_state['state'] == 'retryable'
+  assert retryable_state['recoveryOnly'] is True
+  assert final_state['state'] == 'succeeded'
+
+
+def test_ambiguous_success_commit_cannot_reopen_succeeded_task(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  cache = {}
+  action_calls = []
+  output = {'outpainted_image': [{'file': 'generated/one.png'}]}
+
+  def paid_action(_gcs, _workflow_params):
+    action_calls.append('called')
+    return output
+
+  paid_action.__module__ = 'actions.outpaint_image'
+  monkeypatch.setattr(
+      orch.orchestrator.actwrap, 'get_action_by_name', lambda _name: paid_action
+  )
+  _install_action_cache(monkeypatch, orch, cache)
+  monkeypatch.setattr(orch.orchestrator.db, 'store_output', lambda *_args: None)
+  real_mark_succeeded = orch.orchestrator.db.mark_task_succeeded
+  transition_attempts = 0
+
+  def commit_then_raise(*args, **kwargs):
+    nonlocal transition_attempts
+    transition_attempts += 1
+    result = real_mark_succeeded(*args, **kwargs)
+    if transition_attempts == 1:
+      raise google_exceptions.DeadlineExceeded('response lost after commit')
+    return result
+
+  monkeypatch.setattr(
+      orch.orchestrator.db, 'mark_task_succeeded', commit_then_raise
+  )
+  payload = _task_payload(
+      execution_id='success-transition-ambiguous',
+      action='outpaint_image',
+      force_execution=True,
+  )
+  headers = _task_headers('queue-success-state', 'task-success-ambiguous')
+  client = orch.app.test_client()
+
+  first = client.post('/triggerAction', json=payload, headers=headers)
+  redelivery = client.post(
+      '/triggerAction',
+      json=payload,
+      headers={**headers, 'X-CloudTasks-TaskRetryCount': '1'},
+  )
+  lock_ref = orch.orchestrator.db._get_task_lock_ref(
+      payload['executionId'], 'node-1', 'group-1'
+  )
+  final_state = lock_ref.get().to_dict()
+
+  assert first.status_code == 503
+  assert redelivery.status_code == 200
+  assert redelivery.get_data(as_text=True) == 'Already Triggered'
+  assert action_calls == ['called']
+  assert transition_attempts == 1
+  assert final_state['state'] == 'succeeded'
+
+
+def test_lost_success_transition_recovers_manifest_after_lease(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  cache = {}
+  action_calls = []
+  output = {'outpainted_image': [{'file': 'generated/one.png'}]}
+
+  def paid_action(_gcs, _workflow_params):
+    action_calls.append('called')
+    return output
+
+  paid_action.__module__ = 'actions.outpaint_image'
+  monkeypatch.setattr(
+      orch.orchestrator.actwrap, 'get_action_by_name', lambda _name: paid_action
+  )
+  _install_action_cache(monkeypatch, orch, cache)
+  monkeypatch.setattr(orch.orchestrator.db, 'store_output', lambda *_args: None)
+  real_mark_succeeded = orch.orchestrator.db.mark_task_succeeded
+  transition_attempts = 0
+
+  def lose_first_transition(*args, **kwargs):
+    nonlocal transition_attempts
+    transition_attempts += 1
+    if transition_attempts == 1:
+      return False
+    return real_mark_succeeded(*args, **kwargs)
+
+  monkeypatch.setattr(
+      orch.orchestrator.db, 'mark_task_succeeded', lose_first_transition
+  )
+  payload = _task_payload(
+      execution_id='success-transition-lost-owner',
+      action='outpaint_image',
+      force_execution=True,
+  )
+  headers = _task_headers('queue-success-state', 'task-success-lost-owner')
   client = orch.app.test_client()
 
   first = client.post('/triggerAction', json=payload, headers=headers)
@@ -1270,10 +1320,7 @@ def test_trigger_action_completed_manifest_read_failure_never_regenerates(
   monkeypatch.setattr(orch.orchestrator.db, 'store_output', store_once)
   payload = _task_payload(action='outpaint_image', force_execution=True)
   client = orch.app.test_client()
-  headers = {
-      'X-CloudTasks-QueueName': 'queue-a',
-      'X-CloudTasks-TaskName': 'task-a',
-  }
+  headers = _task_headers('queue-a', 'task-a')
   responses = [client.post('/triggerAction', json=payload, headers=headers)]
   for retry_count in (1, 2):
     responses.append(
@@ -1335,10 +1382,7 @@ def test_recovery_only_state_never_regenerates_a_missing_manifest(
       action='outpaint_image',
       force_execution=True,
   )
-  headers = {
-      'X-CloudTasks-QueueName': 'queue-recovery-only',
-      'X-CloudTasks-TaskName': 'task-recovery-only',
-  }
+  headers = _task_headers('queue-recovery-only', 'task-recovery-only')
   client = orch.app.test_client()
 
   first = client.post('/triggerAction', json=payload, headers=headers)
@@ -1404,10 +1448,7 @@ def test_trigger_action_redelivery_reruns_failed_forced_action(
   cache_path = f'outpaint_image/{checksum}.json'
   cache[cache_path] = json.dumps(stale_output)
   client = orch.app.test_client()
-  task_headers = {
-      'X-CloudTasks-QueueName': 'queue-rerun',
-      'X-CloudTasks-TaskName': 'task-rerun',
-  }
+  task_headers = _task_headers('queue-rerun', 'task-rerun')
 
   first = client.post('/triggerAction', json=payload, headers=task_headers)
   retry = client.post(
@@ -1506,7 +1547,11 @@ def test_trigger_action_non_forced_reuses_legacy_cache(
   )
   cache[f'outpaint_image/{checksum}.json'] = json.dumps(legacy_output)
 
-  response = orch.app.test_client().post('/triggerAction', json=payload)
+  response = orch.app.test_client().post(
+      '/triggerAction',
+      json=payload,
+      headers=_task_headers('queue-legacy-cache', 'task-legacy-cache'),
+  )
 
   assert response.status_code == 200
   assert action_calls == []
@@ -1569,12 +1614,13 @@ def test_trigger_action_enqueue_retry_completes_successor_once(
       },
   })
   client = orch.app.test_client()
+  headers = _task_headers('queue-enqueue-retry', 'task-enqueue-retry')
 
-  first = client.post('/triggerAction', json=payload)
+  first = client.post('/triggerAction', json=payload, headers=headers)
   retry = client.post(
       '/triggerAction',
       json=payload,
-      headers={'X-CloudTasks-TaskRetryCount': '1'},
+      headers={**headers, 'X-CloudTasks-TaskRetryCount': '1'},
   )
   for successor_payload in successor_deliveries:
     assert client.post('/supplyNode', json=successor_payload).status_code == 200
@@ -1604,7 +1650,11 @@ def test_trigger_action_non_retryable_error_records_failed_state(
   monkeypatch.setattr(orch.orchestrator, 'trigger_action', boom)
   monkeypatch.setattr(orch.util_errors, 'is_retryable', lambda _e: False)
   client = orch.app.test_client()
-  response = client.post('/triggerAction', json=_task_payload())
+  response = client.post(
+      '/triggerAction',
+      json=_task_payload(),
+      headers=_task_headers('queue-fatal-state', 'task-fatal-state'),
+  )
   assert response.status_code == 200
   assert response.get_data(as_text=True) == 'Internal Error'
   assert [state for state, _args in transitions] == ['failed']
@@ -1624,7 +1674,11 @@ def test_trigger_action_rejects_malformed_payload(
       lambda *a, **k: called.__setitem__('trigger', True),
   )
   client = orch.app.test_client()
-  response = client.post('/triggerAction', json={'action': 'pass'})
+  response = client.post(
+      '/triggerAction',
+      json={'action': 'pass'},
+      headers=_task_headers('queue-malformed', 'task-malformed'),
+  )
   assert response.status_code == 400
   assert called['trigger'] is False
 
@@ -1632,10 +1686,19 @@ def test_trigger_action_rejects_malformed_payload(
 @pytest.mark.parametrize(
     'headers',
     (
+        {},
         {'X-CloudTasks-QueueName': 'queue-only'},
         {'X-CloudTasks-TaskName': 'task-only'},
-        {'X-CloudTasks-TaskRetryCount': 'not-an-integer'},
-        {'X-CloudTasks-TaskRetryCount': '-1'},
+        {
+            'X-CloudTasks-QueueName': 'queue-without-retry',
+            'X-CloudTasks-TaskName': 'task-without-retry',
+        },
+        {'X-CloudTasks-TaskRetryCount': '0'},
+        _task_headers(queue_name=''),
+        _task_headers(task_name=''),
+        _task_headers(retry_count=''),
+        _task_headers(retry_count='not-an-integer'),
+        _task_headers(retry_count=-1),
     ),
 )
 def test_trigger_action_rejects_incomplete_task_headers(
@@ -1644,6 +1707,12 @@ def test_trigger_action_rejects_incomplete_task_headers(
   del orchestrator_module
   orch = _load_orch(monkeypatch, ROLE='worker')
   called = []
+  lock_calls = []
+  monkeypatch.setattr(
+      orch.orchestrator.db,
+      'acquire_task_lock',
+      lambda *_args, **_kwargs: lock_calls.append(True),
+  )
   monkeypatch.setattr(
       orch.orchestrator,
       'trigger_action',
@@ -1655,7 +1724,28 @@ def test_trigger_action_rejects_incomplete_task_headers(
   )
 
   assert response.status_code == 400
+  assert lock_calls == []
   assert called == []
+
+
+def test_role_all_allows_headerless_local_trigger_action(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='all')
+  action_calls = []
+  monkeypatch.setattr(
+      orch.orchestrator,
+      'trigger_action',
+      lambda *_args, **_kwargs: action_calls.append(True),
+  )
+  transitions = _install_task_state(monkeypatch, orch)
+
+  response = orch.app.test_client().post('/triggerAction', json=_task_payload())
+
+  assert response.status_code == 200
+  assert action_calls == [True]
+  assert [state for state, _args in transitions] == ['succeeded']
 
 
 def test_trigger_action_attempt_limit_matches_deploy_queue(

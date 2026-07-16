@@ -308,10 +308,18 @@ def trigger_action_handler() -> tuple[str, int]:
     # Malformed task payload (e.g. missing the Cloud Tasks lock fields): reject
     # cleanly instead of raising a KeyError below and returning a 500.
     return 'Bad Request', 400
+  queue_name = flask_request.headers.get('X-CloudTasks-QueueName')
+  task_name = flask_request.headers.get('X-CloudTasks-TaskName')
+  retry_count_header = flask_request.headers.get('X-CloudTasks-TaskRetryCount')
+  task_headers = (queue_name, task_name, retry_count_header)
+  task_header_presence = tuple(value is not None for value in task_headers)
+  if _ROLE == 'worker':
+    if not all(task_headers):
+      return 'Bad Request', 400
+  elif any(task_header_presence) and not all(task_headers):
+    return 'Bad Request', 400
   try:
-    retry_count = int(
-        flask_request.headers.get('X-CloudTasks-TaskRetryCount', 0)
-    )
+    retry_count = int(retry_count_header or 0)
   except (TypeError, ValueError):
     return 'Bad Request', 400
   if retry_count < 0:
@@ -324,10 +332,6 @@ def trigger_action_handler() -> tuple[str, int]:
   node_id = data[Key.NODE_ID.value]
   group_id = data[Key.GROUP_ID.value]
   node = data[Key.WORKFLOW_DEF.value][node_id]
-  queue_name = flask_request.headers.get('X-CloudTasks-QueueName')
-  task_name = flask_request.headers.get('X-CloudTasks-TaskName')
-  if bool(queue_name) != bool(task_name):
-    return 'Bad Request', 400
   task_identity = (
       ['cloud-tasks', queue_name, task_name]
       if queue_name and task_name
@@ -487,6 +491,7 @@ def trigger_action_handler() -> tuple[str, int]:
         data[Key.ACTION.value],
         e,
     )
+    mark_retryable(e, True)
     return 'Service Unavailable', 503
   if not task_succeeded:
     logger.error(
