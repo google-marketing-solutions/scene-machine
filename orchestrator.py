@@ -310,7 +310,7 @@ def _task_completion_blob(data: dict[str, Any], task_token: str):
 def _load_task_completion(
     data: dict[str, Any], task_token: str, recovery_only: bool = False
 ) -> dict[str, Any] | None:
-  """Loads an immutable task output without falling back to execution."""
+  """Loads a task-specific output without falling back to execution."""
   blob = _task_completion_blob(data, task_token)
   try:
     manifest = blob.download_as_bytes()
@@ -321,14 +321,28 @@ def _load_task_completion(
       )
     return None
   except Exception as e:  # pylint: disable=broad-exception-caught
-    raise util_errors.RetryableTaskRecoveryError(
-        'Failed to read task completion output'
-    ) from e
+    retryable_error = (
+        util_errors.RetryableTaskRecoveryError
+        if recovery_only
+        else util_errors.RetryablePreActionProbeError
+    )
+    raise retryable_error('Failed to read task completion output') from e
   try:
     output = json.loads(manifest)
     if not isinstance(output, dict):
       raise TypeError('Task completion output must be a JSON object')
     return output
+  # Known content failures repeat for the same object. Unexpected local parser
+  # failures may be transient, so only the known failures are terminal.
+  except (ValueError, TypeError, RecursionError) as e:
+    logger.error(
+        'Invalid task completion output at gs://%s/%s/%s.json: %s',
+        data[Key.WORKFLOW_PARAMS.value][Key.GCS_BUCKET.value],
+        _TASK_COMPLETION_PREFIX,
+        task_token,
+        e,
+    )
+    raise
   except Exception as e:  # pylint: disable=broad-exception-caught
     raise util_errors.RetryableTaskRecoveryError(
         'Failed to read task completion output'
@@ -338,7 +352,7 @@ def _load_task_completion(
 def _store_task_completion(
     data: dict[str, Any], task_token: str, output: dict[str, Any]
 ) -> dict[str, Any]:
-  """Creates the immutable output used by later task deliveries."""
+  """Creates the task-specific output used by later task deliveries."""
   blob = _task_completion_blob(data, task_token)
   try:
     blob.upload_from_string(
@@ -348,12 +362,7 @@ def _store_task_completion(
     )
     return output
   except google_exceptions.PreconditionFailed:
-    existing = _load_task_completion(data, task_token)
-    if existing is None:
-      raise util_errors.RetryableTaskRecoveryError(
-          'Task completion output disappeared after create conflict'
-      )
-    return existing
+    return _load_task_completion(data, task_token, recovery_only=True)
   except Exception as e:  # pylint: disable=broad-exception-caught
     raise util_errors.TaskCompletionWriteError(
         'Failed to prove task completion; refusing automatic action retry'
@@ -394,14 +403,7 @@ def trigger_action(
   else:  # For pass action, simply forward
     func = lambda input_files, *_: input_files
   task_token = task_token or _local_task_token(data)
-  try:
-    output = _load_task_completion(data, task_token, recovery_only)
-  except util_errors.RetryableTaskRecoveryError as e:
-    if recovery_only:
-      raise
-    raise util_errors.RetryablePreActionProbeError(str(e)) from (
-        e.__cause__ or e
-    )
+  output = _load_task_completion(data, task_token, recovery_only)
   if output is None:
     output = func(
         data[Key.INPUT_FILES.value],

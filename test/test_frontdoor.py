@@ -273,6 +273,24 @@ def _task_headers(
   }
 
 
+def _task_completion_path(execution_id, queue_name, task_name):
+  task_token = hashlib.sha256(
+      json.dumps(
+          [
+              'cloud-tasks',
+              queue_name,
+              task_name,
+              execution_id,
+              'node-1',
+              'group-1',
+          ],
+          ensure_ascii=True,
+          separators=(',', ':'),
+      ).encode('utf-8')
+  ).hexdigest()
+  return f'_task-completions/{task_token}.json'
+
+
 def _install_action_cache(
     monkeypatch,
     orch,
@@ -491,6 +509,160 @@ def test_task_completion_is_create_only_without_false_expiry_metadata(
       completion_path,
   ]
   assert cache_state['metadata'][completion_path] is None
+
+
+def test_create_conflict_read_failure_requires_recovery_only_retry(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  task_token = 'b' * 64
+  completion_path = f'_task-completions/{task_token}.json'
+  _install_action_cache(
+      monkeypatch,
+      orch,
+      {completion_path: json.dumps({'video': []})},
+      download_errors=[google_exceptions.ServiceUnavailable('GCS unavailable')],
+  )
+
+  with pytest.raises(orch.util_errors.RetryableTaskRecoveryError) as error:
+    orch.orchestrator._store_task_completion(
+        _task_payload(execution_id='completion-create-conflict'),
+        task_token,
+        {'video': [{'file': 'generated/video.mp4'}]},
+    )
+
+  assert type(error.value) is orch.util_errors.RetryableTaskRecoveryError
+
+
+@pytest.mark.parametrize(
+    ('manifest', 'error_type'),
+    (
+        (b'{', 'JSONDecodeError'),
+        (b'[]', 'TypeError'),
+        (b'\xff', 'UnicodeDecodeError'),
+        (b'[' * 10_000, 'RecursionError'),
+    ),
+    ids=(
+        'malformed-json',
+        'non-object-json',
+        'invalid-utf8',
+        'excessive-nesting',
+    ),
+)
+def test_invalid_task_completion_is_terminal_without_running_action(
+    monkeypatch, orchestrator_module, manifest, error_type
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  action_calls = []
+  stored_outputs = []
+  execution_id = f'invalid-completion-{error_type.lower()}'
+  queue_name = f'queue-{error_type.lower()}'
+  task_name = f'task-{error_type.lower()}'
+  completion_path = _task_completion_path(execution_id, queue_name, task_name)
+  cache_state = _install_action_cache(
+      monkeypatch, orch, {completion_path: manifest}
+  )
+
+  def paid_action(*_args, **_kwargs):
+    action_calls.append('called')
+    return {'outpainted_image': [{'file': 'generated/image.png'}]}
+
+  paid_action.__module__ = 'actions.outpaint_image'
+  monkeypatch.setattr(
+      orch.orchestrator.actwrap, 'get_action_by_name', lambda _name: paid_action
+  )
+  monkeypatch.setattr(
+      orch.orchestrator.db,
+      'store_output',
+      lambda *args: stored_outputs.append(args[-1]),
+  )
+  payload = _task_payload(
+      execution_id=execution_id,
+      action='outpaint_image',
+      force_execution=True,
+  )
+
+  response = orch.app.test_client().post(
+      '/triggerAction',
+      json=payload,
+      headers=_task_headers(queue_name, task_name),
+  )
+  state = (
+      orch.orchestrator.db._get_task_lock_ref(execution_id, 'node-1', 'group-1')
+      .get()
+      .to_dict()
+  )
+
+  assert response.status_code == 200
+  assert state['state'] == 'failed'
+  assert state['attempt'] == 1
+  assert state['error'].startswith(f'{error_type}:')
+  assert action_calls == []
+  assert stored_outputs == []
+  assert cache_state['completion_downloads'] == [completion_path]
+
+
+def test_unexpected_completion_parse_failure_stays_recovery_only(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  action_calls = []
+  execution_id = 'unexpected-completion-parse-failure'
+  queue_name = 'queue-unexpected-parse'
+  task_name = 'task-unexpected-parse'
+  completion_path = _task_completion_path(execution_id, queue_name, task_name)
+
+  class UnexpectedParseFailure(bytes):
+
+    def decode(self, *_args, **_kwargs):
+      raise MemoryError('transient parser failure')
+
+  cache = {completion_path: UnexpectedParseFailure(b'{}')}
+  cache_state = _install_action_cache(monkeypatch, orch, cache)
+
+  def paid_action(*_args, **_kwargs):
+    action_calls.append('called')
+    return {'outpainted_image': [{'file': 'generated/image.png'}]}
+
+  paid_action.__module__ = 'actions.outpaint_image'
+  monkeypatch.setattr(
+      orch.orchestrator.actwrap, 'get_action_by_name', lambda _name: paid_action
+  )
+  payload = _task_payload(
+      execution_id=execution_id,
+      action='outpaint_image',
+      force_execution=True,
+  )
+  headers = _task_headers(queue_name, task_name)
+  client = orch.app.test_client()
+
+  first = client.post('/triggerAction', json=payload, headers=headers)
+  lock_ref = orch.orchestrator.db._get_task_lock_ref(
+      execution_id, 'node-1', 'group-1'
+  )
+  first_state = lock_ref.get().to_dict()
+  cache.pop(completion_path)
+  redelivery = client.post(
+      '/triggerAction',
+      json=payload,
+      headers={**headers, 'X-CloudTasks-TaskRetryCount': '1'},
+  )
+  redelivery_state = lock_ref.get().to_dict()
+
+  assert first.status_code == 503
+  assert redelivery.status_code == 503
+  assert first_state['state'] == 'retryable'
+  assert first_state['recoveryOnly'] is True
+  assert redelivery_state['state'] == 'retryable'
+  assert redelivery_state['recoveryOnly'] is True
+  assert action_calls == []
+  assert cache_state['completion_downloads'] == [
+      completion_path,
+      completion_path,
+  ]
 
 
 def test_task_completion_upload_error_refuses_automatic_action_retry(
