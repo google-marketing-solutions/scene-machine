@@ -49,6 +49,7 @@ import {
   Candidate,
   ConfigService,
   GeneratedScene,
+  MIN_RENDER_CLIP_DURATION_SECONDS,
   ProvidedVideoScene,
   toDecimals,
 } from '../services/config/config';
@@ -566,6 +567,9 @@ export class Storyboard {
     const currentTrim = this.trimBySceneType();
 
     const duration = this.videoDuration();
+    if (!Number.isFinite(duration) || duration <= 0) {
+      return;
+    }
     const newTrim = {
       ...currentTrim,
       ...range,
@@ -598,6 +602,43 @@ export class Storyboard {
 
     newTrim.start = toDecimals(newTrim.start, 3);
     newTrim.end = toDecimals(newTrim.end, 3);
+
+    const minimumDurationMilliseconds = Math.round(
+      MIN_RENDER_CLIP_DURATION_SECONDS * 1000,
+    );
+    const sourceDurationMilliseconds = Math.round(
+      toDecimals(duration, 3) * 1000,
+    );
+    let startMilliseconds = Math.round(newTrim.start * 1000);
+    let endMilliseconds = Math.round(newTrim.end * 1000);
+
+    if (endMilliseconds - startMilliseconds < minimumDurationMilliseconds) {
+      if (range.start !== undefined && range.end === undefined) {
+        startMilliseconds = Math.max(
+          0,
+          endMilliseconds - minimumDurationMilliseconds,
+        );
+        if (endMilliseconds - startMilliseconds < minimumDurationMilliseconds) {
+          endMilliseconds = Math.min(
+            sourceDurationMilliseconds,
+            startMilliseconds + minimumDurationMilliseconds,
+          );
+        }
+      } else {
+        endMilliseconds = Math.min(
+          sourceDurationMilliseconds,
+          startMilliseconds + minimumDurationMilliseconds,
+        );
+      }
+      if (endMilliseconds - startMilliseconds < minimumDurationMilliseconds) {
+        startMilliseconds = Math.max(
+          0,
+          endMilliseconds - minimumDurationMilliseconds,
+        );
+      }
+    }
+    newTrim.start = startMilliseconds / 1000;
+    newTrim.end = endMilliseconds / 1000;
 
     if (this.config.isGeneratedScene(scene) && candidate) {
       candidate.trim = newTrim;

@@ -26,6 +26,7 @@ import {
   GeneratedScene,
   ProjectConfig,
   ProvidedVideoScene,
+  resolveSceneRenderClip,
 } from '../services/config/config';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {Storyboard} from './storyboard';
@@ -159,6 +160,19 @@ describe('Storyboard', () => {
     fixture.detectChanges();
   });
 
+  function selectTrimScene(scene: GeneratedScene | ProvidedVideoScene) {
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [scene],
+    }));
+    component.selectScene(scene.id);
+    component.videoDuration.set(10);
+  }
+
+  function currentProvidedTrim() {
+    return (projectConfigSignal().storyboard[0] as ProvidedVideoScene).trim;
+  }
+
   it('should create', () => {
     expect(component).toBeTruthy();
   });
@@ -282,6 +296,106 @@ describe('Storyboard', () => {
     // Test with dragging
     component.draggingTrim.set({start: 3, end: 7});
     expect(component.trimmedDuration()).toBe(4);
+  });
+
+  it('keeps at least one 24fps frame when trim start crosses trim end', () => {
+    const candidate: Candidate = {
+      video: {url: 'http://test.mp4', path: 'test/path'},
+      runNumber: 1,
+      durationSeconds: 10,
+      trim: {start: 2, end: 8},
+      prompt: 'test prompt',
+      model: 'test-model',
+      generateAudio: false,
+      resolution: '1080p',
+    };
+    const scene: GeneratedScene = {
+      id: '1',
+      type: 'generated',
+      name: 'Scene 1',
+      prompt: 'test prompt',
+      candidates: [candidate],
+      selectedCandidateIndex: 0,
+    };
+    selectTrimScene(scene);
+
+    component.updateTrim({start: 9});
+
+    expect(candidate.trim).toEqual({start: 7.958, end: 8});
+    const resolution = resolveSceneRenderClip(scene);
+    expect(resolution.state).toBe('ready');
+    if (resolution.state === 'ready') {
+      expect(Math.round(resolution.clip.duration * 24)).toBe(1);
+    }
+  });
+
+  it('keeps at least one 24fps frame when trim end crosses trim start', () => {
+    const scene: ProvidedVideoScene = {
+      id: '1',
+      type: 'video',
+      name: 'Scene 1',
+      video: {url: 'http://test.mp4', path: 'test/path'},
+      durationSeconds: 10,
+      trim: {start: 2, end: 8},
+    };
+    selectTrimScene(scene);
+
+    component.updateTrim({end: 1});
+
+    expect(currentProvidedTrim()).toEqual({start: 2, end: 2.042});
+    const trim = currentProvidedTrim()!;
+    expect(Math.round((trim.end! - trim.start!) * 24)).toBe(1);
+  });
+
+  it('keeps trim endpoints strictly ordered after rounding', () => {
+    const scene: ProvidedVideoScene = {
+      id: '1',
+      type: 'video',
+      name: 'Scene 1',
+      video: {url: 'http://test.mp4', path: 'test/path'},
+      durationSeconds: 10,
+      trim: {start: 2, end: 8},
+    };
+    selectTrimScene(scene);
+
+    component.updateTrim({end: 2});
+
+    expect(currentProvidedTrim()).toEqual({start: 2, end: 2.042});
+  });
+
+  it('repairs a two-endpoint trim that becomes equal after rounding', () => {
+    const scene: ProvidedVideoScene = {
+      id: '1',
+      type: 'video',
+      name: 'Scene 1',
+      video: {url: 'http://test.mp4', path: 'test/path'},
+      durationSeconds: 10,
+      trim: {start: 1, end: 8},
+    };
+    selectTrimScene(scene);
+
+    component.updateTrim({start: 2, end: 2.0009});
+
+    expect(currentProvidedTrim()).toEqual({start: 2, end: 2.042});
+  });
+
+  it('does not change trim before video metadata loads', () => {
+    const scene: ProvidedVideoScene = {
+      id: '1',
+      type: 'video',
+      name: 'Scene 1',
+      video: {url: 'http://test.mp4', path: 'test/path'},
+      durationSeconds: 10,
+      trim: {start: 2, end: 8},
+    };
+    selectTrimScene(scene);
+    component.videoDuration.set(0);
+    const updateSpy = vi.spyOn(mockConfigService, 'updateProjectConfig');
+
+    component.updateTrim({start: 3});
+
+    expect(currentProvidedTrim()).toEqual({start: 2, end: 8});
+    expect(updateSpy).not.toHaveBeenCalled();
   });
 
   describe('run+letter candidate labels', () => {

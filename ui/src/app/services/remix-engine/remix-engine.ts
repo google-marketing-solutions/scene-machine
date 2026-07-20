@@ -50,6 +50,7 @@ import {
   ProductImage,
   ProvidedVideoScene,
   RenderRun,
+  resolveSceneRenderClip,
   Resolution,
   VisualOverlay,
 } from '../config/config';
@@ -71,6 +72,13 @@ class ProjectChangedError extends Error {
   constructor() {
     super('Project changed, cancelling workflow polling');
     this.name = 'ProjectChangedError';
+  }
+}
+
+class RenderContractError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RenderContractError';
   }
 }
 
@@ -1407,7 +1415,13 @@ export class RemixEngineService {
       await this.recordRenderOutput(workflowStatus, projectId);
       this.combiningScenes.set(false);
     } catch (error) {
-      if (error instanceof ProjectChangedError) {
+      if (error instanceof RenderContractError) {
+        this.combiningScenes.set(false);
+        this.matSnackBar.open(error.message, 'Dismiss', {
+          panelClass: ['error-snackbar'],
+        });
+        return;
+      } else if (error instanceof ProjectChangedError) {
         // The user left the project mid-render: reset the in-memory button
         // state (otherwise it stays stuck on "Rendering...") but keep the
         // persisted marker so returning to the project resumes the run. Release
@@ -1619,61 +1633,37 @@ export class RemixEngineService {
     }
   }
 
-  private getSceneVideoDuration(
-    scene: GeneratedScene | ProvidedVideoScene,
-    skipTime: number,
-  ) {
-    if (this.configService.isGeneratedScene(scene)) {
-      const candidate = scene.candidates![scene.selectedCandidateIndex!];
-      const end = candidate.trim?.end ?? candidate.durationSeconds;
-      return end - skipTime;
-    }
-    if (this.configService.isProvidedVideoScene(scene)) {
-      const end = scene.trim?.end ?? scene.durationSeconds!;
-      return end - skipTime;
-    }
-    return 0;
-  }
-
   private getCombineScenesArrangements(
     scenes: Array<GeneratedScene | ProvidedVideoScene>,
     audioTracks: AudioTrack[],
     visualOverlays: VisualOverlay[],
   ) {
     const arrangement: CombineScenesArrangement[] = [];
-    const validScenes = scenes.filter(scene => {
-      if (this.configService.isProvidedVideoScene(scene)) {
-        if (scene.durationSeconds) {
-          return scene.video?.path;
-        }
-      } else if (this.configService.isGeneratedScene(scene)) {
-        if (scene.candidates && scene.selectedCandidateIndex !== undefined) {
-          return scene.candidates[scene.selectedCandidateIndex].video?.path;
-        }
-      }
-      return false;
-    });
-    for (const scene of validScenes) {
-      let gcsVideoPath;
-      let skipTime = 0;
-      if (this.configService.isProvidedVideoScene(scene)) {
-        gcsVideoPath = scene.video?.path;
-        skipTime = scene.trim?.start ?? 0;
-      } else if (this.configService.isGeneratedScene(scene)) {
-        const candidate = scene.candidates![scene.selectedCandidateIndex!];
-        gcsVideoPath = candidate.video?.path;
-        skipTime = candidate.trim?.start ?? 0;
-      }
-      const duration = this.getSceneVideoDuration(scene, skipTime);
-      if (!gcsVideoPath) {
-        console.debug(`No video for scene ${scene.id}`);
+    const resolvedScenes = scenes.map(scene => ({
+      scene,
+      resolution: resolveSceneRenderClip(scene),
+    }));
+    if (resolvedScenes.some(({resolution}) => resolution.state === 'invalid')) {
+      throw new RenderContractError(
+        'One or more selected scene videos are missing a storage path or valid ' +
+          'duration, or have an invalid trim.',
+      );
+    }
+    if (!resolvedScenes.some(({resolution}) => resolution.state === 'ready')) {
+      throw new RenderContractError(
+        'Select or upload at least one scene video before rendering.',
+      );
+    }
+    for (const {scene, resolution} of resolvedScenes) {
+      if (resolution.state !== 'ready') {
         continue;
       }
+      const {video, start, duration} = resolution.clip;
       const videoArrangement: CombineScenesArrangement = {
         file_type: 'video',
-        file_path: gcsVideoPath,
+        file_path: video.path,
         start_time: 0,
-        skip_time: skipTime,
+        skip_time: start,
         duration,
       };
       if (scene.transition) {
@@ -1682,12 +1672,6 @@ export class RemixEngineService {
           scene.transitionOverlap ?? DEFAULT_TRANSITION_OVERLAP;
       }
       arrangement.push(videoArrangement);
-
-      if (duration <= 0) {
-        console.error(
-          `ERROR:Unknown scene #${scene.id} video duration: ${duration}, using default value instead.`,
-        );
-      }
     }
 
     for (const track of audioTracks) {

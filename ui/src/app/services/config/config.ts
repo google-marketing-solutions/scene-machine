@@ -34,6 +34,11 @@ import {debounceTime, distinctUntilChanged, firstValueFrom, skip} from 'rxjs';
  */
 export const DEFAULT_TRANSITION_OVERLAP = 0.5;
 
+/** One full frame at the backend's minimum 24 fps render rate. */
+export const MIN_RENDER_CLIP_DURATION_SECONDS = 0.042;
+
+const DURATION_COMPARISON_EPSILON_SECONDS = 1e-9;
+
 /**
  * Threshold for aspect ratio deviation beyond which a warning is shown.
  */
@@ -316,6 +321,69 @@ export interface ProvidedVideoScene extends Scene {
   video?: GcsFile;
   durationSeconds?: number;
   trim?: {start?: number; end?: number};
+}
+
+export interface SceneRenderClip {
+  video: GcsFile;
+  start: number;
+  duration: number;
+}
+
+export type SceneRenderClipResolution =
+  | {state: 'not-selected'}
+  | {state: 'invalid'}
+  | {state: 'ready'; clip: SceneRenderClip};
+
+/**
+ * Resolves the video material that a scene contributes to a render.
+ *
+ * An unselected generated scene contributes nothing. A provided-video scene,
+ * or a generated scene with a selected candidate, is invalid unless it has a
+ * storage path and at least one frame of effective duration.
+ */
+export function resolveSceneRenderClip(
+  scene: GeneratedScene | ProvidedVideoScene,
+): SceneRenderClipResolution {
+  let video: GcsFile | undefined;
+  let sourceDuration: number | undefined;
+  let trim: {start?: number; end?: number} | undefined;
+
+  if (scene.type === 'generated') {
+    const generatedScene = scene as GeneratedScene;
+    if (generatedScene.selectedCandidateIndex === undefined) {
+      return {state: 'not-selected'};
+    }
+    const candidate =
+      generatedScene.candidates?.[generatedScene.selectedCandidateIndex];
+    if (!candidate) {
+      return {state: 'invalid'};
+    }
+    video = candidate.video;
+    sourceDuration = candidate.durationSeconds;
+    trim = candidate.trim;
+  } else {
+    const providedScene = scene as ProvidedVideoScene;
+    video = providedScene.video;
+    sourceDuration = providedScene.durationSeconds;
+    trim = providedScene.trim;
+  }
+
+  const start = trim?.start ?? 0;
+  const end = trim?.end ?? sourceDuration;
+  const duration = end === undefined ? NaN : end - start;
+  const path = video?.path;
+  if (
+    !video ||
+    typeof path !== 'string' ||
+    !path.trim() ||
+    !Number.isFinite(start) ||
+    !Number.isFinite(duration) ||
+    duration + DURATION_COMPARISON_EPSILON_SECONDS <
+      MIN_RENDER_CLIP_DURATION_SECONDS
+  ) {
+    return {state: 'invalid'};
+  }
+  return {state: 'ready', clip: {video, start, duration}};
 }
 
 export interface ThumbnailMaterial {
