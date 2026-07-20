@@ -28,7 +28,10 @@ import datetime
 import importlib
 import pathlib
 import sys
+import threading
 import uuid
+
+from google.api_core import exceptions as google_exceptions
 
 # Reused module-scoped fixture; pytest picks it up from this namespace.
 from test.test_frontdoor import orchestrator_module  # noqa: F401  pylint: disable=unused-import
@@ -201,24 +204,34 @@ class FakeCollection(FakeQuery):
 
 
 class FakeBatch:
-  """WriteBatch fake: buffers set()/delete() ops, applies them on commit()."""
+  """Buffers create/set/delete writes and commits them atomically."""
 
-  def __init__(self):
+  def __init__(self, db):
+    self._db = db
     self._ops = []
 
   def set(self, ref, data):
     self._ops.append(('set', ref, data))
 
+  def create(self, ref, data):
+    self._ops.append(('create', ref, data))
+
   def delete(self, ref):
     self._ops.append(('delete', ref, None))
 
   def commit(self):
-    for op, ref, data in self._ops:
-      if op == 'set':
-        ref.set(data)
-      else:
-        ref.delete()
-    self._ops.clear()
+    if self._db.commit_barrier is not None:
+      self._db.commit_barrier.wait(timeout=5)
+    with self._db.lock:
+      for op, ref, _ in self._ops:
+        if op == 'create' and ref.id in ref._collection.docs:
+          raise google_exceptions.AlreadyExists('document already exists')
+      for op, ref, data in self._ops:
+        if op in ('create', 'set'):
+          ref.set(data)
+        else:
+          ref.delete()
+      self._ops.clear()
 
 
 class FakeUiDb:
@@ -226,12 +239,14 @@ class FakeUiDb:
 
   def __init__(self):
     self._collections = {}
+    self.lock = threading.Lock()
+    self.commit_barrier = None
 
   def collection(self, name):
     return self._collections.setdefault(name, FakeCollection())
 
   def batch(self):
-    return FakeBatch()
+    return FakeBatch(self)
 
 
 # ---------------------------------------------------------------------------
@@ -784,6 +799,77 @@ def _scenes_docs(fake_db, project_id):
   return (
       fake_db.collection('projects').document(project_id).collection('scenes').docs
   )
+
+
+def test_concurrent_project_posts_are_atomically_create_only(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(
+      monkeypatch, AUTH_MODE='iap', IAP_AUDIENCE=_IAP_AUDIENCE
+  )
+  _stub_identity(
+      monkeypatch,
+      orch,
+      {'t-u1': {'email': 'u1@x'}, 't-u2': {'email': 'u2@x'}},
+  )
+  fake_db.commit_barrier = threading.Barrier(2)
+  project_id = str(uuid.uuid4())
+  submissions = {
+      'first': {
+          'assertion': 't-u1',
+          'owner': 'u1@x',
+          'payload': {
+              'id': project_id,
+              'name': 'First',
+              'storyboard': [
+                  {'description': 'first-0'},
+                  {'description': 'first-1'},
+              ],
+          },
+      },
+      'second': {
+          'assertion': 't-u2',
+          'owner': 'u2@x',
+          'payload': {
+              'id': project_id,
+              'name': 'Second',
+              'storyboard': [{'description': 'second-0'}],
+          },
+      },
+  }
+  statuses = {}
+
+  def post_project(label):
+    submission = submissions[label]
+    with orch.app.test_client() as client:
+      response = client.post(
+          '/api/projects',
+          json=submission['payload'],
+          headers=_iap(submission['assertion']),
+      )
+    statuses[label] = response.status_code
+
+  threads = [
+      threading.Thread(target=post_project, args=(label,))
+      for label in submissions
+  ]
+  for thread in threads:
+    thread.start()
+  for thread in threads:
+    thread.join(timeout=10)
+  assert not any(thread.is_alive() for thread in threads)
+
+  assert sorted(statuses.values()) == [200, 409]
+  winner = next(label for label, status in statuses.items() if status == 200)
+  expected = submissions[winner]
+  stored = fake_db.collection('projects').docs[project_id]
+  assert stored['name'] == expected['payload']['name']
+  assert stored['createdBy'] == expected['owner']
+  stored_scenes = [
+      scene for _, scene in sorted(_scenes_docs(fake_db, project_id).items())
+  ]
+  assert stored_scenes == expected['payload']['storyboard']
 
 
 def test_project_storyboard_split_into_scenes_subcollection(
