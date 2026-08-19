@@ -600,15 +600,15 @@ export class Storyboard {
       newTrim.end = duration;
     }
 
-    newTrim.start = toDecimals(newTrim.start, 3);
-    newTrim.end = toDecimals(newTrim.end, 3);
-
+    // Convert the raw clamped seconds straight to integer milliseconds:
+    // toDecimals() truncates via Math.floor, and 1.001 * 1000 evaluates to
+    // 1000.9999999999999 in IEEE-754, so pre-rounding to 3 decimals in
+    // seconds silently drops a millisecond that Math.round would keep. All
+    // the repair math below runs in integer milliseconds for the same reason.
     const minimumDurationMilliseconds = Math.round(
       MIN_RENDER_CLIP_DURATION_SECONDS * 1000,
     );
-    const sourceDurationMilliseconds = Math.round(
-      toDecimals(duration, 3) * 1000,
-    );
+    const sourceDurationMilliseconds = Math.round(duration * 1000);
     let startMilliseconds = Math.round(newTrim.start * 1000);
     let endMilliseconds = Math.round(newTrim.end * 1000);
 

@@ -379,6 +379,25 @@ describe('Storyboard', () => {
     expect(currentProvidedTrim()).toEqual({start: 2, end: 2.042});
   });
 
+  it('preserves millisecond trim precision through the round trip', () => {
+    // 1.001 * 1000 is 1000.9999999999999 in IEEE-754, so a naive
+    // Math.floor(seconds * 1000)/1000 pre-rounding step truncates 1.001s to
+    // 1.000s before the millisecond math ever runs.
+    const scene: ProvidedVideoScene = {
+      id: '1',
+      type: 'video',
+      name: 'Scene 1',
+      video: {url: 'http://test.mp4', path: 'test/path'},
+      durationSeconds: 10,
+      trim: {start: 0, end: 10},
+    };
+    selectTrimScene(scene);
+
+    component.updateTrim({start: 1.001, end: 5.001});
+
+    expect(currentProvidedTrim()).toEqual({start: 1.001, end: 5.001});
+  });
+
   it('does not change trim before video metadata loads', () => {
     const scene: ProvidedVideoScene = {
       id: '1',
