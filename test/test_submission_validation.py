@@ -426,11 +426,12 @@ def _code_with_actions(data, actions_json):
   return result[1] if result is not None else None
 
 
-def _malformed_action_submission():
-  # A node with an explicit-but-empty input dict is enough to reach the
-  # actions_json[action] lookup that Victor's review flagged: no input keys
-  # need to be iterated, only the lookup itself needs to happen.
-  return _submission({'n': {'action': 'weird', 'input': {}}}, {}, node_id='n')
+def _malformed_action_submission(node=None):
+  # An explicit-but-empty input dict reaches the actions_json[action] lookup
+  # without needing any input keys to iterate.
+  return _submission(
+      {'n': node or {'action': 'weird', 'input': {}}}, {}, node_id='n'
+  )
 
 
 @pytest.mark.parametrize('action_def', [None, ['x'], 'weird', 5])
@@ -454,6 +455,48 @@ def test_missing_action_input_key_is_allowed():
   data = _malformed_action_submission()
   assert _code_with_actions(data, {'weird': {}}) is None
 
+
+@pytest.mark.parametrize(
+    'field', ('input', 'parameters', 'dimensionsMapping', 'dimensionsConsumed')
+)
+def test_explicit_null_node_field_rejected(field):
+  # The executor reads these with .get(key, default), which returns the
+  # default only when the key is ABSENT. An explicit null survives to the
+  # engine and crashes it, so absence and null cannot validate the same.
+  node = {'action': 'pass', 'input': {}}
+  node[field] = None
+  assert (
+      _code_with_actions(_malformed_action_submission(node), {})
+      == 'MALFORMED_SUBMISSION'
+  )
+
+
+@pytest.mark.parametrize(
+    'field', ('parameters', 'dimensionsMapping', 'dimensionsConsumed')
+)
+def test_omitted_node_field_still_allowed(field):
+  node = {'action': 'pass', 'input': {}}
+  assert field not in node
+  assert _code_with_actions(_malformed_action_submission(node), {}) is None
+
+
+@pytest.mark.parametrize('action_def', [None, ['x'], 'weird', 5])
+def test_non_dict_action_definition_rejected_without_node_input(action_def):
+  # The action-definition shape must be checked even when the node declares
+  # no input of its own, since the executor still reads that definition.
+  data = _malformed_action_submission({'action': 'weird'})
+  assert (
+      _code_with_actions(data, {'weird': action_def}) == 'MALFORMED_SUBMISSION'
+  )
+
+
+@pytest.mark.parametrize('params', [None, ['x'], 'weird', 5])
+def test_non_dict_action_parameters_rejected(params):
+  data = _malformed_action_submission({'action': 'weird'})
+  assert (
+      _code_with_actions(data, {'weird': {'parameters': params}})
+      == 'MALFORMED_SUBMISSION'
+  )
 
 
 # --- enqueue fan-out / quantity / project-pin limits (generous caps) ---------

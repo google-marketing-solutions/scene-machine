@@ -896,8 +896,8 @@ def test_post_project_accepts_449_scenes_in_one_atomic_batch(
   assert response.status_code == 200
   assert fake_db.collection('projects').docs['max-batch']['storyboard'] == []
   assert len(_scenes_docs(fake_db, 'max-batch')) == 449
-  # Root + 449 scenes = 450 operations, Firestore's batch ceiling, committed
-  # in exactly one atomic batch.
+  # Root + 449 scenes = 450 operations, this repository's batching threshold,
+  # committed in exactly one atomic batch.
   assert batch_sizes == [450]
 
 

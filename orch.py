@@ -887,10 +887,10 @@ _SCENES_SUBCOLLECTION = 'scenes'
 # committed in sequence and are NOT atomic as a whole (see _commit_in_batches),
 # so a mid-write failure can leave it partially updated until the next save.
 _SCENE_BATCH_LIMIT = 450
-# A create POST must fit its root doc plus every scene in ONE atomic batch:
-# splitting a create across batches would leave the root created before a
-# later batch is known to succeed, so a mid-write failure and retry collides
-# with Firestore's not-exists precondition (PR #148 review thread).
+# A create POST must fit its root doc plus every scene in ONE batch of that
+# size: splitting a create across batches would leave the root created before
+# a later batch is known to succeed, so a mid-write failure and retry collides
+# with Firestore's not-exists precondition and 409s forever.
 _MAX_CREATE_SCENES = _SCENE_BATCH_LIMIT - 1
 
 

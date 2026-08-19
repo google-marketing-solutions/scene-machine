@@ -273,9 +273,29 @@ def validate_submission(
     if action != _PASS and action not in actions_json:
       return (f'Node {node_id!r} has an undefined action {action!r}',
               'ACTION_UNDEFINED')
-    node_input = node.get(_INPUT)
-    if node_input is not None and not isinstance(node_input, dict):
+    # Absence and explicit null are NOT equivalent: the executor reads these
+    # fields with .get(key, default), which supplies the default only when the
+    # key is missing. A null survives to the engine and crashes it, so a
+    # present-but-null field is rejected here while an omitted one defaults.
+    if _INPUT in node and not isinstance(node[_INPUT], dict):
       return (f'Node {node_id!r} input is not an object', 'MALFORMED_SUBMISSION')
+    node_input = node.get(_INPUT)
+    # The referenced action's own metadata is read by the executor whether or
+    # not this node declares inputs, so its shape is checked out here rather
+    # than inside the input branch below.
+    if action != _PASS:
+      action_def = actions_json[action]
+      if not isinstance(action_def, dict):
+        return (
+            f'Action {action!r} definition is not an object',
+            'MALFORMED_SUBMISSION',
+        )
+      for key in (_INPUT, 'parameters'):
+        if key in action_def and not isinstance(action_def[key], dict):
+          return (
+              f'Action {action!r} {key} is not an object',
+              'MALFORMED_SUBMISSION',
+          )
     if node_id == selected_node_id and set(input_files) != set(node_input or {}):
       return (f'Node {node_id!r} inputs and inputFiles groups do not match',
               'MALFORMED_SUBMISSION')
@@ -287,18 +307,7 @@ def validate_submission(
           return (f'Node {node_id!r} input {input_key!r} is not a valid '
                   'Firestore path segment', 'MALFORMED_SUBMISSION')
       if action != _PASS:
-        action_def = actions_json[action]
-        if not isinstance(action_def, dict):
-          return (
-              f'Action {action!r} definition is not an object',
-              'MALFORMED_SUBMISSION',
-          )
-        if _INPUT in action_def and not isinstance(action_def[_INPUT], dict):
-          return (
-              f'Action {action!r} input is not an object',
-              'MALFORMED_SUBMISSION',
-          )
-        declared_inputs = action_def.get(_INPUT, {})
+        declared_inputs = actions_json[action].get(_INPUT, {})
         undeclared_inputs = set(node_input) - set(declared_inputs)
         if undeclared_inputs:
           return (f'Node {node_id!r} has an undeclared input '
@@ -338,7 +347,7 @@ def validate_submission(
     # dimensionsConsumed`, which throws on a non-list. Fail closed on shape here so
     # a bad control is a 400, not a 500.
     mapping = node.get(_DIMENSIONS_MAPPING)
-    if mapping is not None:
+    if _DIMENSIONS_MAPPING in node:
       if not isinstance(mapping, dict) or any(
           not isinstance(k, str) or not k or not isinstance(v, str) or not v
           for k, v in mapping.items()):
@@ -351,15 +360,13 @@ def validate_submission(
         return (f'Node {node_id!r} dimensionsMapping has duplicate targets',
                 'MALFORMED_SUBMISSION')
     consumed = node.get(_DIMENSIONS_CONSUMED)
-    if consumed is not None and (not isinstance(consumed, list) or any(
+    if _DIMENSIONS_CONSUMED in node and (not isinstance(consumed, list) or any(
         not isinstance(dimension, str) or not dimension
         for dimension in consumed)):
       return (f'Node {node_id!r} has a malformed dimensionsConsumed (expected a '
               f'list of non-empty strings)', 'MALFORMED_SUBMISSION')
 
-    params = node.get('parameters')
-    if params is None:
-      params = {}
+    params = node.get('parameters', {})
     if not isinstance(params, dict):
       return (f'Node {node_id!r} has non-object parameters', 'MALFORMED_SUBMISSION')
 

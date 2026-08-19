@@ -2264,8 +2264,12 @@ def test_app_rejects_empty_submission_before_side_effects(
   assert tasks == []
 
 
+@pytest.mark.parametrize('node', [
+    {'action': 'weird', 'input': {}},
+    {'action': 'weird'},  # no node input: the action shape still matters
+])
 def test_app_rejects_malformed_action_definition_before_side_effects(
-    monkeypatch, orchestrator_module
+    monkeypatch, orchestrator_module, node
 ):
   """A malformed actions.json entry must not crash the server (regression)."""
   del orchestrator_module
@@ -2278,7 +2282,33 @@ def test_app_rejects_malformed_action_definition_before_side_effects(
   body = {
       'workflowId': 'workflow-test',
       'nodeId': 'root',
-      'workflowDefinition': {'root': {'action': 'weird', 'input': {}}},
+      'workflowDefinition': {'root': node},
+      'inputFiles': {},
+  }
+  response, stored, tasks = _app_submit_without_side_effects(
+      monkeypatch, orch, body
+  )
+  assert response.status_code == 400
+  assert response.get_json()['code'] == 'MALFORMED_SUBMISSION'
+  assert stored == []
+  assert tasks == []
+
+
+@pytest.mark.parametrize(
+    'field', ('input', 'parameters', 'dimensionsMapping', 'dimensionsConsumed')
+)
+def test_app_rejects_explicit_null_node_field_before_side_effects(
+    monkeypatch, orchestrator_module, field
+):
+  """An explicit null reached the engine and 500'd AFTER storing (regression)."""
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  node = {'action': 'pass'}
+  node[field] = None
+  body = {
+      'workflowId': 'workflow-test',
+      'nodeId': 'root',
+      'workflowDefinition': {'root': node},
       'inputFiles': {},
   }
   response, stored, tasks = _app_submit_without_side_effects(
