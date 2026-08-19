@@ -793,6 +793,107 @@ describe('ConfigService (mediated data plane)', () => {
     });
   });
 
+  describe('stale autosave callbacks after deletion', () => {
+    it('a late SUCCESS after deletion starts no queued save', async () => {
+      markPersisted('proj-1');
+      const firstResponse = new Subject<unknown>();
+      httpClientMock.patch.mockReturnValue(firstResponse);
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+      // Queues a pending save against the SAME (soon-to-be-orphaned) state
+      // object, since a save is already in flight.
+      service.updateProjectConfig({name: 'B'});
+      service.saveNow();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+
+      await service.deleteProject('proj-1');
+
+      // The in-flight request's response arrives after the project is gone.
+      firstResponse.next({});
+
+      // Unguarded, the success handler would start the queued pending save,
+      // resurrecting the project with a second PATCH.
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      expect((service as any).projectSaveStates.has('proj-1')).toBe(false);
+    });
+
+    it('a late FAILURE after deletion shows no snackbar and retries nothing', async () => {
+      markPersisted('proj-1');
+      const firstResponse = new Subject<unknown>();
+      httpClientMock.patch.mockReturnValue(firstResponse);
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+
+      await service.deleteProject('proj-1');
+
+      firstResponse.error(new Error('late failure'));
+
+      expect(matSnackBarMock.open).not.toHaveBeenCalled();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      expect((service as any).projectSaveStates.has('proj-1')).toBe(false);
+    });
+
+    it('Retry from a snackbar shown before deletion does not recreate the project', async () => {
+      markPersisted('proj-1');
+      const failedResponse = new Subject<unknown>();
+      const retryAction = new Subject<void>();
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      httpClientMock.patch.mockReturnValueOnce(failedResponse);
+      matSnackBarMock.open.mockReturnValue({onAction: () => retryAction});
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+      failedResponse.error(new Error('save failed'));
+      expect(matSnackBarMock.open).toHaveBeenCalledTimes(1);
+
+      await service.deleteProject('proj-1');
+      retryAction.next();
+
+      // Unguarded, Retry calls persistNow() for the deleted id, which (since
+      // persistedProjectIds was also cleared by delete) issues a fresh POST.
+      expect(httpClientMock.post).not.toHaveBeenCalled();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      expect((service as any).projectSaveStates.has('proj-1')).toBe(false);
+      errorSpy.mockRestore();
+    });
+
+    it('a stale callback cannot corrupt a same-id project recreated after delete', async () => {
+      markPersisted('proj-1');
+      const oldResponse = new Subject<unknown>();
+      httpClientMock.patch.mockReturnValueOnce(oldResponse);
+
+      // The old project: a save starts (capturing the OLD save-state object),
+      // then a second edit queues a pending save against that same object.
+      service.updateProjectConfig({id: 'proj-1', name: 'old-A'});
+      service.saveNow();
+      service.updateProjectConfig({name: 'old-B'});
+      service.saveNow();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+
+      await service.deleteProject('proj-1');
+
+      // A new project reuses the same id, getting its OWN save-state object.
+      service.setNewProject('proj-1');
+      service.updateProjectConfig({name: 'new'});
+      service.saveNow();
+      expect(httpClientMock.post).toHaveBeenCalledTimes(1);
+
+      // The old in-flight request finally resolves. Unguarded, its success
+      // handler would start the OLD queued 'old-B' pending save against the
+      // NOW-persisted id, PATCHing the new project with stale deleted data.
+      oldResponse.next({});
+
+      // Still just the one PATCH for 'old-A' from before deletion: nothing
+      // new was triggered by the stale response.
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      expect(
+        (service as any).projectSaveStates.get('proj-1').lastSavedSource.name,
+      ).toBe('new');
+    });
+  });
+
   describe('debounced autosave interplay', () => {
     it('should save a dirty config via the debounce when not flushed', async () => {
       markPersisted('proj-1');

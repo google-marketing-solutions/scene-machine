@@ -696,6 +696,22 @@ export class ConfigService {
   }
 
   /**
+   * Whether `state` is still the tracked save state for `projectId`.
+   *
+   * A deleted project can be recreated with the same id, which allocates a
+   * new ProjectSaveState object under that id. An HTTP callback captured a
+   * specific state object when its request started; if the map no longer
+   * points at that same object, the callback belongs to a project that no
+   * longer exists (or has been replaced) and must not act.
+   */
+  private isCurrentSaveState(
+    projectId: string,
+    state: ProjectSaveState,
+  ): boolean {
+    return this.projectSaveStates.get(projectId) === state;
+  }
+
+  /**
    * A GET started before a local save settles can return older project bytes.
    * Keep this load on the newest local object until that save settles.
    */
@@ -807,6 +823,12 @@ export class ConfigService {
       : this.httpClient.post<{id: string}>('/api/projects', save.payload);
     request.subscribe({
       next: () => {
+        // The project may have been deleted (and possibly recreated under the
+        // same id, with its own new state object) while this request was in
+        // flight. A stale response must not touch project state at all.
+        if (!this.isCurrentSaveState(projectId, state)) {
+          return;
+        }
         this.persistedProjectIds.add(projectId);
         // Confirmed saved: now it is safe to dedupe future saves of this exact
         // object, and it is no longer in flight.
@@ -817,6 +839,9 @@ export class ConfigService {
         this.startPendingSave(state);
       },
       error: error => {
+        if (!this.isCurrentSaveState(projectId, state)) {
+          return;
+        }
         // The save did NOT happen: clear the in-flight marker (without ever
         // setting lastSavedSource) so a later flush/saveNow or the next
         // autosave emission re-attempts this work instead of skipping it.
@@ -852,6 +877,9 @@ export class ConfigService {
           {panelClass: ['error-snackbar']},
         );
         snackBarRef.onAction().subscribe(() => {
+          if (!this.isCurrentSaveState(projectId, state)) {
+            return;
+          }
           // Retry the current state when still on this project, otherwise the
           // newest source this project's queue has observed.
           const latest = this.projectConfig.value();
