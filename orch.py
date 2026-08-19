@@ -887,6 +887,11 @@ _SCENES_SUBCOLLECTION = 'scenes'
 # committed in sequence and are NOT atomic as a whole (see _commit_in_batches),
 # so a mid-write failure can leave it partially updated until the next save.
 _SCENE_BATCH_LIMIT = 450
+# A create POST must fit its root doc plus every scene in ONE atomic batch:
+# splitting a create across batches would leave the root created before a
+# later batch is known to succeed, so a mid-write failure and retry collides
+# with Firestore's not-exists precondition (PR #148 review thread).
+_MAX_CREATE_SCENES = _SCENE_BATCH_LIMIT - 1
 
 
 def _scene_doc_id(index: int) -> str:
@@ -925,7 +930,10 @@ def _write_project_doc(
   spans multiple batches committed in sequence (not atomic as a whole), so a
   failure partway through can leave the project partially written until the next
   save. When create is true, the root uses Firestore's atomic not-exists
-  precondition; scene writes retain their existing set behavior.
+  precondition, scene writes retain their existing set behavior, and the
+  stale-scene prune scan is skipped: a brand-new project has no prior scenes
+  to prune, and callers cap create at _MAX_CREATE_SCENES so this always fits
+  one atomic batch.
   """
   scenes = payload.get('storyboard')
   if not isinstance(scenes, list):
@@ -933,13 +941,14 @@ def _write_project_doc(
   root = dict(payload)
   root['storyboard'] = []
   scenes_ref = doc_ref.collection(_SCENES_SUBCOLLECTION)
-  keep_ids = {_scene_doc_id(i) for i in range(len(scenes))}
   ops = [('create' if create else 'set', doc_ref, root)]
   for index, scene in enumerate(scenes):
     ops.append(('set', scenes_ref.document(_scene_doc_id(index)), scene))
-  for snapshot in scenes_ref.stream():
-    if snapshot.id not in keep_ids:
-      ops.append(('delete', scenes_ref.document(snapshot.id), None))
+  if not create:
+    keep_ids = {_scene_doc_id(i) for i in range(len(scenes))}
+    for snapshot in scenes_ref.stream():
+      if snapshot.id not in keep_ids:
+        ops.append(('delete', scenes_ref.document(snapshot.id), None))
   _commit_in_batches(ui_db, ops)
 
 
@@ -1028,6 +1037,15 @@ def projects_handler() -> flask_response:
   doc_ref = collection.document(project_id)
   payload['createdBy'] = _request_email()
   _convert_project_dates(payload)
+  storyboard = payload.get('storyboard')
+  # Reject before any write: keeps create-with-too-many-scenes from ever
+  # reaching _write_project_doc, so it cannot partially create a project.
+  if isinstance(storyboard, list) and len(storyboard) > _MAX_CREATE_SCENES:
+    return _json_error(
+        f'Too many scenes for project creation: {len(storyboard)}'
+        f' (max {_MAX_CREATE_SCENES})',
+        400,
+    )
   try:
     _write_project_doc(ui_db, doc_ref, payload, create=True)
   except google_exceptions.AlreadyExists:

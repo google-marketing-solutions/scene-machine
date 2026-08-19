@@ -872,6 +872,87 @@ def test_concurrent_project_posts_are_atomically_create_only(
   assert stored_scenes == expected['payload']['storyboard']
 
 
+def test_post_project_accepts_449_scenes_in_one_atomic_batch(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  batch_sizes = []
+  original_commit = FakeBatch.commit
+
+  def counting_commit(self):
+    batch_sizes.append(len(self._ops))
+    original_commit(self)
+
+  monkeypatch.setattr(FakeBatch, 'commit', counting_commit)
+
+  scenes = [{'description': f'scene-{i}'} for i in range(449)]
+  response = client.post(
+      '/api/projects',
+      json={'id': 'max-batch', 'name': 'n', 'storyboard': scenes},
+  )
+  assert response.status_code == 200
+  assert fake_db.collection('projects').docs['max-batch']['storyboard'] == []
+  assert len(_scenes_docs(fake_db, 'max-batch')) == 449
+  # Root + 449 scenes = 450 operations, Firestore's batch ceiling, committed
+  # in exactly one atomic batch.
+  assert batch_sizes == [450]
+
+
+def test_post_project_rejects_450_scenes_before_any_write(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  def fail_batch():
+    raise AssertionError('no batch should be created for a rejected POST')
+
+  monkeypatch.setattr(fake_db, 'batch', fail_batch)
+
+  scenes = [{'description': f'scene-{i}'} for i in range(450)]
+  response = client.post(
+      '/api/projects',
+      json={'id': 'too-big', 'name': 'n', 'storyboard': scenes},
+  )
+  assert response.status_code == 400
+  body = response.get_json()
+  assert 'error' in body
+  assert '449' in body['error']
+  assert 'too-big' not in fake_db.collection('projects').docs
+  assert _scenes_docs(fake_db, 'too-big') == {}
+
+
+def test_post_project_does_not_scan_existing_scenes_on_create(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  del fake_db
+
+  def fail_stream(self):
+    raise AssertionError(
+        'creating a new project must not scan for stale scenes; there is'
+        ' nothing to prune yet'
+    )
+
+  monkeypatch.setattr(FakeQuery, 'stream', fail_stream)
+
+  response = client.post(
+      '/api/projects',
+      json={
+          'id': 'fresh',
+          'name': 'n',
+          'storyboard': [{'description': 'only-scene'}],
+      },
+  )
+  assert response.status_code == 200
+
+
 def test_project_storyboard_split_into_scenes_subcollection(
     monkeypatch, orchestrator_module
 ):
