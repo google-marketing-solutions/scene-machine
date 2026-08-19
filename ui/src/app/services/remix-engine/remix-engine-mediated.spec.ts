@@ -1117,6 +1117,38 @@ describe('RemixEngineService (mediated)', () => {
       expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
     });
 
+    it('does not submit a workflow when every scene is unselected (non-empty storyboard)', async () => {
+      // Distinct from the empty-storyboard case above: the storyboard is
+      // non-empty, but the only scene is a generated one with no candidate
+      // chosen yet, so it resolves to 'not-selected', never 'ready'.
+      setRenderStoryboard([
+        {
+          id: 'unselected',
+          type: 'generated',
+          name: 'No candidate selected',
+          candidates: [
+            {
+              video: {path: 'videos/candidate.mp4', url: ''},
+              durationSeconds: 5,
+            },
+          ],
+        },
+      ]);
+      const startSpy = vi.spyOn(service, 'startCombineScenesWorkflow');
+
+      await service.combineScenes();
+
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+      expect(configServiceMock.setPendingRender).not.toHaveBeenCalled();
+      expect(service.combiningScenes()).toBe(false);
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Select or upload at least one scene video before rendering.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
     it('does not submit a partial render when an intended clip is invalid', async () => {
       setRenderStoryboard([
         {
