@@ -372,18 +372,81 @@ export function resolveSceneRenderClip(
   const end = trim?.end ?? sourceDuration;
   const duration = end === undefined ? NaN : end - start;
   const path = video?.path;
+  // A clip must not only be long enough, it must lie inside the source. A
+  // trim starting at or past the source end still satisfies the minimum
+  // duration, but there is no video left to read and ffmpeg emits an
+  // audio-only output instead of failing.
+  const withinSource =
+    Number.isFinite(sourceDuration) &&
+    (sourceDuration as number) > 0 &&
+    start >= 0 &&
+    start < (sourceDuration as number) &&
+    end !== undefined &&
+    end <= (sourceDuration as number) + DURATION_COMPARISON_EPSILON_SECONDS;
   if (
     !video ||
     typeof path !== 'string' ||
     !path.trim() ||
     !Number.isFinite(start) ||
     !Number.isFinite(duration) ||
+    !withinSource ||
     duration + DURATION_COMPARISON_EPSILON_SECONDS <
       MIN_RENDER_CLIP_DURATION_SECONDS
   ) {
     return {state: 'invalid'};
   }
   return {state: 'ready', clip: {video, start, duration}};
+}
+
+/**
+ * The message shown when a scene's transition cannot be applied, or null when
+ * every transition in the storyboard is applicable.
+ *
+ * Per-clip validity is not enough: a transition consumes time from BOTH the
+ * clip it is on and the one before it (ffmpeg offsets the crossfade by
+ * `overlap` into the accumulated timeline). An overlap at least as long as
+ * either neighbour swallows that clip entirely, so a storyboard of
+ * individually valid clips can still render as a single wash of colour.
+ *
+ * Shared by render eligibility and arrangement construction so the button and
+ * the submitted workflow cannot disagree.
+ */
+export function findTransitionContractViolation(
+  scenes: Array<GeneratedScene | ProvidedVideoScene>,
+): string | null {
+  const renderable: Array<{
+    scene: GeneratedScene | ProvidedVideoScene;
+    duration: number;
+  }> = [];
+  for (const scene of scenes) {
+    const resolution = resolveSceneRenderClip(scene);
+    if (resolution.state === 'ready') {
+      renderable.push({scene, duration: resolution.clip.duration});
+    }
+  }
+  // The first clip has nothing to transition from, so ffmpeg ignores its
+  // transition; start at the second.
+  for (let index = 1; index < renderable.length; index++) {
+    const {scene, duration} = renderable[index];
+    if (!scene.transition) {
+      continue;
+    }
+    const overlap = scene.transitionOverlap ?? DEFAULT_TRANSITION_OVERLAP;
+    if (!Number.isFinite(overlap) || overlap <= 0) {
+      continue; // an explicit zero (or absent) overlap is a hard cut
+    }
+    const previousDuration = renderable[index - 1].duration;
+    if (
+      overlap >= duration + DURATION_COMPARISON_EPSILON_SECONDS ||
+      overlap >= previousDuration + DURATION_COMPARISON_EPSILON_SECONDS
+    ) {
+      return (
+        `The transition on "${scene.name}" is longer than the clips it joins. ` +
+        'Shorten the transition or lengthen the scenes.'
+      );
+    }
+  }
+  return null;
 }
 
 export interface ThumbnailMaterial {
@@ -1033,8 +1096,17 @@ export class ConfigService {
   }
 
   async deleteProject(projectId: string) {
-    await firstValueFrom(this.httpClient.delete(`/api/projects/${projectId}`));
+    // Fence the project BEFORE the request, not after it resolves: while a
+    // DELETE is in flight the save state would otherwise still be current, so
+    // an in-flight save completing mid-deletion would dispatch its queued
+    // successor against the project being deleted. Dropping the state first
+    // makes every outstanding callback fail its isCurrentSaveState check.
+    //
+    // This orders the client's own writes. A PATCH already dispatched to the
+    // server can still be processed after the DELETE arrives; that ordering
+    // is the server's to guarantee.
     this.persistedProjectIds.delete(projectId);
     this.projectSaveStates.delete(projectId);
+    await firstValueFrom(this.httpClient.delete(`/api/projects/${projectId}`));
   }
 }

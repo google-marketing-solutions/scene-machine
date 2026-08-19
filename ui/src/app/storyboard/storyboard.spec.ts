@@ -379,6 +379,55 @@ describe('Storyboard', () => {
     expect(currentProvidedTrim()).toEqual({start: 2, end: 2.042});
   });
 
+  describe('resolveSceneRenderClip source bounds', () => {
+    function providedScene(
+      durationSeconds: number | undefined,
+      trim: {start?: number; end?: number},
+    ): ProvidedVideoScene {
+      return {
+        id: 'b',
+        type: 'video',
+        name: 'Bounds',
+        video: {url: 'http://test.mp4', path: 'videos/test.mp4'},
+        durationSeconds,
+        trim,
+      } as ProvidedVideoScene;
+    }
+
+    it('rejects a trim starting at the source end', () => {
+      // Long enough to pass the minimum-duration check, but there is no
+      // source video left to read: ffmpeg yields an audio-only output.
+      expect(
+        resolveSceneRenderClip(providedScene(5, {start: 5, end: 5.042})).state,
+      ).toBe('invalid');
+    });
+
+    it('rejects a trim ending beyond the source duration', () => {
+      expect(
+        resolveSceneRenderClip(providedScene(5, {start: 4, end: 6})).state,
+      ).toBe('invalid');
+    });
+
+    it('rejects an explicit trim with no source duration', () => {
+      expect(
+        resolveSceneRenderClip(providedScene(undefined, {start: 0, end: 2}))
+          .state,
+      ).toBe('invalid');
+    });
+
+    it('rejects a negative trim start', () => {
+      expect(
+        resolveSceneRenderClip(providedScene(5, {start: -1, end: 2})).state,
+      ).toBe('invalid');
+    });
+
+    it('still accepts a trim that ends exactly at the source duration', () => {
+      expect(
+        resolveSceneRenderClip(providedScene(5, {start: 1, end: 5})).state,
+      ).toBe('ready');
+    });
+  });
+
   it('preserves millisecond trim precision through the round trip', () => {
     // 1.001 * 1000 is 1000.9999999999999 in IEEE-754, so a naive
     // Math.floor(seconds * 1000)/1000 pre-rounding step truncates 1.001s to

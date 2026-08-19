@@ -499,6 +499,68 @@ describe('CompositionComponent', () => {
     expect(button.textContent).toContain('Rendering...');
   });
 
+  it('disables Render when a transition is longer than the clips it joins', () => {
+    // Each clip is individually valid, but the 0.5s crossfade on the second
+    // scene is longer than the 42ms first clip, which ffmpeg would consume
+    // entirely.
+    projectConfigSignal.set({
+      ...projectConfigSignal(),
+      storyboard: [
+        {
+          id: 'short',
+          type: 'video',
+          name: 'Short clip',
+          video: {url: '', path: 'videos/short.mp4'},
+          durationSeconds: 5,
+          trim: {start: 0, end: 0.042},
+        },
+        {
+          id: 'next',
+          type: 'video',
+          name: 'Next clip',
+          video: {url: '', path: 'videos/next.mp4'},
+          durationSeconds: 5,
+          transition: 'fade',
+          transitionOverlap: 0.5,
+        },
+      ],
+    });
+    fixture.detectChanges();
+
+    expect(component.canRender()).toBe(false);
+    expect(component.renderDisabledReason()).toContain(
+      'longer than the clips it joins',
+    );
+  });
+
+  it('keeps Render enabled for a transition that fits its clips', () => {
+    projectConfigSignal.set({
+      ...projectConfigSignal(),
+      storyboard: [
+        {
+          id: 'a',
+          type: 'video',
+          name: 'Clip A',
+          video: {url: '', path: 'videos/a.mp4'},
+          durationSeconds: 5,
+        },
+        {
+          id: 'b',
+          type: 'video',
+          name: 'Clip B',
+          video: {url: '', path: 'videos/b.mp4'},
+          durationSeconds: 5,
+          transition: 'fade',
+          transitionOverlap: 0.5,
+        },
+      ],
+    });
+    fixture.detectChanges();
+
+    expect(component.canRender()).toBe(true);
+    expect(component.renderDisabledReason()).toBe('');
+  });
+
   it('reports the render-in-progress reason ahead of other disabled reasons', () => {
     const remixEngineService = TestBed.inject(RemixEngineService);
     // An invalid scene would normally set its own disabled reason; a render

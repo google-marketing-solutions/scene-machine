@@ -39,6 +39,7 @@ import {FormatTimePipe} from '../pipes/format-time-pipe';
 import {
   ConfigService,
   DEFAULT_TRANSITION_OVERLAP,
+  findTransitionContractViolation,
   resolveSceneRenderClip,
 } from '../services/config/config';
 import {MediaRef, MediaService} from '../services/media/media';
@@ -139,12 +140,17 @@ export class Composition {
    * clip is valid. An empty playlist would fail in the backend, while omitting
    * an invalid intended clip would silently render only part of the storyboard.
    */
+  private transitionViolation = computed(() =>
+    findTransitionContractViolation(this.scenes()),
+  );
+
   canRender = computed(
     () =>
       this.playlist().length > 0 &&
       !this.sceneRenderClips().some(
         ({resolution}) => resolution.state === 'invalid',
-      ),
+      ) &&
+      this.transitionViolation() === null,
   );
 
   renderDisabledReason = computed(() => {
@@ -163,6 +169,10 @@ export class Composition {
     }
     if (this.playlist().length === 0) {
       return 'Select or upload at least one scene video before rendering.';
+    }
+    const transitionViolation = this.transitionViolation();
+    if (transitionViolation) {
+      return transitionViolation;
     }
     return '';
   });

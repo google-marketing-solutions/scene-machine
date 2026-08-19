@@ -794,6 +794,33 @@ describe('ConfigService (mediated data plane)', () => {
   });
 
   describe('stale autosave callbacks after deletion', () => {
+    it('does not start a queued save after deletion begins', async () => {
+      markPersisted('proj-1');
+      const firstResponse = new Subject<unknown>();
+      const deleteResponse = new Subject<unknown>();
+      httpClientMock.patch.mockReturnValue(firstResponse);
+      httpClientMock.delete.mockReturnValue(deleteResponse);
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+      service.updateProjectConfig({name: 'B'});
+      service.saveNow();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+
+      // Deletion STARTS but its response has not arrived yet.
+      const deletion = service.deleteProject('proj-1');
+
+      // The in-flight save now succeeds. Fencing only after DELETE resolves
+      // would let this dispatch the queued 'B' save mid-deletion.
+      firstResponse.next({});
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+
+      deleteResponse.next({});
+      await deletion;
+      expect((service as any).projectSaveStates.has('proj-1')).toBe(false);
+    });
+
     it('a late SUCCESS after deletion starts no queued save', async () => {
       markPersisted('proj-1');
       const firstResponse = new Subject<unknown>();

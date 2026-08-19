@@ -1117,6 +1117,80 @@ describe('RemixEngineService (mediated)', () => {
       expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
     });
 
+    it('does not submit a workflow when a transition outlasts its clips', async () => {
+      setRenderStoryboard([
+        {
+          id: 'short',
+          type: 'video',
+          name: 'Short clip',
+          video: {path: 'videos/short.mp4', url: ''},
+          durationSeconds: 5,
+          trim: {start: 0, end: 0.042},
+        },
+        {
+          id: 'next',
+          type: 'video',
+          name: 'Next clip',
+          video: {path: 'videos/next.mp4', url: ''},
+          durationSeconds: 5,
+          transition: 'fade',
+          transitionOverlap: 0.5,
+        },
+      ]);
+      const startSpy = vi.spyOn(service, 'startCombineScenesWorkflow');
+
+      await service.combineScenes();
+
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+      expect(configServiceMock.setPendingRender).not.toHaveBeenCalled();
+      expect(service.combiningScenes()).toBe(false);
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        expect.stringContaining('longer than the clips it joins'),
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('submits a transition that fits, using the persisted overlap', async () => {
+      setRenderStoryboard([
+        {
+          id: 'a',
+          type: 'video',
+          name: 'Clip A',
+          video: {path: 'videos/a.mp4', url: ''},
+          durationSeconds: 5,
+        },
+        {
+          id: 'b',
+          type: 'video',
+          name: 'Clip B',
+          video: {path: 'videos/b.mp4', url: ''},
+          durationSeconds: 5,
+          transition: 'fade',
+          transitionOverlap: 0,
+        },
+      ]);
+      const startSpy = vi
+        .spyOn(service, 'startCombineScenesWorkflow')
+        .mockResolvedValue(of({executionId: 'render-exec-id'}) as any);
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'renders/output.mp4'}]}}},
+      } as any);
+      mediaServiceMock.signUrl.mockResolvedValue(
+        'https://signed.example/o.mp4',
+      );
+
+      await service.combineScenes();
+
+      expect(startSpy).toHaveBeenCalled();
+      // An explicit zero overlap is a hard cut and must reach the backend as
+      // 0, not be dropped or defaulted.
+      expect(startSpy.mock.calls[0][0][1]).toEqual(
+        expect.objectContaining({transition: 'fade', transition_overlap: 0}),
+      );
+    });
+
     it('does not submit a workflow when every scene is unselected (non-empty storyboard)', async () => {
       // Distinct from the empty-storyboard case above: the storyboard is
       // non-empty, but the only scene is a generated one with no candidate

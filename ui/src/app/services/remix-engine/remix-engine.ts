@@ -50,6 +50,7 @@ import {
   ProductImage,
   ProvidedVideoScene,
   RenderRun,
+  findTransitionContractViolation,
   resolveSceneRenderClip,
   Resolution,
   VisualOverlay,
@@ -1653,6 +1654,10 @@ export class RemixEngineService {
       throw new RenderContractError(
         'Select or upload at least one scene video before rendering.',
       );
+    }
+    const transitionViolation = findTransitionContractViolation(scenes);
+    if (transitionViolation) {
+      throw new RenderContractError(transitionViolation);
     }
     for (const {scene, resolution} of resolvedScenes) {
       if (resolution.state !== 'ready') {

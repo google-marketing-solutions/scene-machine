@@ -358,6 +358,33 @@ class TestCombineVideo(unittest.TestCase):
         transition_overlap=0.5,
     )
 
+  def test_execute_preserves_explicit_zero_transition_overlap(self):
+    """An explicit 0 overlap means a hard cut and must not become 0.5."""
+    arrangement = [{
+        'file_type': 'video',
+        'file_path': 'video1.mp4',
+        'transition': 'circlecrop',
+        'transition_overlap': 0,
+    }]
+    self.mock_gcs.load_text.return_value = json.dumps(arrangement)
+
+    combine_video.execute(
+        self.mock_gcs,
+        self.mock_workflow_params,
+        [{Key.FILE.value: 'arrangement.json'}],
+        '1280:720',
+        6,
+        20,
+    )
+
+    self.mock_ffmpeg.add_video.assert_called_with(
+        path=mock.ANY,
+        skip_time=0,
+        duration=-1,
+        transition='circlecrop',
+        transition_overlap=0,
+    )
+
 
 if __name__ == '__main__':
   unittest.main()
