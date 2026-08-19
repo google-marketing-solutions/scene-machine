@@ -287,7 +287,18 @@ def validate_submission(
           return (f'Node {node_id!r} input {input_key!r} is not a valid '
                   'Firestore path segment', 'MALFORMED_SUBMISSION')
       if action != _PASS:
-        declared_inputs = actions_json[action].get(_INPUT) or {}
+        action_def = actions_json[action]
+        if not isinstance(action_def, dict):
+          return (
+              f'Action {action!r} definition is not an object',
+              'MALFORMED_SUBMISSION',
+          )
+        if _INPUT in action_def and not isinstance(action_def[_INPUT], dict):
+          return (
+              f'Action {action!r} input is not an object',
+              'MALFORMED_SUBMISSION',
+          )
+        declared_inputs = action_def.get(_INPUT, {})
         undeclared_inputs = set(node_input) - set(declared_inputs)
         if undeclared_inputs:
           return (f'Node {node_id!r} has an undeclared input '

@@ -421,6 +421,41 @@ def test_non_dict_parameters_rejected():
   assert _code(_sub('generate_video', 'not-a-dict')) == 'MALFORMED_SUBMISSION'
 
 
+def _code_with_actions(data, actions_json):
+  result = validate_submission(data, actions_json=actions_json)
+  return result[1] if result is not None else None
+
+
+def _malformed_action_submission():
+  # A node with an explicit-but-empty input dict is enough to reach the
+  # actions_json[action] lookup that Victor's review flagged: no input keys
+  # need to be iterated, only the lookup itself needs to happen.
+  return _submission({'n': {'action': 'weird', 'input': {}}}, {}, node_id='n')
+
+
+@pytest.mark.parametrize('action_def', [None, ['x'], 'weird', 5])
+def test_non_dict_action_definition_rejected(action_def):
+  data = _malformed_action_submission()
+  assert (
+      _code_with_actions(data, {'weird': action_def}) == 'MALFORMED_SUBMISSION'
+  )
+
+
+@pytest.mark.parametrize('input_value', [None, ['x'], 'weird', 5])
+def test_non_dict_action_input_rejected(input_value):
+  data = _malformed_action_submission()
+  assert (
+      _code_with_actions(data, {'weird': {'input': input_value}})
+      == 'MALFORMED_SUBMISSION'
+  )
+
+
+def test_missing_action_input_key_is_allowed():
+  data = _malformed_action_submission()
+  assert _code_with_actions(data, {'weird': {}}) is None
+
+
+
 # --- enqueue fan-out / quantity / project-pin limits (generous caps) ---------
 
 _VALID_VIDEO = {'model': 'veo-3.1-generate-001', 'gcp_location': 'global'}

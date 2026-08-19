@@ -2264,6 +2264,32 @@ def test_app_rejects_empty_submission_before_side_effects(
   assert tasks == []
 
 
+def test_app_rejects_malformed_action_definition_before_side_effects(
+    monkeypatch, orchestrator_module
+):
+  """A malformed actions.json entry must not crash the server (regression)."""
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='app', WORKER_URL='https://w.a.run.app')
+  monkeypatch.setattr(
+      orch.submission_validation,
+      '_load_actions_json',
+      lambda: {'weird': 'not-a-dict'},
+  )
+  body = {
+      'workflowId': 'workflow-test',
+      'nodeId': 'root',
+      'workflowDefinition': {'root': {'action': 'weird', 'input': {}}},
+      'inputFiles': {},
+  }
+  response, stored, tasks = _app_submit_without_side_effects(
+      monkeypatch, orch, body
+  )
+  assert response.status_code == 400
+  assert response.get_json()['code'] == 'MALFORMED_SUBMISSION'
+  assert stored == []
+  assert tasks == []
+
+
 @pytest.mark.parametrize(
     'missing_field',
     ('workflowId', 'nodeId', 'workflowDefinition', 'inputFiles'),
