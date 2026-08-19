@@ -148,6 +148,9 @@ export class Composition {
   );
 
   renderDisabledReason = computed(() => {
+    if (this.combiningScenes()) {
+      return 'Video rendering is in progress.';
+    }
     if (
       this.sceneRenderClips().some(
         ({resolution}) => resolution.state === 'invalid',

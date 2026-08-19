@@ -499,6 +499,33 @@ describe('CompositionComponent', () => {
     expect(button.textContent).toContain('Rendering...');
   });
 
+  it('reports the render-in-progress reason ahead of other disabled reasons', () => {
+    const remixEngineService = TestBed.inject(RemixEngineService);
+    // An invalid scene would normally set its own disabled reason; a render
+    // already in progress must be reported instead.
+    projectConfigSignal.set({
+      ...projectConfigSignal(),
+      storyboard: [
+        {
+          id: 'invalid',
+          type: 'video',
+          name: 'Invalid clip',
+          video: {url: '', path: 'videos/invalid.mp4'},
+          durationSeconds: Number.NaN,
+        },
+      ],
+    });
+    remixEngineService.combiningScenes.set(true);
+    fixture.detectChanges();
+
+    expect(component.renderDisabledReason()).toBe(
+      'Video rendering is in progress.',
+    );
+    const button = fixture.nativeElement.querySelector('button.mat-primary');
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toContain('Rendering...');
+  });
+
   it('should enable the render button when combiningScenes is false', () => {
     const remixEngineService = TestBed.inject(RemixEngineService);
     // The render button also requires at least one renderable scene (a
