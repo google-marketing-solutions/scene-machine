@@ -1152,6 +1152,70 @@ describe('RemixEngineService (mediated)', () => {
       );
     });
 
+    it('does not submit a transition exactly as long as its own clip', async () => {
+      setRenderStoryboard([
+        {
+          id: 'long',
+          type: 'video',
+          name: 'Long clip',
+          video: {path: 'videos/long.mp4', url: ''},
+          durationSeconds: 5,
+        },
+        {
+          id: 'exact',
+          type: 'video',
+          name: 'Exact clip',
+          video: {path: 'videos/exact.mp4', url: ''},
+          durationSeconds: 5,
+          trim: {start: 0, end: 0.5},
+          transition: 'fade',
+          transitionOverlap: 0.5,
+        },
+      ]);
+      const startSpy = vi.spyOn(service, 'startCombineScenesWorkflow');
+
+      await service.combineScenes();
+
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        expect.stringContaining('longer than the clips it joins'),
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('does not submit a transition exactly as long as the previous clip', async () => {
+      setRenderStoryboard([
+        {
+          id: 'exact-prev',
+          type: 'video',
+          name: 'Exact previous',
+          video: {path: 'videos/prev.mp4', url: ''},
+          durationSeconds: 5,
+          trim: {start: 0, end: 0.5},
+        },
+        {
+          id: 'long-next',
+          type: 'video',
+          name: 'Long next',
+          video: {path: 'videos/next.mp4', url: ''},
+          durationSeconds: 5,
+          transition: 'fade',
+          transitionOverlap: 0.5,
+        },
+      ]);
+      const startSpy = vi.spyOn(service, 'startCombineScenesWorkflow');
+
+      await service.combineScenes();
+
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        expect.stringContaining('longer than the clips it joins'),
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
     it('submits a transition that fits, using the persisted overlap', async () => {
       setRenderStoryboard([
         {

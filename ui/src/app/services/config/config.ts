@@ -437,8 +437,8 @@ export function findTransitionContractViolation(
     }
     const previousDuration = renderable[index - 1].duration;
     if (
-      overlap >= duration + DURATION_COMPARISON_EPSILON_SECONDS ||
-      overlap >= previousDuration + DURATION_COMPARISON_EPSILON_SECONDS
+      overlap + DURATION_COMPARISON_EPSILON_SECONDS >= duration ||
+      overlap + DURATION_COMPARISON_EPSILON_SECONDS >= previousDuration
     ) {
       return (
         `The transition on "${scene.name}" is longer than the clips it joins. ` +
