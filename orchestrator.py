@@ -54,6 +54,10 @@ _GCS_HOST = 'https://storage.mtls.cloud.google.com/'
 _TASK_COMPLETION_PREFIX = '_task-completions'
 
 
+class UndefinedActionError(Exception):
+  """Raised when a supplied node names an action outside the action catalog."""
+
+
 if os.environ.get('K_SERVICE'):
   google.cloud.logging.Client().setup_logging()
 else:
@@ -103,7 +107,7 @@ logger.info('Running as: %s', service_account_email)
 
 def supply_node(
     data: dict[str, Any], instance: str | None = None
-) -> tuple[str, int]:
+) -> str:
   """Supplies a workflow node with input data.
 
   Args:
@@ -111,6 +115,8 @@ def supply_node(
     instance: The address of the Cloud Run instance to use.
   Returns:
     The execution ID.
+  Raises:
+    UndefinedActionError: if the selected node's action is not declared.
   """
   # In the initial run, set the execution ID and store the workflow:
   if Key.EXECUTION_ID.value not in data:
@@ -135,7 +141,7 @@ def supply_node(
   with open(root_dir / ACTIONS_JSON_PATH, 'r', encoding='utf-8') as json_file:
     actions_def = json.load(json_file)
     if action != 'pass' and action not in actions_def.keys():
-      return 'Action undefined', 404
+      raise UndefinedActionError('Action undefined')
   number_of_initial_executions = 1
   input_complete, input_files = db.verify_input(
       execution_id,
@@ -147,7 +153,7 @@ def supply_node(
   )
   if not input_complete:
     logger.info('[%s] Node %s not yet started', execution_id, node_id)
-    return f'Node {node_id} not yet started', 202
+    return execution_id
   input_files_renamed = util_dimensions.rename_dimensions(
       input_files, node.get(Key.DIMENSIONS_MAPPING.value, {}), True
   )

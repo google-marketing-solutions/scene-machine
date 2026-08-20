@@ -288,21 +288,6 @@
       }
     }
   },
-  "copy_web_to_gcs": {
-    "input": {
-      "urls": {
-        "type": "string"
-      }
-    },
-    "parameters": {},
-    "output": {
-      "file": {
-        "type": "string",
-        "multi": true,
-        "dimensions": ["image_id"]
-      }
-    }
-  },
   "generate_storyboard": {
     "input": {
       "user_prompt": {

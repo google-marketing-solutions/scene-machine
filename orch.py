@@ -59,6 +59,7 @@ from flask import request as flask_request
 from flask import Response as flask_response
 from flask import send_from_directory
 from flask_cors import CORS
+from google.api_core import exceptions as google_exceptions
 from google.auth import compute_engine
 from google.auth import default as google_auth_default
 from google.auth.transport import requests as google_auth_requests
@@ -273,7 +274,14 @@ def supply_node_handler() -> flask_response:
           status=400,
           mimetype=ContentType.JSON.value,
       )
-  execution_id = orchestrator.supply_node(data, instance)
+  try:
+    execution_id = orchestrator.supply_node(data, instance)
+  except orchestrator.UndefinedActionError as error:
+    return flask_response(
+        json.dumps({'error': str(error)}),
+        status=404,
+        mimetype=ContentType.JSON.value,
+    )
   output = {Key.EXECUTION_ID.value: execution_id}
   return flask_response(
       json.dumps(output), status=200, mimetype=ContentType.JSON.value
@@ -879,6 +887,11 @@ _SCENES_SUBCOLLECTION = 'scenes'
 # committed in sequence and are NOT atomic as a whole (see _commit_in_batches),
 # so a mid-write failure can leave it partially updated until the next save.
 _SCENE_BATCH_LIMIT = 450
+# A create POST must fit its root doc plus every scene in ONE batch of that
+# size: splitting a create across batches would leave the root created before
+# a later batch is known to succeed, so a mid-write failure and retry collides
+# with Firestore's not-exists precondition and 409s forever.
+_MAX_CREATE_SCENES = _SCENE_BATCH_LIMIT - 1
 
 
 def _scene_doc_id(index: int) -> str:
@@ -895,14 +908,18 @@ def _commit_in_batches(ui_db, ops) -> None:
   for start in range(0, len(ops), _SCENE_BATCH_LIMIT):
     batch = ui_db.batch()
     for op, ref, data in ops[start : start + _SCENE_BATCH_LIMIT]:
-      if op == 'set':
+      if op == 'create':
+        batch.create(ref, data)
+      elif op == 'set':
         batch.set(ref, data)
       else:
         batch.delete(ref)
     batch.commit()
 
 
-def _write_project_doc(ui_db, doc_ref, payload: dict) -> None:
+def _write_project_doc(
+    ui_db, doc_ref, payload: dict, *, create: bool = False
+) -> None:
   """Writes a project, splitting its storyboard into the scenes subcollection.
 
   The root document keeps every field except the scene list (stored empty);
@@ -912,7 +929,11 @@ def _write_project_doc(ui_db, doc_ref, payload: dict) -> None:
   batches: a project that fits in one batch commits atomically; a larger one
   spans multiple batches committed in sequence (not atomic as a whole), so a
   failure partway through can leave the project partially written until the next
-  save.
+  save. When create is true, the root uses Firestore's atomic not-exists
+  precondition, scene writes retain their existing set behavior, and the
+  stale-scene prune scan is skipped: a brand-new project has no prior scenes
+  to prune, and callers cap create at _MAX_CREATE_SCENES so this always fits
+  one atomic batch.
   """
   scenes = payload.get('storyboard')
   if not isinstance(scenes, list):
@@ -920,13 +941,14 @@ def _write_project_doc(ui_db, doc_ref, payload: dict) -> None:
   root = dict(payload)
   root['storyboard'] = []
   scenes_ref = doc_ref.collection(_SCENES_SUBCOLLECTION)
-  keep_ids = {_scene_doc_id(i) for i in range(len(scenes))}
-  ops = [('set', doc_ref, root)]
+  ops = [('create' if create else 'set', doc_ref, root)]
   for index, scene in enumerate(scenes):
     ops.append(('set', scenes_ref.document(_scene_doc_id(index)), scene))
-  for snapshot in scenes_ref.stream():
-    if snapshot.id not in keep_ids:
-      ops.append(('delete', scenes_ref.document(snapshot.id), None))
+  if not create:
+    keep_ids = {_scene_doc_id(i) for i in range(len(scenes))}
+    for snapshot in scenes_ref.stream():
+      if snapshot.id not in keep_ids:
+        ops.append(('delete', scenes_ref.document(snapshot.id), None))
   _commit_in_batches(ui_db, ops)
 
 
@@ -1013,15 +1035,21 @@ def projects_handler() -> flask_response:
     return _json_error('Invalid project id', 400)
   payload['id'] = project_id
   doc_ref = collection.document(project_id)
-  # Create-only: POST must not overwrite an existing project (which would also
-  # re-stamp createdBy to the poster, reassigning the owner shown in "My
-  # projects"). Updates go through PATCH, which preserves createdBy. A repeated
-  # POST of the same id returns 409 instead of silently clobbering.
-  if doc_ref.get().exists:
-    return _json_error('Project already exists', 409)
   payload['createdBy'] = _request_email()
   _convert_project_dates(payload)
-  _write_project_doc(ui_db, doc_ref, payload)
+  storyboard = payload.get('storyboard')
+  # Reject before any write: keeps create-with-too-many-scenes from ever
+  # reaching _write_project_doc, so it cannot partially create a project.
+  if isinstance(storyboard, list) and len(storyboard) > _MAX_CREATE_SCENES:
+    return _json_error(
+        f'Too many scenes for project creation: {len(storyboard)}'
+        f' (max {_MAX_CREATE_SCENES})',
+        400,
+    )
+  try:
+    _write_project_doc(ui_db, doc_ref, payload, create=True)
+  except google_exceptions.AlreadyExists:
+    return _json_error('Project already exists', 409)
   return _json_response({'id': project_id})
 
 
