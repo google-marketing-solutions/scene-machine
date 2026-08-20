@@ -113,7 +113,10 @@ def execute(
       if 'video' == arr['file_type']:
         transition = arr.get('transition')
         transition_overlap = arr.get('transition_overlap')
-        if transition and not transition_overlap:
+        # Only an absent overlap defaults. An explicit 0 means a hard cut and
+        # is falsy, so a truthiness check would silently turn it into a
+        # half-second crossfade.
+        if transition and transition_overlap is None:
           transition_overlap = 0.5
 
         ffmpeg.add_video(

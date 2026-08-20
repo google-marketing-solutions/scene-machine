@@ -85,6 +85,15 @@ describe('RemixEngineService (mediated)', () => {
     return calls[calls.length - 1][0].storyboard[0];
   }
 
+  function setRenderStoryboard(storyboard: any[]) {
+    projectConfigSignal.set({
+      ...projectConfigSignal(),
+      storyboard,
+      audioTracks: [],
+      visualOverlays: [],
+    });
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     // Do NOT replace the global `window` here. jsdom already provides
@@ -1092,18 +1101,292 @@ describe('RemixEngineService (mediated)', () => {
     });
   });
 
+  describe('combineScenes: render contract', () => {
+    it('does not submit a workflow with no renderable video', async () => {
+      setRenderStoryboard([]);
+      const startSpy = vi.spyOn(service, 'startCombineScenesWorkflow');
+
+      await service.combineScenes();
+
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Select or upload at least one scene video before rendering.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+    });
+
+    it('does not submit a workflow when a transition outlasts its clips', async () => {
+      setRenderStoryboard([
+        {
+          id: 'short',
+          type: 'video',
+          name: 'Short clip',
+          video: {path: 'videos/short.mp4', url: ''},
+          durationSeconds: 5,
+          trim: {start: 0, end: 0.042},
+        },
+        {
+          id: 'next',
+          type: 'video',
+          name: 'Next clip',
+          video: {path: 'videos/next.mp4', url: ''},
+          durationSeconds: 5,
+          transition: 'fade',
+          transitionOverlap: 0.5,
+        },
+      ]);
+      const startSpy = vi.spyOn(service, 'startCombineScenesWorkflow');
+
+      await service.combineScenes();
+
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+      expect(configServiceMock.setPendingRender).not.toHaveBeenCalled();
+      expect(service.combiningScenes()).toBe(false);
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        expect.stringContaining('longer than the clips it joins'),
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('does not submit a transition exactly as long as its own clip', async () => {
+      setRenderStoryboard([
+        {
+          id: 'long',
+          type: 'video',
+          name: 'Long clip',
+          video: {path: 'videos/long.mp4', url: ''},
+          durationSeconds: 5,
+        },
+        {
+          id: 'exact',
+          type: 'video',
+          name: 'Exact clip',
+          video: {path: 'videos/exact.mp4', url: ''},
+          durationSeconds: 5,
+          trim: {start: 0, end: 0.5},
+          transition: 'fade',
+          transitionOverlap: 0.5,
+        },
+      ]);
+      const startSpy = vi.spyOn(service, 'startCombineScenesWorkflow');
+
+      await service.combineScenes();
+
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        expect.stringContaining('longer than the clips it joins'),
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('does not submit a transition exactly as long as the previous clip', async () => {
+      setRenderStoryboard([
+        {
+          id: 'exact-prev',
+          type: 'video',
+          name: 'Exact previous',
+          video: {path: 'videos/prev.mp4', url: ''},
+          durationSeconds: 5,
+          trim: {start: 0, end: 0.5},
+        },
+        {
+          id: 'long-next',
+          type: 'video',
+          name: 'Long next',
+          video: {path: 'videos/next.mp4', url: ''},
+          durationSeconds: 5,
+          transition: 'fade',
+          transitionOverlap: 0.5,
+        },
+      ]);
+      const startSpy = vi.spyOn(service, 'startCombineScenesWorkflow');
+
+      await service.combineScenes();
+
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        expect.stringContaining('longer than the clips it joins'),
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('submits a transition that fits, using the persisted overlap', async () => {
+      setRenderStoryboard([
+        {
+          id: 'a',
+          type: 'video',
+          name: 'Clip A',
+          video: {path: 'videos/a.mp4', url: ''},
+          durationSeconds: 5,
+        },
+        {
+          id: 'b',
+          type: 'video',
+          name: 'Clip B',
+          video: {path: 'videos/b.mp4', url: ''},
+          durationSeconds: 5,
+          transition: 'fade',
+          transitionOverlap: 0,
+        },
+      ]);
+      const startSpy = vi
+        .spyOn(service, 'startCombineScenesWorkflow')
+        .mockResolvedValue(of({executionId: 'render-exec-id'}) as any);
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'renders/output.mp4'}]}}},
+      } as any);
+      mediaServiceMock.signUrl.mockResolvedValue(
+        'https://signed.example/o.mp4',
+      );
+
+      await service.combineScenes();
+
+      expect(startSpy).toHaveBeenCalled();
+      // An explicit zero overlap is a hard cut and must reach the backend as
+      // 0, not be dropped or defaulted.
+      expect(startSpy.mock.calls[0][0][1]).toEqual(
+        expect.objectContaining({transition: 'fade', transition_overlap: 0}),
+      );
+    });
+
+    it('does not submit a workflow when every scene is unselected (non-empty storyboard)', async () => {
+      // Distinct from the empty-storyboard case above: the storyboard is
+      // non-empty, but the only scene is a generated one with no candidate
+      // chosen yet, so it resolves to 'not-selected', never 'ready'.
+      setRenderStoryboard([
+        {
+          id: 'unselected',
+          type: 'generated',
+          name: 'No candidate selected',
+          candidates: [
+            {
+              video: {path: 'videos/candidate.mp4', url: ''},
+              durationSeconds: 5,
+            },
+          ],
+        },
+      ]);
+      const startSpy = vi.spyOn(service, 'startCombineScenesWorkflow');
+
+      await service.combineScenes();
+
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+      expect(configServiceMock.setPendingRender).not.toHaveBeenCalled();
+      expect(service.combiningScenes()).toBe(false);
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Select or upload at least one scene video before rendering.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('does not submit a partial render when an intended clip is invalid', async () => {
+      setRenderStoryboard([
+        {
+          id: 'ready',
+          type: 'video',
+          name: 'Ready clip',
+          video: {path: 'videos/ready.mp4', url: ''},
+          durationSeconds: 5,
+        },
+        {
+          id: 'invalid',
+          type: 'generated',
+          name: 'Invalid selected clip',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {
+              video: {path: '', url: 'https://legacy.example/video.mp4'},
+              durationSeconds: 5,
+            },
+          ],
+        },
+      ]);
+      const startSpy = vi.spyOn(service, 'startCombineScenesWorkflow');
+
+      await service.combineScenes();
+
+      expect(startSpy).not.toHaveBeenCalled();
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        expect.stringContaining('storage path or valid duration'),
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+      expect(configServiceMock.setPendingRender).not.toHaveBeenCalled();
+      expect(service.combiningScenes()).toBe(false);
+    });
+
+    it('submits the shared clip values and ignores an unselected generated scene', async () => {
+      setRenderStoryboard([
+        {
+          id: 'ready',
+          type: 'generated',
+          name: 'Ready clip',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {
+              video: {path: 'videos/ready.mp4', url: ''},
+              durationSeconds: 10,
+              trim: {start: 2, end: 8},
+            },
+          ],
+        },
+        {
+          id: 'not-selected',
+          type: 'generated',
+          name: 'No candidate selected',
+        },
+      ]);
+      const startSpy = vi
+        .spyOn(service, 'startCombineScenesWorkflow')
+        .mockResolvedValue(of({executionId: 'render-exec-id'}) as any);
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'renders/output.mp4'}]}}},
+      } as any);
+      mediaServiceMock.signUrl.mockResolvedValue(
+        'https://signed.example/renders/output.mp4',
+      );
+
+      await service.combineScenes();
+
+      expect(startSpy).toHaveBeenCalledWith(
+        [
+          {
+            file_type: 'video',
+            file_path: 'videos/ready.mp4',
+            start_time: 0,
+            skip_time: 2,
+            duration: 6,
+          },
+        ],
+        false,
+      );
+    });
+  });
+
   describe('combineScenes: signing-failure resilience', () => {
     it('keeps the pending render and records no error when the output cannot be signed', async () => {
       // A live render finishes, but signing its output URL fails persistently
       // (transient /api/signUrl outage). withRetry exhausts its attempts and the
       // completed render is kept (marker not cleared, no error run) so a reopen
       // re-collects it, mirroring the resumed-render path. (E3)
-      projectConfigSignal.set({
-        id: 'project-1',
-        storyboard: [],
-        audioTracks: [],
-        visualOverlays: [],
-      });
+      setRenderStoryboard([
+        {
+          id: 'video-1',
+          type: 'video',
+          name: 'Video 1',
+          video: {path: 'videos/video-1.mp4', url: ''},
+          durationSeconds: 5,
+        },
+      ]);
       vi.spyOn(service, 'startCombineScenesWorkflow').mockResolvedValue(
         of({executionId: 'render-exec-id'}) as any,
       );

@@ -39,6 +39,8 @@ import {FormatTimePipe} from '../pipes/format-time-pipe';
 import {
   ConfigService,
   DEFAULT_TRANSITION_OVERLAP,
+  findTransitionContractViolation,
+  resolveSceneRenderClip,
 } from '../services/config/config';
 import {MediaRef, MediaService} from '../services/media/media';
 import {MediaSrcPipe} from '../services/media/media-src.pipe';
@@ -99,74 +101,81 @@ export class Composition {
     return ratio ? ratio.replace(':', '/') : '16/9';
   });
 
-  filmstripScenes = computed(() => {
-    return this.scenes().filter(scene => {
-      if (
-        this.configService.isGeneratedScene(scene) &&
-        scene.candidates &&
-        scene.selectedCandidateIndex !== undefined
-      ) {
-        // Downstream resolves media by path (signing it on read), so a scene
-        // persisted with a path but a blank url is still renderable: accept
-        // either a path or a url.
-        const video = scene.candidates[scene.selectedCandidateIndex].video;
-        return !!(video?.path || video?.url);
+  private sceneRenderClips = computed(() =>
+    this.scenes().map(scene => ({
+      scene,
+      resolution: resolveSceneRenderClip(scene),
+    })),
+  );
+
+  filmstripScenes = computed(() =>
+    this.sceneRenderClips()
+      .filter(({resolution}) => resolution.state === 'ready')
+      .map(({scene}) => scene),
+  );
+
+  playlist = computed(() => {
+    return this.sceneRenderClips().flatMap(({scene, resolution}) => {
+      if (resolution.state !== 'ready') {
+        return [];
       }
-      if (this.configService.isProvidedVideoScene(scene)) {
-        return !!(scene.video?.path || scene.video?.url);
-      }
-      return false;
+      const {video, start, duration} = resolution.clip;
+      return [
+        {
+          id: scene.id,
+          name: scene.name,
+          video,
+          start,
+          end: start + duration,
+          duration,
+          transitionOverlap: scene.transitionOverlap,
+          type: scene.type,
+        },
+      ];
     });
   });
 
-  playlist = computed(() => {
-    return this.filmstripScenes()
-      .map(scene => {
-        if (this.configService.isGeneratedScene(scene)) {
-          if (!scene.candidates || scene.selectedCandidateIndex === undefined) {
-            return;
-          }
-          const candidate = scene.candidates[scene.selectedCandidateIndex];
-          const start = candidate.trim?.start ?? 0;
-          const end = candidate.trim?.end ?? candidate.durationSeconds;
-          return {
-            id: scene.id,
-            name: scene.name,
-            video: candidate.video,
-            start,
-            end,
-            duration: end - start,
-            transitionOverlap: scene.transitionOverlap,
-            type: 'generated' as const,
-          };
-        } else {
-          // VideoScene
-          const start = scene.trim?.start ?? 0;
-          const end = scene.trim?.end ?? scene.durationSeconds!;
-          return {
-            id: scene.id,
-            name: scene.name,
-            video: scene.video,
-            start,
-            end,
-            duration: end - start,
-            transitionOverlap: scene.transitionOverlap,
-            type: 'video' as const,
-          };
-        }
-      })
-      .filter(item => item !== undefined);
-  });
-
   /**
-   * True when at least one scene contributes a usable video to the render
-   * (a selected candidate with a video, or an uploaded video scene). The
-   * playlist already filters to exactly those scenes, so an empty playlist
-   * means there is nothing to combine — rendering would fail in the backend
-   * with "cannot generate video without at least one video input", so we block
-   * it in the UI instead.
+   * True when at least one scene contributes a usable video and every intended
+   * clip is valid. An empty playlist would fail in the backend, while omitting
+   * an invalid intended clip would silently render only part of the storyboard.
    */
-  canRender = computed(() => this.playlist().length > 0);
+  private transitionViolation = computed(() =>
+    findTransitionContractViolation(this.scenes()),
+  );
+
+  canRender = computed(
+    () =>
+      this.playlist().length > 0 &&
+      !this.sceneRenderClips().some(
+        ({resolution}) => resolution.state === 'invalid',
+      ) &&
+      this.transitionViolation() === null,
+  );
+
+  renderDisabledReason = computed(() => {
+    if (this.combiningScenes()) {
+      return 'Video rendering is in progress.';
+    }
+    if (
+      this.sceneRenderClips().some(
+        ({resolution}) => resolution.state === 'invalid',
+      )
+    ) {
+      return (
+        'One or more selected scene videos are missing a storage path or valid ' +
+        'duration, or have an invalid trim.'
+      );
+    }
+    if (this.playlist().length === 0) {
+      return 'Select or upload at least one scene video before rendering.';
+    }
+    const transitionViolation = this.transitionViolation();
+    if (transitionViolation) {
+      return transitionViolation;
+    }
+    return '';
+  });
 
   currentPlaylistIndex = signal(0);
   isPlaying = signal(false);

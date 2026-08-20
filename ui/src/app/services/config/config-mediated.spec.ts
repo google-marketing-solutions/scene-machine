@@ -20,7 +20,7 @@ import {DOCUMENT} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import {MatSnackBar} from '@angular/material/snack-bar';
 import {Router} from '@angular/router';
-import {of, throwError} from 'rxjs';
+import {of, Subject, throwError} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ConfigService} from './config';
 
@@ -377,6 +377,366 @@ describe('ConfigService (mediated data plane)', () => {
     });
   });
 
+  describe('ordered autosave persistence', () => {
+    it('preserves newer local data when returning during an in-flight save', async () => {
+      const firstSave = new Subject<unknown>();
+      const secondSave = new Subject<unknown>();
+      const staleReload = new Subject<any>();
+      httpClientMock.patch
+        .mockReturnValueOnce(firstSave)
+        .mockReturnValueOnce(secondSave);
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') {
+          return of({});
+        }
+        if (url === '/api/projects/proj-2') {
+          return of({
+            ...service.projectConfig.value(),
+            id: 'proj-2',
+            name: 'project B',
+          });
+        }
+        return staleReload;
+      });
+      markPersisted('proj-1');
+      service.updateProjectConfig({
+        id: 'proj-1',
+        name: 'new A',
+        inputConfig: {
+          ...service.projectConfig.value().inputConfig,
+          composition: 'new local composition',
+        },
+      });
+      service.saveNow();
+
+      service.loadProjectConfig('proj-2');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().id).toBe('proj-2');
+      });
+      service.loadProjectConfig('proj-1');
+      await vi.waitFor(() => {
+        expect(httpClientMock.get).toHaveBeenCalledWith('/api/projects/proj-1');
+      });
+      staleReload.next({
+        ...service.projectConfig.value(),
+        id: 'proj-1',
+        name: 'old A',
+        inputConfig: {
+          ...service.projectConfig.value().inputConfig,
+          composition: 'old server composition',
+        },
+      });
+      staleReload.complete();
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().id).toBe('proj-1');
+      });
+
+      firstSave.next({});
+      firstSave.complete();
+      service.updateProjectConfig({name: 'edited after reload'});
+      service.saveNow();
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(2);
+      expect(httpClientMock.patch.mock.calls[1][1]).toEqual(
+        expect.objectContaining({
+          name: 'edited after reload',
+          inputConfig: expect.objectContaining({
+            composition: 'new local composition',
+          }),
+        }),
+      );
+      secondSave.next({});
+    });
+
+    it('preserves a failed new project when its reload returns 404', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      httpClientMock.post.mockReturnValue(
+        throwError(() => new Error('save failed')),
+      );
+      httpClientMock.get.mockImplementation((url: string) =>
+        url === '/api/config'
+          ? of({})
+          : throwError(() => new HttpErrorResponse({status: 404})),
+      );
+      service.setNewProject('new-proj');
+      service.updateProjectConfig({name: 'unsaved local project'});
+      service.saveNow();
+      service.setNewProject('other-proj');
+
+      service.loadProjectConfig('new-proj');
+
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value()).toEqual(
+          expect.objectContaining({
+            id: 'new-proj',
+            name: 'unsaved local project',
+          }),
+        );
+      });
+      errorSpy.mockRestore();
+    });
+
+    it('waits for the current save before sending a newer snapshot', () => {
+      markPersisted('proj-1');
+      const firstResponse = new Subject<unknown>();
+      const secondResponse = new Subject<unknown>();
+      httpClientMock.patch
+        .mockReturnValueOnce(firstResponse)
+        .mockReturnValueOnce(secondResponse);
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+      service.updateProjectConfig({name: 'B'});
+      service.saveNow();
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      expect(httpClientMock.patch.mock.calls[0][1]).toEqual(
+        expect.objectContaining({name: 'A'}),
+      );
+
+      firstResponse.next({});
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(2);
+      expect(httpClientMock.patch.mock.calls[1][1]).toEqual(
+        expect.objectContaining({name: 'B'}),
+      );
+      secondResponse.next({});
+    });
+
+    it('coalesces intermediate snapshots while a save is in flight', () => {
+      markPersisted('proj-1');
+      const firstResponse = new Subject<unknown>();
+      const finalResponse = new Subject<unknown>();
+      httpClientMock.patch
+        .mockReturnValueOnce(firstResponse)
+        .mockReturnValueOnce(finalResponse);
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+      service.updateProjectConfig({name: 'B'});
+      service.saveNow();
+      service.updateProjectConfig({name: 'C'});
+      service.saveNow();
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      firstResponse.next({});
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(2);
+      expect(
+        httpClientMock.patch.mock.calls.map(([, body]: any[]) => body.name),
+      ).toEqual(['A', 'C']);
+      finalResponse.next({});
+    });
+
+    it('captures queued nested data without defeating source dedupe', () => {
+      markPersisted('proj-1');
+      const firstResponse = new Subject<unknown>();
+      const queuedResponse = new Subject<unknown>();
+      httpClientMock.patch
+        .mockReturnValueOnce(firstResponse)
+        .mockReturnValueOnce(queuedResponse);
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+      service.updateProjectConfig({
+        name: 'B',
+        inputConfig: {
+          ...service.projectConfig.value().inputConfig,
+          products: [{id: 1, name: 'queued product', images: []}],
+        },
+      });
+      service.saveNow();
+
+      const queuedSource = service.projectConfig.value();
+      queuedSource.inputConfig.products[0].name = 'mutated after queueing';
+      service.saveNow();
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      firstResponse.next({});
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(2);
+      expect(httpClientMock.patch.mock.calls[1][1]).toEqual(
+        expect.objectContaining({
+          inputConfig: expect.objectContaining({
+            products: [expect.objectContaining({name: 'queued product'})],
+          }),
+        }),
+      );
+      queuedResponse.next({});
+    });
+
+    it('keeps ordering and confirmation state independent per project', () => {
+      markPersisted('proj-1');
+      const firstProjectResponse = new Subject<unknown>();
+      const queuedFirstProjectResponse = new Subject<unknown>();
+      const secondProjectResponse = new Subject<unknown>();
+      httpClientMock.patch.mockImplementation(
+        (url: string, body: {name: string}) => {
+          if (url.endsWith('/proj-2')) {
+            return secondProjectResponse;
+          }
+          return body.name === 'project A1'
+            ? firstProjectResponse
+            : queuedFirstProjectResponse;
+        },
+      );
+
+      service.updateProjectConfig({id: 'proj-1', name: 'project A1'});
+      service.saveNow();
+      service.updateProjectConfig({name: 'project A2'});
+      service.saveNow();
+
+      service.setNewProject('proj-2');
+      markPersisted('proj-2');
+      service.updateProjectConfig({name: 'project B'});
+      service.saveNow();
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(2);
+
+      secondProjectResponse.next({});
+      firstProjectResponse.next({});
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(3);
+      expect(httpClientMock.patch.mock.calls[2][1]).toEqual(
+        expect.objectContaining({name: 'project A2'}),
+      );
+      queuedFirstProjectResponse.next({});
+      service.saveNow();
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(3);
+    });
+
+    it('recovers a queued create conflict with one PATCH of the latest snapshot', () => {
+      const createResponse = new Subject<unknown>();
+      const updateResponse = new Subject<unknown>();
+      httpClientMock.post.mockReturnValue(createResponse);
+      httpClientMock.patch.mockReturnValue(updateResponse);
+
+      service.setNewProject('dupe-proj');
+      service.updateProjectConfig({name: 'A'});
+      service.saveNow();
+      service.updateProjectConfig({name: 'B'});
+      service.saveNow();
+
+      expect(httpClientMock.post).toHaveBeenCalledTimes(1);
+      expect(httpClientMock.patch).not.toHaveBeenCalled();
+
+      createResponse.error(new HttpErrorResponse({status: 409}));
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      expect(httpClientMock.patch.mock.calls[0][1]).toEqual(
+        expect.objectContaining({id: 'dupe-proj', name: 'B'}),
+      );
+      updateResponse.next({});
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+    });
+
+    it('continues with the latest queued snapshot after a failed save', () => {
+      markPersisted('proj-1');
+      const firstResponse = new Subject<unknown>();
+      const queuedResponse = new Subject<unknown>();
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      httpClientMock.patch
+        .mockReturnValueOnce(firstResponse)
+        .mockReturnValueOnce(queuedResponse);
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+      service.updateProjectConfig({name: 'B'});
+      service.saveNow();
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      firstResponse.error(new Error('save failed'));
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Unsaved changes — failed to save the project.',
+        'Retry',
+        {panelClass: ['error-snackbar']},
+      );
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(2);
+      expect(httpClientMock.patch.mock.calls[1][1]).toEqual(
+        expect.objectContaining({name: 'B'}),
+      );
+      queuedResponse.next({});
+      errorSpy.mockRestore();
+    });
+
+    it('recovers an off-project create conflict with the captured project', () => {
+      const createResponse = new Subject<unknown>();
+      const updateResponse = new Subject<unknown>();
+      httpClientMock.post.mockReturnValue(createResponse);
+      httpClientMock.patch.mockReturnValue(updateResponse);
+
+      service.setNewProject('dupe-proj');
+      service.updateProjectConfig({name: 'project A'});
+      service.saveNow();
+      service.setNewProject('other-proj');
+
+      createResponse.error(new HttpErrorResponse({status: 409}));
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      expect(httpClientMock.patch).toHaveBeenCalledWith(
+        '/api/projects/dupe-proj',
+        expect.objectContaining({id: 'dupe-proj', name: 'project A'}),
+      );
+      updateResponse.next({});
+    });
+
+    it('does not retry an older failure after a newer snapshot succeeds off-project', () => {
+      markPersisted('proj-1');
+      const failedResponse = new Subject<unknown>();
+      const queuedResponse = new Subject<unknown>();
+      const retryAction = new Subject<void>();
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      httpClientMock.patch
+        .mockReturnValueOnce(failedResponse)
+        .mockReturnValueOnce(queuedResponse)
+        .mockReturnValue(of({}));
+      matSnackBarMock.open.mockReturnValue({onAction: () => retryAction});
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+      service.updateProjectConfig({name: 'B'});
+      service.saveNow();
+      failedResponse.error(new Error('save failed'));
+
+      service.setNewProject('proj-2');
+      queuedResponse.next({});
+      retryAction.next();
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(2);
+      errorSpy.mockRestore();
+    });
+
+    it('retries the latest unsaved snapshot from the snackbar action', () => {
+      markPersisted('proj-1');
+      const failedResponse = new Subject<unknown>();
+      const retryResponse = new Subject<unknown>();
+      const retryAction = new Subject<void>();
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      httpClientMock.patch
+        .mockReturnValueOnce(failedResponse)
+        .mockReturnValueOnce(retryResponse);
+      matSnackBarMock.open.mockReturnValue({onAction: () => retryAction});
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+      failedResponse.error(new Error('save failed'));
+
+      service.updateProjectConfig({name: 'B'});
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+
+      retryAction.next();
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(2);
+      expect(httpClientMock.patch.mock.calls[1][1]).toEqual(
+        expect.objectContaining({name: 'B'}),
+      );
+      retryResponse.next({});
+      errorSpy.mockRestore();
+    });
+  });
+
   describe('flush on leaving a project', () => {
     it('resetProjectConfig should flush the dirty project before clearing', () => {
       markPersisted('proj-1');
@@ -418,6 +778,146 @@ describe('ConfigService (mediated data plane)', () => {
     it('reset with a clean project should not save', () => {
       service.resetProjectConfig();
       expect(saveRequestCount()).toBe(0);
+    });
+  });
+
+  describe('deleteProject', () => {
+    it('forgets per-project save state after deletion', async () => {
+      markPersisted('proj-1');
+      service.updateProjectConfig({id: 'proj-1', name: 'saved'});
+      service.saveNow();
+
+      await service.deleteProject('proj-1');
+
+      expect((service as any).projectSaveStates.has('proj-1')).toBe(false);
+    });
+  });
+
+  describe('stale autosave callbacks after deletion', () => {
+    it('does not start a queued save after deletion begins', async () => {
+      markPersisted('proj-1');
+      const firstResponse = new Subject<unknown>();
+      const deleteResponse = new Subject<unknown>();
+      httpClientMock.patch.mockReturnValue(firstResponse);
+      httpClientMock.delete.mockReturnValue(deleteResponse);
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+      service.updateProjectConfig({name: 'B'});
+      service.saveNow();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+
+      // Deletion STARTS but its response has not arrived yet.
+      const deletion = service.deleteProject('proj-1');
+
+      // The in-flight save now succeeds. Fencing only after DELETE resolves
+      // would let this dispatch the queued 'B' save mid-deletion.
+      firstResponse.next({});
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+
+      deleteResponse.next({});
+      await deletion;
+      expect((service as any).projectSaveStates.has('proj-1')).toBe(false);
+    });
+
+    it('a late SUCCESS after deletion starts no queued save', async () => {
+      markPersisted('proj-1');
+      const firstResponse = new Subject<unknown>();
+      httpClientMock.patch.mockReturnValue(firstResponse);
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+      // Queues a pending save against the SAME (soon-to-be-orphaned) state
+      // object, since a save is already in flight.
+      service.updateProjectConfig({name: 'B'});
+      service.saveNow();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+
+      await service.deleteProject('proj-1');
+
+      // The in-flight request's response arrives after the project is gone.
+      firstResponse.next({});
+
+      // Unguarded, the success handler would start the queued pending save,
+      // resurrecting the project with a second PATCH.
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      expect((service as any).projectSaveStates.has('proj-1')).toBe(false);
+    });
+
+    it('a late FAILURE after deletion shows no snackbar and retries nothing', async () => {
+      markPersisted('proj-1');
+      const firstResponse = new Subject<unknown>();
+      httpClientMock.patch.mockReturnValue(firstResponse);
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+
+      await service.deleteProject('proj-1');
+
+      firstResponse.error(new Error('late failure'));
+
+      expect(matSnackBarMock.open).not.toHaveBeenCalled();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      expect((service as any).projectSaveStates.has('proj-1')).toBe(false);
+    });
+
+    it('Retry from a snackbar shown before deletion does not recreate the project', async () => {
+      markPersisted('proj-1');
+      const failedResponse = new Subject<unknown>();
+      const retryAction = new Subject<void>();
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      httpClientMock.patch.mockReturnValueOnce(failedResponse);
+      matSnackBarMock.open.mockReturnValue({onAction: () => retryAction});
+
+      service.updateProjectConfig({id: 'proj-1', name: 'A'});
+      service.saveNow();
+      failedResponse.error(new Error('save failed'));
+      expect(matSnackBarMock.open).toHaveBeenCalledTimes(1);
+
+      await service.deleteProject('proj-1');
+      retryAction.next();
+
+      // Unguarded, Retry calls persistNow() for the deleted id, which (since
+      // persistedProjectIds was also cleared by delete) issues a fresh POST.
+      expect(httpClientMock.post).not.toHaveBeenCalled();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      expect((service as any).projectSaveStates.has('proj-1')).toBe(false);
+      errorSpy.mockRestore();
+    });
+
+    it('a stale callback cannot corrupt a same-id project recreated after delete', async () => {
+      markPersisted('proj-1');
+      const oldResponse = new Subject<unknown>();
+      httpClientMock.patch.mockReturnValueOnce(oldResponse);
+
+      // The old project: a save starts (capturing the OLD save-state object),
+      // then a second edit queues a pending save against that same object.
+      service.updateProjectConfig({id: 'proj-1', name: 'old-A'});
+      service.saveNow();
+      service.updateProjectConfig({name: 'old-B'});
+      service.saveNow();
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+
+      await service.deleteProject('proj-1');
+
+      // A new project reuses the same id, getting its OWN save-state object.
+      service.setNewProject('proj-1');
+      service.updateProjectConfig({name: 'new'});
+      service.saveNow();
+      expect(httpClientMock.post).toHaveBeenCalledTimes(1);
+
+      // The old in-flight request finally resolves. Unguarded, its success
+      // handler would start the OLD queued 'old-B' pending save against the
+      // NOW-persisted id, PATCHing the new project with stale deleted data.
+      oldResponse.next({});
+
+      // Still just the one PATCH for 'old-A' from before deletion: nothing
+      // new was triggered by the stale response.
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
+      expect(
+        (service as any).projectSaveStates.get('proj-1').lastSavedSource.name,
+      ).toBe('new');
     });
   });
 

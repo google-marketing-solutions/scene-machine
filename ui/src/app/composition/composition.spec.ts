@@ -20,6 +20,7 @@ import {MatSnackBarModule} from '@angular/material/snack-bar';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   ConfigService,
+  GcsFile,
   GeneratedScene,
   ProjectConfig,
   ProvidedVideoScene,
@@ -118,6 +119,139 @@ describe('CompositionComponent', () => {
     expect(component.filmstripScenes().length).toBe(0);
   });
 
+  it('does not render a URL-only provided video', () => {
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [
+        {
+          id: 'legacy-video',
+          type: 'video',
+          name: 'Legacy video',
+          video: {url: 'https://legacy.example/video.mp4', path: ''},
+          durationSeconds: 5,
+        },
+      ],
+    }));
+
+    expect(component.filmstripScenes()).toEqual([]);
+    expect(component.canRender()).toBe(false);
+  });
+
+  it('treats a legacy URL-only video with no path field as invalid', () => {
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [
+        {
+          id: 'legacy-video-without-path',
+          type: 'video',
+          name: 'Legacy video without path',
+          video: {
+            url: 'https://legacy.example/video.mp4',
+          } as unknown as GcsFile,
+          durationSeconds: 5,
+        },
+      ],
+    }));
+
+    expect(component.filmstripScenes()).toEqual([]);
+    expect(component.canRender()).toBe(false);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['zero', 0],
+  ])(
+    'does not render a provided video with %s duration',
+    (_label, duration) => {
+      projectConfigSignal.update(config => ({
+        ...config,
+        storyboard: [
+          {
+            id: 'invalid-video',
+            type: 'video',
+            name: 'Invalid video',
+            video: {url: '', path: 'videos/invalid.mp4'},
+            durationSeconds: duration,
+          },
+        ],
+      }));
+
+      expect(component.filmstripScenes()).toEqual([]);
+      expect(component.canRender()).toBe(false);
+    },
+  );
+
+  it('does not render a persisted trim shorter than one 24fps frame', () => {
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [
+        {
+          id: 'too-short',
+          type: 'video',
+          name: 'Too-short clip',
+          video: {url: '', path: 'videos/too-short.mp4'},
+          durationSeconds: 5,
+          trim: {start: 2, end: 2.041},
+        },
+      ],
+    }));
+
+    expect(component.filmstripScenes()).toEqual([]);
+    expect(component.canRender()).toBe(false);
+  });
+
+  it('renders a persisted trim that contains one full 24fps frame', () => {
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [
+        {
+          id: 'one-frame',
+          type: 'video',
+          name: 'One-frame clip',
+          video: {url: '', path: 'videos/one-frame.mp4'},
+          durationSeconds: 5,
+          trim: {start: 2, end: 2.042},
+        },
+      ],
+    }));
+
+    expect(component.filmstripScenes().map(scene => scene.id)).toEqual([
+      'one-frame',
+    ]);
+    expect(component.canRender()).toBe(true);
+    expect(Math.round(component.playlist()[0].duration * 24)).toBe(1);
+  });
+
+  it('blocks a partial render when an intended clip is invalid', () => {
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [
+        {
+          id: 'ready',
+          type: 'video',
+          name: 'Ready clip',
+          video: {url: '', path: 'videos/ready.mp4'},
+          durationSeconds: 5,
+        },
+        {
+          id: 'invalid',
+          type: 'video',
+          name: 'Invalid clip',
+          video: {url: '', path: 'videos/invalid.mp4'},
+          durationSeconds: Number.NaN,
+        },
+      ],
+    }));
+
+    expect(component.filmstripScenes().map(scene => scene.id)).toEqual([
+      'ready',
+    ]);
+    expect(component.canRender()).toBe(false);
+    expect(component.renderDisabledReason()).toContain(
+      'storage path or valid duration',
+    );
+  });
+
   it('should show a generated scene in the filmstrip if it has a selected candidate', () => {
     const generatedScene: GeneratedScene = {
       id: '1',
@@ -163,12 +297,13 @@ describe('CompositionComponent', () => {
     expect(component.filmstripScenes().length).toBe(0);
   });
 
-  it('should show a video scene in the filmstrip if it has a videoUrl', () => {
+  it('shows a provided video with a path and positive duration', () => {
     const videoScene: ProvidedVideoScene = {
       id: '2',
       type: 'video',
       name: 'Scene 2',
       video: {url: 'http://video.url/2', path: 'path/to/video/2'},
+      durationSeconds: 5,
     };
 
     projectConfigSignal.set({
@@ -217,6 +352,7 @@ describe('CompositionComponent', () => {
       type: 'video',
       name: 'Scene 2',
       video: {url: '', path: 'path/to/video/2'},
+      durationSeconds: 5,
     };
 
     projectConfigSignal.set({
@@ -289,6 +425,7 @@ describe('CompositionComponent', () => {
         type: 'video',
         name: 'Scene 3',
         video: {url: 'u3', path: 'path3'},
+        durationSeconds: 5,
       },
       {
         id: '4',
@@ -357,6 +494,95 @@ describe('CompositionComponent', () => {
     const remixEngineService = TestBed.inject(RemixEngineService);
     remixEngineService.combiningScenes.set(true);
     fixture.detectChanges();
+    const button = fixture.nativeElement.querySelector('button.mat-primary');
+    expect(button.disabled).toBe(true);
+    expect(button.textContent).toContain('Rendering...');
+  });
+
+  it('disables Render when a transition is longer than the clips it joins', () => {
+    // Each clip is individually valid, but the 0.5s crossfade on the second
+    // scene is longer than the 42ms first clip, which ffmpeg would consume
+    // entirely.
+    projectConfigSignal.set({
+      ...projectConfigSignal(),
+      storyboard: [
+        {
+          id: 'short',
+          type: 'video',
+          name: 'Short clip',
+          video: {url: '', path: 'videos/short.mp4'},
+          durationSeconds: 5,
+          trim: {start: 0, end: 0.042},
+        },
+        {
+          id: 'next',
+          type: 'video',
+          name: 'Next clip',
+          video: {url: '', path: 'videos/next.mp4'},
+          durationSeconds: 5,
+          transition: 'fade',
+          transitionOverlap: 0.5,
+        },
+      ],
+    });
+    fixture.detectChanges();
+
+    expect(component.canRender()).toBe(false);
+    expect(component.renderDisabledReason()).toContain(
+      'longer than the clips it joins',
+    );
+  });
+
+  it('keeps Render enabled for a transition that fits its clips', () => {
+    projectConfigSignal.set({
+      ...projectConfigSignal(),
+      storyboard: [
+        {
+          id: 'a',
+          type: 'video',
+          name: 'Clip A',
+          video: {url: '', path: 'videos/a.mp4'},
+          durationSeconds: 5,
+        },
+        {
+          id: 'b',
+          type: 'video',
+          name: 'Clip B',
+          video: {url: '', path: 'videos/b.mp4'},
+          durationSeconds: 5,
+          transition: 'fade',
+          transitionOverlap: 0.5,
+        },
+      ],
+    });
+    fixture.detectChanges();
+
+    expect(component.canRender()).toBe(true);
+    expect(component.renderDisabledReason()).toBe('');
+  });
+
+  it('reports the render-in-progress reason ahead of other disabled reasons', () => {
+    const remixEngineService = TestBed.inject(RemixEngineService);
+    // An invalid scene would normally set its own disabled reason; a render
+    // already in progress must be reported instead.
+    projectConfigSignal.set({
+      ...projectConfigSignal(),
+      storyboard: [
+        {
+          id: 'invalid',
+          type: 'video',
+          name: 'Invalid clip',
+          video: {url: '', path: 'videos/invalid.mp4'},
+          durationSeconds: Number.NaN,
+        },
+      ],
+    });
+    remixEngineService.combiningScenes.set(true);
+    fixture.detectChanges();
+
+    expect(component.renderDisabledReason()).toBe(
+      'Video rendering is in progress.',
+    );
     const button = fixture.nativeElement.querySelector('button.mat-primary');
     expect(button.disabled).toBe(true);
     expect(button.textContent).toContain('Rendering...');
