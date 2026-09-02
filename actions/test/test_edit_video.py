@@ -67,11 +67,41 @@ class TestEditVideo(unittest.TestCase):
         video_mime='video/mp4',
         model='gemini-omni-1.1-flash-preview',
         output_gcs='gs://b/edit_video/abc/',
+        resolution=None,
     )
     self.assertEqual(
         result,
         {'edited_video': [{Key.FILE.value: 'edit_video/abc/edited.mp4'}]},
     )
+
+  @mock.patch('actions.edit_video.omni.edit')
+  def test_resolution_forwarded_to_omni_edit(self, mock_omni_edit):
+    """A resolution parameter reaches omni.edit unchanged; no revalidation
+    here -- omni.edit already rejects a bad value."""
+    for resolution in ('1080p', '4k'):
+      mock_omni_edit.reset_mock()
+      mock_omni_edit.return_value = 'gs://b/edit_video/abc/edited.mp4'
+
+      edit_video.execute(
+          self.mock_gcs,
+          self.mock_workflow_params,
+          self.video,
+          self.prompt,
+          'gemini-omni-1.1-flash-preview',
+          'global',
+          resolution,
+      )
+
+      mock_omni_edit.assert_called_once_with(
+          gcp_project='test-project',
+          gcp_location='global',
+          prompt='edit the video',
+          video_uri='gs://b/generate_video/x/sample_0.mp4',
+          video_mime='video/mp4',
+          model='gemini-omni-1.1-flash-preview',
+          output_gcs='gs://b/edit_video/abc/',
+          resolution=resolution,
+      )
 
   @mock.patch('actions.edit_video.omni.edit')
   def test_missing_video_returns_empty_and_skips_omni(self, mock_omni_edit):
@@ -131,6 +161,7 @@ class TestEditVideo(unittest.TestCase):
         video_mime='video/mp4',
         model='gemini-omni-1.1-flash-preview',
         output_gcs='gs://b/edit_video/abc/',
+        resolution=None,
     )
     self.assertEqual(
         result,

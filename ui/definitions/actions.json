@@ -193,6 +193,9 @@
       },
       "gcp_location": {
         "type": "string"
+      },
+      "resolution": {
+        "type": "string"
       }
     },
     "output": {

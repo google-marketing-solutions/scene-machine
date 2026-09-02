@@ -31,6 +31,7 @@ def execute(
     prompt: NodeInput,
     model: str,
     gcp_location: str,
+    resolution: str | None = None,
 ) -> NodeOutput:
   """Executes the action.
 
@@ -43,6 +44,12 @@ def execute(
     prompt: The text prompt describing the edit.
     model: The Omni model to use for editing.
     gcp_location: The location of the model to use.
+    resolution: The output resolution. Omni defaults to 720p when this is
+      not sent, so a higher-resolution source needs it set explicitly to
+      come back at its own resolution. Not re-validated here: omni.edit
+      already rejects an unsupported value. Optional because
+      actions_wrapper only passes parameters present in the submission, so
+      an older submission without it must still work.
 
   Returns:
     A NodeOutput with a one-entry dict with the key "edited_video".
@@ -60,5 +67,6 @@ def execute(
       video_mime=gcs.get_mime_type(video_path),
       model=model,
       output_gcs=gcs.get_path_uri(),
+      resolution=resolution,
   )
   return {'edited_video': [{Key.FILE.value: gcs.strip_prefix(edited_uri)}]}

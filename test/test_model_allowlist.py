@@ -429,3 +429,48 @@ def test_shape_allows_json_typed_extra_fields():
   catalog = load_shipped_allowlist()
   catalog['_notes'] = 'operator scratch note'
   assert validate_catalog_shape(catalog, _MODELS['actions']) is None
+
+
+# --- validate_catalog_shape: capability fields Omni submission checks rely on -
+
+_OMNI_ID = 'gemini-omni-1.1-flash-preview'
+
+
+def test_shape_rejects_non_boolean_audio_always_on():
+  catalog = load_shipped_allowlist()
+  catalog['models'][_OMNI_ID]['capabilities']['audio_always_on'] = 'yes'
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _OMNI_ID in problem and 'audio_always_on' in problem
+  assert validate_catalog_shape(_MODELS, _MODELS['actions']) is None
+
+
+def test_shape_rejects_non_list_allowed_aspect_ratios():
+  catalog = load_shipped_allowlist()
+  catalog['models'][_OMNI_ID]['capabilities']['allowed_aspect_ratios'] = '16:9'
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _OMNI_ID in problem and 'allowed_aspect_ratios' in problem
+  assert validate_catalog_shape(_MODELS, _MODELS['actions']) is None
+
+
+def test_shape_rejects_non_string_element_in_allowed_resolutions():
+  catalog = load_shipped_allowlist()
+  catalog['models'][_OMNI_ID]['capabilities']['allowed_resolutions'] = [
+      '720p', 1080]
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _OMNI_ID in problem and 'allowed_resolutions' in problem
+  assert validate_catalog_shape(_MODELS, _MODELS['actions']) is None
+
+
+def test_shape_rejects_malformed_duration_by_resolution():
+  mutations = (
+      lambda c: c.__setitem__('duration_by_resolution', 'nope'),
+      lambda c: c.__setitem__('duration_by_resolution', {'720p': [4, True]}),
+      lambda c: c.__setitem__('duration_by_resolution', {'720p': 4}),
+  )
+  for mutate in mutations:
+    catalog = load_shipped_allowlist()
+    mutate(catalog['models'][_OMNI_ID]['capabilities'])
+    problem = validate_catalog_shape(catalog, _MODELS['actions'])
+    assert problem and _OMNI_ID in problem
+    assert 'is not a dict of string to list of ints' in problem
+  assert validate_catalog_shape(_MODELS, _MODELS['actions']) is None
