@@ -26,7 +26,8 @@
       "parameters": {
         "model": "gemini-omni-1.1-flash-preview",
         "gcp_location": "global",
-        "resolution": "720p"
+        "resolution": "720p",
+        "generate_audio": true
       }
     },
     "sink": {

@@ -214,7 +214,15 @@ def _capability_violation(
               'DURATION_NOT_ALLOWED',
           )
 
-  if 'generate_audio' in params and caps.get('audio_always_on') is True:
+  if caps.get('audio_always_on') is True:
+    if 'generate_audio' not in params:
+      return (
+          (
+              f'Node {node_id!r}: {model!r} always generates audio; '
+              'generate_audio must be true'
+          ),
+          'AUDIO_REQUIRED',
+      )
     for value in _as_values(params['generate_audio']):
       if value is not True:
         return (

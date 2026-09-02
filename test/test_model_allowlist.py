@@ -231,7 +231,13 @@ def _live_catalog_with_hotfix():
   catalog = load_shipped_allowlist()
   catalog['models']['veo-live-hotfix'] = {
       'family': 'veo', 'actions': ['generate_video'],
-      'locations': ['global'], 'capabilities': {}}
+      'locations': ['global'],
+      'capabilities': {
+          'allowed_aspect_ratios': ['16:9'],
+          'allowed_resolutions': ['720p'],
+          'duration_by_resolution': {'720p': [4, 6, 8]},
+          'audio_always_on': False,
+      }}
   return catalog
 
 
@@ -474,3 +480,144 @@ def test_shape_rejects_malformed_duration_by_resolution():
     assert problem and _OMNI_ID in problem
     assert 'is not a dict of string to list of ints' in problem
   assert validate_catalog_shape(_MODELS, _MODELS['actions']) is None
+
+
+# --- validate_catalog_shape: required generate_video capability schema -------
+
+_GENERATE_VIDEO_MODEL_ID = 'veo-3.1-generate-001'
+
+
+def test_shape_rejects_missing_allowed_aspect_ratios_on_generate_video():
+  catalog = load_shipped_allowlist()
+  del catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities'][
+      'allowed_aspect_ratios']
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _GENERATE_VIDEO_MODEL_ID in problem
+  assert 'allowed_aspect_ratios' in problem
+
+
+def test_shape_rejects_missing_allowed_resolutions_on_generate_video():
+  catalog = load_shipped_allowlist()
+  del catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities'][
+      'allowed_resolutions']
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _GENERATE_VIDEO_MODEL_ID in problem
+  assert 'allowed_resolutions' in problem
+
+
+def test_shape_rejects_missing_duration_by_resolution_on_generate_video():
+  catalog = load_shipped_allowlist()
+  del catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities'][
+      'duration_by_resolution']
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _GENERATE_VIDEO_MODEL_ID in problem
+  assert 'duration_by_resolution' in problem
+
+
+def test_shape_rejects_missing_audio_always_on_on_generate_video():
+  catalog = load_shipped_allowlist()
+  del catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities'][
+      'audio_always_on']
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _GENERATE_VIDEO_MODEL_ID in problem
+  assert 'audio_always_on' in problem
+
+
+def test_shape_rejects_empty_allowed_aspect_ratios_on_generate_video():
+  catalog = load_shipped_allowlist()
+  catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities'][
+      'allowed_aspect_ratios'] = []
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _GENERATE_VIDEO_MODEL_ID in problem
+  assert 'allowed_aspect_ratios' in problem
+
+
+def test_shape_rejects_empty_allowed_resolutions_on_generate_video():
+  catalog = load_shipped_allowlist()
+  catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities'][
+      'allowed_resolutions'] = []
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _GENERATE_VIDEO_MODEL_ID in problem
+  assert 'allowed_resolutions' in problem
+
+
+def test_shape_rejects_orphan_duration_key():
+  # duration_by_resolution has a key not present in allowed_resolutions.
+  catalog = load_shipped_allowlist()
+  caps = catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities']
+  caps['duration_by_resolution']['2160p'] = [4, 6, 8]
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _GENERATE_VIDEO_MODEL_ID in problem
+  assert 'duration_by_resolution' in problem
+
+
+def test_shape_rejects_orphan_allowed_resolution():
+  # allowed_resolutions has an entry with no matching duration_by_resolution key.
+  catalog = load_shipped_allowlist()
+  caps = catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities']
+  caps['allowed_resolutions'] = caps['allowed_resolutions'] + ['2160p']
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _GENERATE_VIDEO_MODEL_ID in problem
+  assert 'duration_by_resolution' in problem
+
+
+def test_shape_rejects_non_int_duration_value():
+  catalog = load_shipped_allowlist()
+  caps = catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities']
+  caps['duration_by_resolution']['720p'] = [4, '6', 8]
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _GENERATE_VIDEO_MODEL_ID in problem
+  assert 'duration_by_resolution' in problem
+
+
+def test_shape_rejects_bool_duration_value():
+  catalog = load_shipped_allowlist()
+  caps = catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities']
+  caps['duration_by_resolution']['720p'] = [4, True, 8]
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _GENERATE_VIDEO_MODEL_ID in problem
+  assert 'duration_by_resolution' in problem
+
+
+def test_shape_rejects_unsorted_duration_list():
+  catalog = load_shipped_allowlist()
+  caps = catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities']
+  caps['duration_by_resolution']['720p'] = [8, 4, 6]
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _GENERATE_VIDEO_MODEL_ID in problem
+  assert 'duration_by_resolution' in problem
+
+
+def test_shape_rejects_non_arithmetic_duration_list():
+  catalog = load_shipped_allowlist()
+  caps = catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities']
+  caps['duration_by_resolution']['720p'] = [3, 5, 10]
+  problem = validate_catalog_shape(catalog, _MODELS['actions'])
+  assert problem and _GENERATE_VIDEO_MODEL_ID in problem
+  assert 'duration_by_resolution' in problem
+
+
+def test_shape_accepts_shipped_catalog():
+  assert validate_catalog_shape(load_shipped_allowlist(), _MODELS['actions']) is None
+
+
+def test_bad_generate_video_catalog_falls_back_to_shipped(monkeypatch, caplog):
+  monkeypatch.setenv('ROLE', 'app')
+  def bad_live_catalog():
+    catalog = load_shipped_allowlist()
+    del catalog['models'][_GENERATE_VIDEO_MODEL_ID]['capabilities'][
+        'audio_always_on']
+    return catalog
+  monkeypatch.setattr(model_allowlist, '_fetch_live_catalog', bad_live_catalog)
+  catalog, source = load_allowlist_with_source()
+  assert source == 'shipped'
+  assert catalog == load_shipped_allowlist()
+  assert 'audio_always_on' in caplog.text
+
+
+def test_shape_leaves_non_video_models_unrestricted():
+  # gemini-3.5-flash has no generate_video action and no capability fields;
+  # the required-fields rule must not apply to it.
+  catalog = load_shipped_allowlist()
+  assert catalog['models']['gemini-3.5-flash']['capabilities'] == {}
+  assert validate_catalog_shape(catalog, _MODELS['actions']) is None

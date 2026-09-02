@@ -43,8 +43,7 @@
         "allowed_aspect_ratios": ["16:9", "9:16"],
         "allowed_resolutions": ["720p", "1080p", "4k"],
         "duration_by_resolution": {"720p": [4, 6, 8], "1080p": [4, 6, 8], "4k": [8]},
-        "supports_last_frame": true,
-        "supports_reference_images": true
+        "audio_always_on": false
       }
     },
     "veo-3.1-fast-generate-001": {
@@ -58,8 +57,7 @@
         "allowed_aspect_ratios": ["16:9", "9:16"],
         "allowed_resolutions": ["720p", "1080p", "4k"],
         "duration_by_resolution": {"720p": [4, 6, 8], "1080p": [4, 6, 8], "4k": [8]},
-        "supports_last_frame": true,
-        "supports_reference_images": true
+        "audio_always_on": false
       }
     },
     "veo-3.1-lite-generate-001": {
@@ -73,8 +71,7 @@
         "allowed_aspect_ratios": ["16:9", "9:16"],
         "allowed_resolutions": ["720p", "1080p"],
         "duration_by_resolution": {"720p": [4, 6, 8], "1080p": [4, 6, 8]},
-        "supports_last_frame": true,
-        "supports_reference_images": false
+        "audio_always_on": false
       }
     },
     "gemini-omni-1.1-flash-preview": {
@@ -88,9 +85,7 @@
         "max_videos_per_request": 1,
         "allowed_aspect_ratios": ["16:9", "9:16"],
         "allowed_resolutions": ["360p", "720p", "1080p", "4k"],
-        "duration_by_resolution": {"360p": [3, 4, 5, 6, 7, 8, 9, 10], "720p": [3, 4, 5, 6, 7, 8, 9, 10], "1080p": [3, 4, 5, 6, 7, 8, 9, 10], "4k": [3, 4, 5, 6, 7, 8, 9, 10]},
-        "supports_last_frame": false,
-        "supports_reference_images": false
+        "duration_by_resolution": {"360p": [3, 4, 5, 6, 7, 8, 9, 10], "720p": [3, 4, 5, 6, 7, 8, 9, 10], "1080p": [3, 4, 5, 6, 7, 8, 9, 10], "4k": [3, 4, 5, 6, 7, 8, 9, 10]}
       }
     },
     "gemini-3-pro-image": {

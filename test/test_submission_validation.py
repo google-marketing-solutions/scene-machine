@@ -914,6 +914,10 @@ def test_generate_audio_false_rejected_when_always_on():
                     {**_OMNI, 'generate_audio': False})) == 'AUDIO_REQUIRED'
 
 
+def test_generate_audio_omitted_rejected_when_always_on():
+  assert _code(_sub('generate_video', _OMNI)) == 'AUDIO_REQUIRED'
+
+
 def test_duration_must_be_a_non_bool_int():
   for bad in (3.5, 4.0, '5', True):
     assert _code(_sub('generate_video',
@@ -983,6 +987,7 @@ def test_duration_check_rejects_unhashable_resolution_without_crashing(
     bad_resolution):
   assert validate_submission(
       _sub('generate_video',
-           {**_OMNI, 'resolution': bad_resolution, 'duration_seconds': 8}),
+           {**_OMNI, 'resolution': bad_resolution, 'duration_seconds': 8,
+            'generate_audio': True}),
       allowlist=_allowlist_without_omni_allowed_resolutions(),
   ) is None
