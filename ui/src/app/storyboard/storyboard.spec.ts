@@ -29,6 +29,7 @@ import {
   resolveSceneRenderClip,
 } from '../services/config/config';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
+import {EditCandidateDialog} from './edit-candidate-dialog';
 import {Storyboard} from './storyboard';
 
 describe('Storyboard', () => {
@@ -49,6 +50,7 @@ describe('Storyboard', () => {
     audioTracks: [],
     visualOverlays: [],
   });
+  const canEditCandidatesSignal = signal(false);
   let mockConfigService = {
     projectConfig: {
       value: projectConfigSignal,
@@ -67,6 +69,8 @@ describe('Storyboard', () => {
       projectConfigSignal.update(config => ({...config, ...partial}));
     },
     videoModels: () => [],
+    canEditCandidates: canEditCandidatesSignal,
+    audioLocked: () => false,
     sceneIdCounter: sceneIdCounterSignal,
     primaryColor: signal('theme-green'),
     isGeneratedScene: (
@@ -78,6 +82,7 @@ describe('Storyboard', () => {
   };
   let mockRemixEngineService = {
     uploadMedia: vi.fn(),
+    editCandidate: vi.fn(),
     generatingSceneIds: signal(new Set()),
   };
   let mockMatDialog = {
@@ -88,6 +93,7 @@ describe('Storyboard', () => {
 
   beforeEach(async () => {
     sceneIdCounterSignal.set(0);
+    canEditCandidatesSignal.set(false);
     mockConfigService = {
       projectConfig: {
         value: projectConfigSignal,
@@ -106,6 +112,8 @@ describe('Storyboard', () => {
         projectConfigSignal.update(config => ({...config, ...partial}));
       },
       videoModels: () => [],
+      canEditCandidates: canEditCandidatesSignal,
+      audioLocked: () => false,
       sceneIdCounter: sceneIdCounterSignal,
       primaryColor: signal('theme-green'),
       isGeneratedScene: (
@@ -118,6 +126,7 @@ describe('Storyboard', () => {
 
     mockRemixEngineService = {
       uploadMedia: vi.fn(),
+      editCandidate: vi.fn(),
       generatingSceneIds: signal(new Set()),
     };
 
@@ -683,5 +692,99 @@ describe('Storyboard', () => {
       fixture.detectChanges();
       expect(component.getPlaceholdersArray().length).toBe(6);
     });
+  });
+
+  describe('Edit button', () => {
+    const makeCandidate = (overrides: Partial<Candidate> = {}): Candidate => ({
+      video: {url: 'r1.mp4', path: 'path/r1.mp4'},
+      runNumber: 1,
+      durationSeconds: 4,
+      prompt: 'test prompt',
+      model: 'test-model',
+      generateAudio: false,
+      resolution: '1080p',
+      ...overrides,
+    });
+
+    const selectSceneWithOneCandidate = () => {
+      const scene: GeneratedScene = {
+        id: '1',
+        type: 'generated',
+        name: 'Scene 1',
+        prompt: 'test',
+        candidates: [makeCandidate()],
+      };
+      projectConfigSignal.update(config => ({
+        ...config,
+        storyboard: [scene],
+      }));
+      component.selectScene('1');
+      fixture.detectChanges();
+    };
+
+    it('does not render the Edit button when canEditCandidates() is false', () => {
+      canEditCandidatesSignal.set(false);
+      selectSceneWithOneCandidate();
+
+      expect(
+        fixture.nativeElement.querySelector('.candidate-list .edit-btn'),
+      ).toBeNull();
+    });
+
+    it('renders the Edit button when canEditCandidates() is true', () => {
+      canEditCandidatesSignal.set(true);
+      selectSceneWithOneCandidate();
+
+      expect(
+        fixture.nativeElement.querySelector('.candidate-list .edit-btn'),
+      ).not.toBeNull();
+    });
+
+    it('opens the dialog and calls editCandidate with a non-empty result, without selecting the candidate', () => {
+      canEditCandidatesSignal.set(true);
+      selectSceneWithOneCandidate();
+      mockMatDialog.open = vi.fn().mockReturnValue({
+        afterClosed: () => of('make the sky purple'),
+      });
+
+      const scene = component.config.projectConfig.value()
+        .storyboard[0] as GeneratedScene;
+      const btn = fixture.nativeElement.querySelector(
+        '.candidate-list .edit-btn',
+      );
+      btn.click();
+      fixture.detectChanges();
+
+      expect(mockMatDialog.open).toHaveBeenCalledWith(EditCandidateDialog);
+      expect(mockRemixEngineService.editCandidate).toHaveBeenCalledWith(
+        scene,
+        0,
+        'make the sky purple',
+      );
+      // The click on the edit button must not also select the candidate
+      // (stopPropagation keeps it from bubbling to the video-item's click).
+      expect(
+        (component.config.projectConfig.value().storyboard[0] as GeneratedScene)
+          .selectedCandidateIndex,
+      ).toBeUndefined();
+    });
+
+    for (const emptyResult of [undefined, '']) {
+      it(`calls nothing when the dialog closes with ${JSON.stringify(emptyResult)}`, () => {
+        canEditCandidatesSignal.set(true);
+        selectSceneWithOneCandidate();
+        mockMatDialog.open = vi.fn().mockReturnValue({
+          afterClosed: () => of(emptyResult),
+        });
+
+        const btn = fixture.nativeElement.querySelector(
+          '.candidate-list .edit-btn',
+        );
+        btn.click();
+        fixture.detectChanges();
+
+        expect(mockRemixEngineService.editCandidate).not.toHaveBeenCalled();
+      });
+    }
   });
 });

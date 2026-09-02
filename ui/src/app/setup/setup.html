@@ -110,8 +110,10 @@
         <div class="setting-item">
           <span class="setting-label">Generate audio</span>
           <mat-slide-toggle
-            [ngModel]="config.projectConfig.value().generateAudio"
+            [ngModel]="config.audioLocked() || config.projectConfig.value().generateAudio"
             (ngModelChange)="config.updateProjectConfig({generateAudio: $event})"
+            [disabled]="config.audioLocked()"
+            [matTooltip]="config.audioLocked() ? 'This model always generates audio' : ''"
           ></mat-slide-toggle>
         </div>
       </div>

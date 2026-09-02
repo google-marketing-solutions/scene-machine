@@ -57,6 +57,31 @@ const CATALOG: ModelCatalog = {
   },
 };
 
+/**
+ * CATALOG plus an Omni-like entry that can edit video and always generates
+ * audio. Kept separate from CATALOG (rather than adding to it in place) so
+ * the existing videoModels()/model-fallback specs above — which assert exact
+ * arrays over CATALOG at 'global' and 'us-central1' — are not perturbed by a
+ * model that also lists 'generate_video'.
+ */
+const CATALOG_WITH_OMNI: ModelCatalog = {
+  ...CATALOG,
+  defaults: {...CATALOG.defaults, omni: 'omni-1'},
+  actions: {
+    ...CATALOG.actions,
+    edit_video: {location_param: 'gcp_location', default_key: 'veoModel'},
+  },
+  models: {
+    ...CATALOG.models,
+    'omni-1': {
+      family: 'omni',
+      actions: ['generate_video', 'edit_video'],
+      locations: ['global'],
+      capabilities: {audio_always_on: true},
+    },
+  },
+};
+
 /** A served /api/config payload with the live catalog. */
 function liveGlobalConfig(overrides: Record<string, unknown> = {}) {
   return {
@@ -317,6 +342,59 @@ describe('ConfigService model catalog', () => {
 
     expect(service.projectConfig.value().model).toBe('veo-removed-by-operator');
     expect(matSnackBarMock.open).not.toHaveBeenCalled();
+  });
+
+  it('lists edit-capable models at the veo location and reports editability', async () => {
+    await settle();
+    (service as any).globalConfig.set(
+      liveGlobalConfig({modelCatalog: CATALOG_WITH_OMNI}),
+    );
+
+    expect(service.videoEditModels()).toEqual(['omni-1']);
+    expect(service.canEditCandidates()).toBe(true);
+  });
+
+  it('is empty and non-editable at a location the edit model does not list', async () => {
+    await settle();
+    (service as any).globalConfig.set(
+      liveGlobalConfig({
+        veoLocation: 'us-central1',
+        modelCatalog: CATALOG_WITH_OMNI,
+      }),
+    );
+
+    expect(service.videoEditModels()).toEqual([]);
+    expect(service.canEditCandidates()).toBe(false);
+  });
+
+  it('locks audio on when the project model always generates audio', async () => {
+    await settle();
+    (service as any).globalConfig.set(
+      liveGlobalConfig({modelCatalog: CATALOG_WITH_OMNI}),
+    );
+    service.projectConfig.value.set({
+      ...service.projectConfig.value(),
+      id: 'proj-1',
+      model: 'omni-1',
+    });
+
+    expect(service.audioLocked()).toBe(true);
+  });
+
+  it('does not lock audio for a model without audio_always_on, or when the catalog is missing', async () => {
+    await settle();
+    (service as any).globalConfig.set(
+      liveGlobalConfig({modelCatalog: CATALOG_WITH_OMNI}),
+    );
+    service.projectConfig.value.set({
+      ...service.projectConfig.value(),
+      id: 'proj-1',
+      model: 'veo-default',
+    });
+    expect(service.audioLocked()).toBe(false);
+
+    (service as any).globalConfig.set(undefined);
+    expect(service.audioLocked()).toBe(false);
   });
 
   it('falls back within location-compatible models when the veo default is unusable', async () => {

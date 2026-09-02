@@ -235,6 +235,16 @@
                                 <div class="resolution">
                                   {{ candidate.resolution === '4k' ? '4K' : candidate.resolution }}
                                 </div>
+                                @if (config.canEditCandidates()) {
+                                  <button
+                                    mat-icon-button
+                                    class="edit-btn"
+                                    (click)="editCandidate($event, scene, $index)"
+                                    matTooltip="Edit with a prompt"
+                                  >
+                                    <mat-icon>auto_fix_high</mat-icon>
+                                  </button>
+                                }
                                 <button
                                   mat-icon-button
                                   class="archive-btn"
@@ -356,6 +366,16 @@
                                   #thumbContainer
                                   [style.aspect-ratio]="previewAspectRatio()"
                                 >
+                                  @if (config.canEditCandidates()) {
+                                    <button
+                                      mat-icon-button
+                                      class="edit-btn"
+                                      (click)="editCandidate($event, scene, $index)"
+                                      matTooltip="Edit with a prompt"
+                                    >
+                                      <mat-icon>auto_fix_high</mat-icon>
+                                    </button>
+                                  }
                                   <button
                                     mat-icon-button
                                     class="archive-btn"
@@ -852,8 +872,10 @@
                     </div>
                     <mat-slide-toggle
                       color="primary"
-                      [ngModel]="config.projectConfig.value().generateAudio"
+                      [ngModel]="config.audioLocked() || config.projectConfig.value().generateAudio"
                       (ngModelChange)="config.updateProjectConfig({generateAudio: $event})"
+                      [disabled]="config.audioLocked()"
+                      [matTooltip]="config.audioLocked() ? 'This model always generates audio' : ''"
                     ></mat-slide-toggle>
                   </div>
                 </div>

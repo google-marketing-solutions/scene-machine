@@ -62,6 +62,7 @@ import {
   AddSceneResult,
 } from './add-scene-dialog/add-scene-dialog';
 import {ConfirmDialog} from './confirm-dialog';
+import {EditCandidateDialog} from './edit-candidate-dialog';
 
 /**
  * Component for the storyboard view.
@@ -219,7 +220,10 @@ export class Storyboard {
   runTooltip(candidate: Candidate): string {
     const label = this.runLabels().get(candidate) ?? '';
     const letter = label.slice(String(candidate.runNumber).length);
-    return `Run: ${candidate.runNumber}, Candidate: ${letter}`;
+    const base = `Run: ${candidate.runNumber}, Candidate: ${letter}`;
+    return candidate.editedFromRun !== undefined
+      ? `${base} (edit of run ${candidate.editedFromRun})`
+      : base;
   }
 
   previewAspectRatio = computed(() => {
@@ -835,6 +839,17 @@ export class Storyboard {
       scene.candidates[index].isArchived = !scene.candidates[index].isArchived;
       this.updateScenes();
     }
+  }
+
+  /** Opens the edit-candidate dialog and, on a non-empty result, runs the edit. */
+  editCandidate(event: Event, scene: GeneratedScene, index: number) {
+    event.stopPropagation();
+    const dialogRef = this.dialog.open(EditCandidateDialog);
+    dialogRef.afterClosed().subscribe((result: string | undefined) => {
+      if (result) {
+        void this.remixEngineService.editCandidate(scene, index, result);
+      }
+    });
   }
 
   deleteScene(id: string) {
