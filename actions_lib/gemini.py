@@ -86,7 +86,7 @@ def prompt(
     file_uris: list[str] = None,
     need_to_remove_md_notation=True,
     location="us-central1",
-    model="gemini-3.5-flash",
+    model="gemini-3.7-flash",
     temperature: float = 0.2,
     top_p: float = 0.2,
     tracking_type: TrackingType | None = None,
@@ -103,7 +103,7 @@ def prompt(
       need_to_remove_md_notation: If True and response_schema is not provided,
         removes markdown code block notations (like ```json) from the output.
       location: The Vertex AI location to use (default: "us-central1").
-      model: The Gemini model to use (default: "gemini-3.5-flash").
+      model: The Gemini model to use (default: "gemini-3.7-flash").
       temperature: Sampling temperature to control creativity.
       top_p: Nucleus sampling probability.
 
