@@ -14,7 +14,7 @@
       "parameters": {
         "source_language": "en",
         "target_language": ["de", "es", "la", "it", "nl", "pt", "hu", "se"],
-        "gemini_model": "gemini-3.7-flash",
+        "gemini_model": "gemini-3.8-flash",
         "gemini_model_location": "global"
       },
       "input": {
@@ -29,7 +29,7 @@
       "parameters": {
         "source_language": "en",
         "target_language": ["cs", "es", "la", "it", "nl", "pt", "hu", "se"],
-        "gemini_model": "gemini-3.7-flash",
+        "gemini_model": "gemini-3.8-flash",
         "gemini_model_location": "global"
       },
       "input": {

@@ -15,8 +15,8 @@ export REGION=us-central1
 # Text model.
 # All available models can be found at:
 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models#gemini-models
-# Recommended models: gemini-3.7-flash, gemini-3.1-pro-preview
-export GEMINI_MODEL=gemini-3.7-flash
+# Recommended models: gemini-3.8-flash, gemini-3.7-flash, gemini-3.1-pro-preview
+export GEMINI_MODEL=gemini-3.8-flash
 export GEMINI_REGION=global # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models
 
 # Video generation model.

@@ -1,6 +1,6 @@
 {
   "defaults": {
-    "gemini": "gemini-3.7-flash",
+    "gemini": "gemini-3.8-flash",
     "image": "gemini-3-pro-image",
     "veo": "veo-3.1-generate-001"
   },
@@ -13,6 +13,12 @@
     "generate_video":        { "location_param": "gcp_location",          "default_key": "veoModel" }
   },
   "models": {
+    "gemini-3.8-flash": {
+      "family": "gemini",
+      "actions": ["translate", "write_products_script", "generate_storyboard"],
+      "locations": ["global"],
+      "capabilities": {}
+    },
     "gemini-3.7-flash": {
       "family": "gemini",
       "actions": ["translate", "write_products_script", "generate_storyboard"],
