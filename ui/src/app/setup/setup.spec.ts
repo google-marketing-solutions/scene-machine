@@ -14,9 +14,14 @@
  * limitations under the License.
  */
 
-import {signal} from '@angular/core';
-import {TestBed} from '@angular/core/testing';
+import {HarnessLoader} from '@angular/cdk/testing';
+import {TestbedHarnessEnvironment} from '@angular/cdk/testing/testbed';
+import {signal, type WritableSignal} from '@angular/core';
+import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {MatSelectHarness} from '@angular/material/select/testing';
+import {MatSlider} from '@angular/material/slider';
 import {MatSnackBar} from '@angular/material/snack-bar';
+import {By} from '@angular/platform-browser';
 import {provideRouter} from '@angular/router';
 import {RouterTestingHarness} from '@angular/router/testing';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -25,6 +30,7 @@ import {ClientMediaService} from '../services/client-media/client-media';
 import {ConfigService, ProjectConfig} from '../services/config/config';
 import {ImageImportService} from '../services/image-import/image-import';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
+import {TemplatesService} from '../services/templates/templates';
 import {Setup} from './setup';
 
 describe('Setup', () => {
@@ -338,5 +344,185 @@ describe('Setup image upload', () => {
       'Close',
       {duration: 6000},
     );
+  });
+});
+
+describe('Setup video controls', () => {
+  let component: Setup;
+  let fixture: ComponentFixture<Setup>;
+  let loader: HarnessLoader;
+  let projectConfigSignal: WritableSignal<ProjectConfig>;
+  let configMock: {
+    projectConfig: {
+      value: WritableSignal<ProjectConfig>;
+      isLoading: () => boolean;
+      error: () => null;
+    };
+    updateProjectConfig: ReturnType<typeof vi.fn>;
+    saveNow: ReturnType<typeof vi.fn>;
+    videoModels: () => string[];
+    audioLocked: () => boolean;
+    allowedResolutions: ReturnType<typeof vi.fn>;
+    allowedAspectRatios: ReturnType<typeof vi.fn>;
+    durationSlider: ReturnType<typeof vi.fn>;
+    selectResolution: ReturnType<typeof vi.fn>;
+    selectVideoModel: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(async () => {
+    projectConfigSignal = signal<ProjectConfig>({
+      id: 'proj-1',
+      name: 'Test Project',
+      aspectRatio: '16:9',
+      resolution: '1080p',
+      candidateDurationSeconds: 6,
+      generateAudio: false,
+      numberOfCandidates: 1,
+      model: 'veo-default',
+      inputConfig: {
+        products: [{id: 1, name: 'Product 1', images: []}],
+        composition: '',
+        style: '',
+        audience: '',
+        templateId: 'custom',
+      },
+      storyboard: [],
+      audioTracks: [],
+      visualOverlays: [],
+    });
+    configMock = {
+      projectConfig: {
+        value: projectConfigSignal,
+        isLoading: () => false,
+        error: () => null,
+      },
+      updateProjectConfig: vi.fn((partial: Partial<ProjectConfig>) =>
+        projectConfigSignal.update(c => ({...c, ...partial})),
+      ),
+      saveNow: vi.fn(),
+      videoModels: () => ['veo-default', 'omni-1'],
+      audioLocked: () => false,
+      allowedResolutions: vi.fn(() => ['360p', '720p', '1080p', '4k']),
+      allowedAspectRatios: vi.fn(() => ['16:9', '9:16']),
+      durationSlider: vi.fn(() => ({min: 3, max: 10, step: 1})),
+      selectResolution: vi.fn(),
+      selectVideoModel: vi.fn(),
+    };
+
+    await TestBed.configureTestingModule({
+      imports: [Setup],
+      providers: [
+        provideRouter(routes),
+        {provide: ConfigService, useValue: configMock},
+        {provide: RemixEngineService, useValue: {uploadMedia: vi.fn()}},
+        {provide: ClientMediaService, useValue: {convertImage: vi.fn()}},
+        {
+          provide: ImageImportService,
+          useValue: {
+            importText: vi.fn(),
+            imageFilesFromDataTransfer: vi.fn().mockReturnValue([]),
+            imageUrlFromDataTransfer: vi.fn().mockReturnValue(null),
+            isEditableTarget: vi.fn().mockReturnValue(false),
+          },
+        },
+        {
+          provide: TemplatesService,
+          useValue: {templates: {value: () => undefined}},
+        },
+      ],
+    }).compileComponents();
+
+    fixture = TestBed.createComponent(Setup);
+    component = fixture.componentInstance;
+    loader = TestbedHarnessEnvironment.loader(fixture);
+    fixture.detectChanges();
+  });
+
+  it('should create', () => {
+    expect(component).toBeTruthy();
+  });
+
+  it("offers the model's allowed resolutions, labeling 4k as 4K", async () => {
+    const select = await loader.getHarness(
+      MatSelectHarness.with({ancestor: '.resolution-select'}),
+    );
+    await select.open();
+    const options = await select.getOptions();
+    const texts = await Promise.all(options.map(o => o.getText()));
+
+    expect(texts).toEqual(['360p', '720p', '1080p', '4K']);
+  });
+
+  it('falls back to two options when the model has no allowed_resolutions', async () => {
+    configMock.allowedResolutions.mockReturnValue(['720p', '1080p']);
+    fixture.detectChanges();
+    const select = await loader.getHarness(
+      MatSelectHarness.with({ancestor: '.resolution-select'}),
+    );
+    await select.open();
+    const options = await select.getOptions();
+
+    expect(options.length).toBe(2);
+  });
+
+  it('drives the duration slider from durationSlider()', () => {
+    const noGapItems = fixture.debugElement.queryAll(
+      By.css('.setting-item.no-gap'),
+    );
+    const durationSliderEl = noGapItems[1].query(By.directive(MatSlider))
+      .componentInstance as MatSlider;
+
+    expect(durationSliderEl.min).toBe(3);
+    expect(durationSliderEl.max).toBe(10);
+    expect(durationSliderEl.step).toBe(1);
+  });
+
+  it('calls selectVideoModel when a model is chosen', async () => {
+    const select = await loader.getHarness(
+      MatSelectHarness.with({ancestor: '.veo-model-select'}),
+    );
+    await select.open();
+    await select.clickOptions({text: 'omni-1'});
+
+    expect(configMock.selectVideoModel).toHaveBeenCalledWith('omni-1');
+  });
+
+  it('calls selectResolution when a resolution is chosen', async () => {
+    const select = await loader.getHarness(
+      MatSelectHarness.with({ancestor: '.resolution-select'}),
+    );
+    await select.open();
+    await select.clickOptions({text: '360p'});
+
+    expect(configMock.selectResolution).toHaveBeenCalledWith('360p');
+  });
+
+  it('renders an aspect ratio toggle for each allowed value', () => {
+    const toggles = fixture.debugElement.queryAll(
+      By.css('.aspect-ratio-setting mat-button-toggle'),
+    );
+    const texts = toggles.map(t => t.nativeElement.textContent.trim());
+
+    expect(texts).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('16:9'),
+        expect.stringContaining('9:16'),
+      ]),
+    );
+    expect(toggles.length).toBe(2);
+  });
+
+  it('renders the aspect ratio toggles from allowedAspectRatios()', () => {
+    configMock.allowedAspectRatios.mockReturnValue(['9:16']);
+    fixture.detectChanges();
+    const toggles = fixture.debugElement.queryAll(
+      By.css('.aspect-ratio-setting mat-button-toggle'),
+    );
+
+    expect(toggles.length).toBe(1);
+    expect(toggles[0].nativeElement.textContent).toContain('9:16');
+    expect(
+      toggles[0].query(By.css('mat-icon')).nativeElement.textContent.trim(),
+    ).toBe('crop_portrait');
   });
 });

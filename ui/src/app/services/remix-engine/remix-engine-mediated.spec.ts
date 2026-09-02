@@ -1957,6 +1957,45 @@ describe('RemixEngineService (mediated)', () => {
     });
   });
 
+  describe('startCombineScenesWorkflow: resolution mapping', () => {
+    beforeEach(() => {
+      mediaServiceMock.upload.mockResolvedValue({
+        path: 'remix-input/arrangement.txt',
+        url: 'https://signed.example/arrangement',
+      });
+    });
+
+    it('maps 360p 16:9 to 640:360', async () => {
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        resolution: '360p',
+        aspectRatio: '16:9',
+      });
+
+      await service.startCombineScenesWorkflow([]);
+
+      const postedBody = httpClientMock.post.mock.calls[0][1];
+      expect(postedBody.workflowDefinition.n_0.parameters.resolution).toBe(
+        '640:360',
+      );
+    });
+
+    it('maps 360p 9:16 to 360:640', async () => {
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        resolution: '360p',
+        aspectRatio: '9:16',
+      });
+
+      await service.startCombineScenesWorkflow([]);
+
+      const postedBody = httpClientMock.post.mock.calls[0][1];
+      expect(postedBody.workflowDefinition.n_0.parameters.resolution).toBe(
+        '360:640',
+      );
+    });
+  });
+
   describe('combineScenes: render contract', () => {
     it('does not submit a workflow with no renderable video', async () => {
       setRenderStoryboard([]);
