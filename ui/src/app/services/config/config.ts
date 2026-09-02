@@ -260,6 +260,10 @@ export interface Candidate {
   isArchived?: boolean;
   lowQualityThumbnail?: string;
   highQualityThumbnail?: GcsFile;
+  /** The instruction that produced this candidate via the Edit button, if any. */
+  editPrompt?: string;
+  /** The runNumber of the source candidate this one was edited from, if any. */
+  editedFromRun?: number;
 }
 
 /**
@@ -287,6 +291,12 @@ export interface PendingGeneration {
   resolution: Resolution;
   prompt: string;
   referenceImage?: GcsFile;
+  /** Carried through from the source candidate for an edit run. */
+  trim?: {start?: number; end?: number};
+  /** The instruction being applied, for an edit run. */
+  editPrompt?: string;
+  /** The runNumber of the source candidate, for an edit run. */
+  editedFromRun?: number;
 }
 
 /**
@@ -544,6 +554,43 @@ export class ConfigService {
       )
       .map(([id]) => id)
       .sort();
+  });
+
+  /**
+   * Video models that can run edit_video at the configured Veo location.
+   * Same shape as videoModels, filtered on the edit_video action instead.
+   */
+  readonly videoEditModels = computed(() => {
+    const config = this.globalConfig.value();
+    const catalog = config?.modelCatalog;
+    const location = config?.veoLocation;
+    if (!catalog || !location) {
+      return [];
+    }
+    return Object.entries(catalog.models)
+      .filter(
+        ([, model]) =>
+          model.actions.includes('edit_video') &&
+          model.locations.includes(location),
+      )
+      .map(([id]) => id)
+      .sort();
+  });
+
+  /** Whether the Edit button should be offered: some model can edit at this location. */
+  readonly canEditCandidates = computed(
+    () => this.videoEditModels().length > 0,
+  );
+
+  /**
+   * True when the project's current model always generates audio (per the
+   * catalog's capabilities.audio_always_on), so the audio toggle should show
+   * on and disabled instead of following projectConfig.generateAudio.
+   */
+  readonly audioLocked = computed(() => {
+    const catalog = this.globalConfig.value()?.modelCatalog;
+    const model = this.projectConfig.value().model;
+    return catalog?.models[model]?.capabilities?.['audio_always_on'] === true;
   });
 
   /**

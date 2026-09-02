@@ -104,6 +104,17 @@ export interface VideoGenerationWorkflowParameters extends CommonWorkflowParamet
 }
 
 /**
+ * Parameters for the edit_video workflow: takes a source candidate's video
+ * and a text prompt, run through the catalog's edit-capable model.
+ */
+export interface VideoEditWorkflowParameters extends CommonWorkflowParameters {
+  model: string;
+  location: string;
+  videoPath: string;
+  promptPath: string;
+}
+
+/**
  * Parameters for combining scenes workflow.
  */
 export interface CombineScenesWorkflowParameters extends CommonWorkflowParameters {
