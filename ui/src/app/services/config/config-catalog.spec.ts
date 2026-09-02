@@ -155,18 +155,28 @@ describe('ConfigService model catalog', () => {
       liveGlobalConfig({veoLocation: 'us-central1'}),
     );
 
-    expect(service.videoModels()).toEqual(['veo-central-only', 'veo-default']);
+    // 'veo-fast' is global-only in this catalog but the resolver's global
+    // fallback applies to every model uniformly, so it stays visible even at
+    // a location it does not itself list.
+    expect(service.videoModels()).toEqual([
+      'veo-central-only',
+      'veo-default',
+      'veo-fast',
+    ]);
   });
 
-  it('is empty while the catalog or location is missing', async () => {
+  it('is empty while the catalog is missing', async () => {
     await settle();
     (service as any).globalConfig.set(undefined);
     expect(service.videoModels()).toEqual([]);
+  });
 
+  it('lists global-capable models when veoLocation is missing but the catalog is present', async () => {
+    await settle();
     (service as any).globalConfig.set(
       liveGlobalConfig({veoLocation: undefined}),
     );
-    expect(service.videoModels()).toEqual([]);
+    expect(service.videoModels()).toEqual(['veo-default', 'veo-fast']);
   });
 
   it('switches an out-of-catalog project model to the veo default and says so', async () => {
@@ -354,7 +364,7 @@ describe('ConfigService model catalog', () => {
     expect(service.canEditCandidates()).toBe(true);
   });
 
-  it('is empty and non-editable at a location the edit model does not list', async () => {
+  it('includes the edit model via the global fallback at a location it does not list', async () => {
     await settle();
     (service as any).globalConfig.set(
       liveGlobalConfig({
@@ -363,8 +373,94 @@ describe('ConfigService model catalog', () => {
       }),
     );
 
-    expect(service.videoEditModels()).toEqual([]);
-    expect(service.canEditCandidates()).toBe(false);
+    expect(service.videoEditModels()).toEqual(['omni-1']);
+    expect(service.canEditCandidates()).toBe(true);
+  });
+
+  it('shows both a regional Veo model and a global-only Omni model at a regional deployment', async () => {
+    await settle();
+    (service as any).globalConfig.set(
+      liveGlobalConfig({
+        veoLocation: 'us-central1',
+        modelCatalog: CATALOG_WITH_OMNI,
+      }),
+    );
+
+    expect(service.videoModels()).toContain('veo-central-only');
+    expect(service.videoModels()).toContain('omni-1');
+    expect(service.videoEditModels()).toContain('omni-1');
+  });
+
+  it('excludes a model whose locations list neither the configured region nor global', async () => {
+    await settle();
+    (service as any).globalConfig.set(
+      liveGlobalConfig({
+        veoLocation: 'us-central1',
+        modelCatalog: {
+          ...CATALOG_WITH_OMNI,
+          models: {
+            ...CATALOG_WITH_OMNI.models,
+            'region-only': {
+              family: 'veo',
+              actions: ['generate_video', 'edit_video'],
+              locations: ['us-east1'],
+            },
+          },
+        },
+      }),
+    );
+
+    expect(service.videoModels()).not.toContain('region-only');
+    expect(service.videoEditModels()).not.toContain('region-only');
+  });
+
+  describe('resolveVideoLocation', () => {
+    it('returns the configured Veo location when the model supports it', async () => {
+      await settle();
+      (service as any).globalConfig.set(
+        liveGlobalConfig({veoLocation: 'us-central1', modelCatalog: CATALOG}),
+      );
+      expect(service.resolveVideoLocation('veo-default')).toBe('us-central1');
+    });
+
+    it('falls back to global when the model does not support the configured location', async () => {
+      await settle();
+      (service as any).globalConfig.set(
+        liveGlobalConfig({
+          veoLocation: 'us-central1',
+          modelCatalog: CATALOG_WITH_OMNI,
+        }),
+      );
+      expect(service.resolveVideoLocation('omni-1')).toBe('global');
+    });
+
+    it('returns undefined for a model unusable at this deployment', async () => {
+      await settle();
+      (service as any).globalConfig.set(
+        liveGlobalConfig({
+          veoLocation: 'us-central1',
+          modelCatalog: {
+            ...CATALOG,
+            models: {
+              ...CATALOG.models,
+              'region-only': {
+                family: 'veo',
+                actions: ['generate_video'],
+                locations: ['us-east1'],
+              },
+            },
+          },
+        }),
+      );
+      expect(service.resolveVideoLocation('region-only')).toBeUndefined();
+    });
+
+    it('returns undefined for an unknown model', async () => {
+      await settle();
+      (service as any).globalConfig.set(liveGlobalConfig());
+      expect(service.resolveVideoLocation('not-in-catalog')).toBeUndefined();
+      expect(service.resolveVideoLocation(undefined)).toBeUndefined();
+    });
   });
 
   it('locks audio on when the project model always generates audio', async () => {
@@ -402,11 +498,21 @@ describe('ConfigService model catalog', () => {
     (service as any).globalConfig.set(
       liveGlobalConfig({
         veoLocation: 'us-central1',
-        // At us-central1 the compatible set is veo-central-only and
-        // veo-default; point the default at an incompatible model.
+        // At us-central1 the compatible set (direct match or global
+        // fallback) is veo-central-only, veo-default and veo-fast; point
+        // the default at a model that lists neither, so it stays
+        // incompatible even with the global fallback.
         modelCatalog: {
           ...CATALOG,
-          defaults: {veo: 'veo-fast'},
+          defaults: {veo: 'veo-region-only-default'},
+          models: {
+            ...CATALOG.models,
+            'veo-region-only-default': {
+              family: 'veo',
+              actions: ['generate_video'],
+              locations: ['us-east1'],
+            },
+          },
         },
       }),
     );

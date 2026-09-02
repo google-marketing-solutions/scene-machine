@@ -535,43 +535,42 @@ export class ConfigService {
   private persistedProjectIds = new Set<string>();
 
   /**
-   * Video models compatible with the configured Veo location.
+   * Video models usable at this deployment: those for which
+   * resolveVideoLocation finds a location (the configured Veo location, or
+   * global as the fallback).
    * Matches the backend model/location validator. Sorted: Firestore returns
    * map keys sorted, the shipped fallback keeps file order.
    */
   readonly videoModels = computed(() => {
-    const config = this.globalConfig.value();
-    const catalog = config?.modelCatalog;
-    const location = config?.veoLocation;
-    if (!catalog || !location) {
+    const catalog = this.globalConfig.value()?.modelCatalog;
+    if (!catalog) {
       return [];
     }
     return Object.entries(catalog.models)
       .filter(
-        ([, model]) =>
+        ([id, model]) =>
           model.actions.includes('generate_video') &&
-          model.locations.includes(location),
+          this.resolveVideoLocation(id) !== undefined,
       )
       .map(([id]) => id)
       .sort();
   });
 
   /**
-   * Video models that can run edit_video at the configured Veo location.
+   * Video models that can run edit_video at a location resolveVideoLocation
+   * finds (the configured Veo location, or global as the fallback).
    * Same shape as videoModels, filtered on the edit_video action instead.
    */
   readonly videoEditModels = computed(() => {
-    const config = this.globalConfig.value();
-    const catalog = config?.modelCatalog;
-    const location = config?.veoLocation;
-    if (!catalog || !location) {
+    const catalog = this.globalConfig.value()?.modelCatalog;
+    if (!catalog) {
       return [];
     }
     return Object.entries(catalog.models)
       .filter(
-        ([, model]) =>
+        ([id, model]) =>
           model.actions.includes('edit_video') &&
-          model.locations.includes(location),
+          this.resolveVideoLocation(id) !== undefined,
       )
       .map(([id]) => id)
       .sort();
@@ -581,6 +580,25 @@ export class ConfigService {
   readonly canEditCandidates = computed(
     () => this.videoEditModels().length > 0,
   );
+
+  /**
+   * The gcp_location to use for `model`'s video actions: the configured Veo
+   * location when the model supports it, else 'global' when the model
+   * supports that, else undefined (model unusable at this deployment). One
+   * generic resolver for every model family.
+   */
+  resolveVideoLocation(model: string | undefined): string | undefined {
+    const catalog = this.globalConfig.value()?.modelCatalog;
+    const entry = model ? catalog?.models[model] : undefined;
+    if (!entry) {
+      return undefined;
+    }
+    const veoLocation = this.globalConfig.value()?.veoLocation;
+    if (veoLocation && entry.locations.includes(veoLocation)) {
+      return veoLocation;
+    }
+    return entry.locations.includes('global') ? 'global' : undefined;
+  }
 
   /**
    * True when the project's current model always generates audio (per the

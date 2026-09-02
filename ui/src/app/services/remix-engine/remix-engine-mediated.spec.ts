@@ -141,6 +141,7 @@ describe('RemixEngineService (mediated)', () => {
       videoEditModels: vi.fn().mockReturnValue([]),
       canEditCandidates: vi.fn().mockReturnValue(false),
       audioLocked: vi.fn().mockReturnValue(false),
+      resolveVideoLocation: vi.fn().mockReturnValue('mock-veo-loc'),
     };
 
     clientMediaServiceMock = {
@@ -681,6 +682,46 @@ describe('RemixEngineService (mediated)', () => {
           prompt: [{file: 'remix-input/edit-prompt-abc123.txt'}],
         },
       });
+    });
+
+    it('posts the global fallback location when the edit model does not list the configured Veo location', async () => {
+      const {mockScene} = mockSceneWithCandidate();
+      const globalOnlyEditCatalog = {
+        ...editCatalog,
+        models: {
+          ...editCatalog.models,
+          'omni-1': {...editCatalog.models['omni-1'], locations: ['global']},
+        },
+      };
+      configServiceMock.videoEditModels.mockReturnValue(['omni-1']);
+      configServiceMock.canEditCandidates.mockReturnValue(true);
+      globalConfigSignal.set({
+        ...globalConfigSignal(),
+        modelCatalog: globalOnlyEditCatalog,
+      });
+      configServiceMock.resolveVideoLocation.mockReturnValue('global');
+      vi.spyOn(service, 'uploadText').mockResolvedValue(
+        'remix-input/edit-prompt-abc123.txt',
+      );
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockReturnValue(new Promise(() => {}));
+
+      void service.editCandidate(mockScene as any, 0, 'make the sky purple');
+      await settle();
+
+      expect(httpClientMock.post).toHaveBeenCalledWith(
+        '/api/supplyNode',
+        expect.objectContaining({
+          workflowDefinition: expect.objectContaining({
+            n_0: expect.objectContaining({
+              parameters: expect.objectContaining({gcp_location: 'global'}),
+            }),
+          }),
+        }),
+      );
+      expect(configServiceMock.resolveVideoLocation).toHaveBeenCalledWith(
+        'omni-1',
+      );
     });
 
     it.each([['1080p'], ['4k']] as const)(
@@ -1825,6 +1866,93 @@ describe('RemixEngineService (mediated)', () => {
         configServiceMock.updateProjectConfig.mock.calls[0][0].storyboard[0];
       expect(pendingScene.pendingGeneration).toEqual(
         expect.objectContaining({generateAudio: true}),
+      );
+    });
+  });
+
+  describe('video location resolution in generation', () => {
+    function mockSceneAndProject(model: string) {
+      const mockScene = {
+        id: 'scene-1',
+        type: 'generated',
+        prompt: 'prompt 1',
+        candidates: [],
+      };
+      const mockProject = {
+        id: 'project-1',
+        numberOfCandidates: 2,
+        model,
+        storyboard: [mockScene],
+      };
+      projectConfigSignal.set(mockProject);
+      return mockScene;
+    }
+
+    it('posts the resolved location for a regional Veo model', async () => {
+      globalConfigSignal.set({
+        ...globalConfigSignal(),
+        veoLocation: 'us-central1',
+      });
+      configServiceMock.resolveVideoLocation.mockReturnValue('us-central1');
+      const mockScene = mockSceneAndProject('veo-default');
+      setupHappyMedia();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/video-prompt.txt');
+      httpClientMock.post.mockReturnValue(
+        of({executionId: 'mock-execution-id'}),
+      );
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/v1.mp4'}]}}},
+      } as any);
+
+      await service.generateCandidates(mockScene as any, generationParams);
+
+      expect(httpClientMock.post).toHaveBeenCalledWith(
+        '/api/supplyNode',
+        expect.objectContaining({
+          workflowDefinition: expect.objectContaining({
+            n_0: expect.objectContaining({
+              parameters: expect.objectContaining({
+                gcp_location: 'us-central1',
+              }),
+            }),
+          }),
+        }),
+      );
+      expect(configServiceMock.resolveVideoLocation).toHaveBeenCalledWith(
+        'veo-default',
+      );
+    });
+
+    it('posts the global fallback for a global-only Omni model at a regional deployment', async () => {
+      globalConfigSignal.set({
+        ...globalConfigSignal(),
+        veoLocation: 'us-central1',
+      });
+      configServiceMock.resolveVideoLocation.mockReturnValue('global');
+      const mockScene = mockSceneAndProject('omni-1');
+      setupHappyMedia();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/video-prompt.txt');
+      httpClientMock.post.mockReturnValue(
+        of({executionId: 'mock-execution-id'}),
+      );
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/v1.mp4'}]}}},
+      } as any);
+
+      await service.generateCandidates(mockScene as any, generationParams);
+
+      expect(httpClientMock.post).toHaveBeenCalledWith(
+        '/api/supplyNode',
+        expect.objectContaining({
+          workflowDefinition: expect.objectContaining({
+            n_0: expect.objectContaining({
+              parameters: expect.objectContaining({gcp_location: 'global'}),
+            }),
+          }),
+        }),
+      );
+      expect(configServiceMock.resolveVideoLocation).toHaveBeenCalledWith(
+        'omni-1',
       );
     });
   });

@@ -336,7 +336,9 @@ export class RemixEngineService {
           generateAudio:
             this.configService.audioLocked() || projectConfig.generateAudio,
           veoModel: projectConfig.model,
-          veoLocation: globalConfig!.veoLocation,
+          veoLocation: this.configService.resolveVideoLocation(
+            projectConfig.model,
+          )!,
           aspectRatio: projectConfig!.aspectRatio,
           productImagePath: scene.referenceImage?.path,
           promptPath,
@@ -1045,7 +1047,7 @@ export class RemixEngineService {
           forceExecution: false,
           tasksQueuePrefix: globalConfig.tasksQueuePrefix,
           model,
-          location: globalConfig.veoLocation,
+          location: this.configService.resolveVideoLocation(model)!,
           videoPath: source.video.path,
           promptPath,
           resolution: source.resolution,
