@@ -667,6 +667,7 @@ export class RemixEngineService {
           parameters: {
             model: params.model,
             gcp_location: params.location,
+            resolution: params.resolution,
           },
         },
         sink: {
@@ -993,7 +994,7 @@ export class RemixEngineService {
     candidateIndex: number,
     editPrompt: string,
   ): Promise<void> {
-    const source = scene.candidates?.[candidateIndex];
+    const source = structuredClone(scene.candidates?.[candidateIndex]);
     const model = this.selectEditModel();
     if (!model) {
       this.matSnackBar.open(
@@ -1031,6 +1032,10 @@ export class RemixEngineService {
     try {
       const workflowId = crypto.randomUUID();
       const promptPath = await this.uploadText(editPrompt, 'edit-prompt');
+      // Nothing is paid yet: bail like a navigation if the project changed
+      // during the upload rather than posting into whatever project is now
+      // loaded.
+      this.assertProjectUnchanged(projectId);
       const response = this.startWorkflow(
         this.getVideoEditWorkflowDefinition({
           workflowId,
@@ -1043,9 +1048,25 @@ export class RemixEngineService {
           location: globalConfig.veoLocation,
           videoPath: source.video.path,
           promptPath,
+          resolution: source.resolution,
         }),
       );
       executionId = (await firstValueFrom(response)).executionId;
+      if (!this.projectMatches(projectId)) {
+        // The run is paid for and already started, but the project changed
+        // before the marker could be written. Do not write it (or anything
+        // else) into whatever project is now loaded, and do not poll: that
+        // would leak this run's result into the wrong project. Log the
+        // orphaned run with the captured ids (not sceneLabel(), which would
+        // read the newly loaded project) so it can be found. `finally` still
+        // clears the spinner.
+        console.error('Orphaned video edit run (project changed):', {
+          sceneId: scene.id,
+          projectId,
+          executionId,
+        });
+        return;
+      }
       console.debug(
         `${this.sceneLabel(scene.id)} — video edit workflow started:`,
         `${window.location.origin}/status?executionId=${executionId}`,
@@ -1160,6 +1181,19 @@ export class RemixEngineService {
         );
         return;
       } else if (error instanceof Error) {
+        if (!this.projectMatches(projectId)) {
+          // The project changed under us; the error belongs to the run
+          // started against `projectId`, not whatever project is loaded
+          // now. Writing it there would corrupt an unrelated scene, so log
+          // the orphaned run with the captured ids instead.
+          console.error('Orphaned video edit run (project changed):', {
+            sceneId: scene.id,
+            projectId,
+            executionId,
+            error,
+          });
+          return;
+        }
         this.setSceneGenerationError(scene.id, error.message);
         console.error('Video edit error:', {executionId, error});
         console.error(
@@ -1829,9 +1863,14 @@ export class RemixEngineService {
    * original project re-collects the finished result. (E5)
    */
   private assertProjectUnchanged(projectId: string) {
-    if (this.configService.projectConfig.value().id !== projectId) {
+    if (!this.projectMatches(projectId)) {
       throw new ProjectChangedError();
     }
+  }
+
+  /** Whether the currently loaded project is still `projectId`. */
+  private projectMatches(projectId: string): boolean {
+    return this.configService.projectConfig.value().id === projectId;
   }
 
   /**
