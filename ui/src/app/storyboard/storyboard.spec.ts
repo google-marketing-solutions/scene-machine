@@ -21,6 +21,7 @@ import {signal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {MatDialog} from '@angular/material/dialog';
 import {MatSelectHarness} from '@angular/material/select/testing';
+import {MatSlideToggle} from '@angular/material/slide-toggle';
 import {MatSlider} from '@angular/material/slider';
 import {By} from '@angular/platform-browser';
 import {of} from 'rxjs';
@@ -218,6 +219,47 @@ describe('Storyboard', () => {
     expect(durationSlider.min).toBe(3);
     expect(durationSlider.max).toBe(10);
     expect(durationSlider.step).toBe(1);
+  });
+
+  it('shows the audio toggle checked and disabled when the model always generates audio', async () => {
+    mockConfigService.audioLocked = () => true;
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [
+        {id: '1', type: 'generated', name: 'Scene 1', prompt: 'test'},
+      ],
+    }));
+    component.selectScene('1');
+    fixture.detectChanges();
+    // NgModel writes to its ControlValueAccessor (MatSlideToggle.checked) in
+    // a microtask, so let that settle before reading it back.
+    await fixture.whenStable();
+
+    const toggle = fixture.debugElement.query(By.directive(MatSlideToggle))
+      .componentInstance as MatSlideToggle;
+
+    expect(toggle.checked).toBe(true);
+    expect(toggle.disabled).toBe(true);
+  });
+
+  it('leaves the audio toggle enabled and following generateAudio when the model does not always generate audio', async () => {
+    mockConfigService.audioLocked = () => false;
+    projectConfigSignal.update(config => ({
+      ...config,
+      generateAudio: true,
+      storyboard: [
+        {id: '1', type: 'generated', name: 'Scene 1', prompt: 'test'},
+      ],
+    }));
+    component.selectScene('1');
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const toggle = fixture.debugElement.query(By.directive(MatSlideToggle))
+      .componentInstance as MatSlideToggle;
+
+    expect(toggle.checked).toBe(true);
+    expect(toggle.disabled).toBe(false);
   });
 
   it('calls selectVideoModel when a model is chosen for the selected scene', async () => {

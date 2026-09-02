@@ -19,6 +19,7 @@ import {TestbedHarnessEnvironment} from '@angular/cdk/testing/testbed';
 import {signal, type WritableSignal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {MatSelectHarness} from '@angular/material/select/testing';
+import {MatSlideToggle} from '@angular/material/slide-toggle';
 import {MatSlider} from '@angular/material/slider';
 import {MatSnackBar} from '@angular/material/snack-bar';
 import {By} from '@angular/platform-browser';
@@ -524,5 +525,32 @@ describe('Setup video controls', () => {
     expect(
       toggles[0].query(By.css('mat-icon')).nativeElement.textContent.trim(),
     ).toBe('crop_portrait');
+  });
+
+  it('shows the audio toggle checked and disabled when the model always generates audio', async () => {
+    configMock.audioLocked = () => true;
+    fixture.detectChanges();
+    // NgModel writes to its ControlValueAccessor (MatSlideToggle.checked) in
+    // a microtask, so let that settle before reading it back.
+    await fixture.whenStable();
+
+    const toggle = fixture.debugElement.query(By.directive(MatSlideToggle))
+      .componentInstance as MatSlideToggle;
+
+    expect(toggle.checked).toBe(true);
+    expect(toggle.disabled).toBe(true);
+  });
+
+  it('leaves the audio toggle enabled and following generateAudio when the model does not always generate audio', async () => {
+    configMock.audioLocked = () => false;
+    projectConfigSignal.update(c => ({...c, generateAudio: true}));
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const toggle = fixture.debugElement.query(By.directive(MatSlideToggle))
+      .componentInstance as MatSlideToggle;
+
+    expect(toggle.checked).toBe(true);
+    expect(toggle.disabled).toBe(false);
   });
 });
