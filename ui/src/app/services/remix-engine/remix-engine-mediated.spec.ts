@@ -19,7 +19,7 @@ import {HttpClient} from '@angular/common/http';
 import {signal, type WritableSignal} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import {MatSnackBar} from '@angular/material/snack-bar';
-import {of} from 'rxjs';
+import {from, of} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ClientMediaService} from '../client-media/client-media';
 import {ConfigService} from '../config/config';
@@ -656,7 +656,11 @@ describe('RemixEngineService (mediated)', () => {
               video: {node: 'root', output: 'video'},
               prompt: {node: 'root', output: 'prompt'},
             },
-            parameters: {model: 'omni-1', gcp_location: 'mock-veo-loc'},
+            parameters: {
+              model: 'omni-1',
+              gcp_location: 'mock-veo-loc',
+              resolution: '720p',
+            },
           },
           sink: {
             action: 'pass',
@@ -679,6 +683,90 @@ describe('RemixEngineService (mediated)', () => {
       });
     });
 
+    it.each([['1080p'], ['4k']] as const)(
+      'posts the source candidate resolution (%s) in n_0.parameters and on the attached candidate',
+      async resolution => {
+        const {mockScene} = mockSceneWithCandidate({resolution});
+        enableEditing();
+        setupHappyMedia();
+        vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+        httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+        vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+          sink: {output: {'0': {video: [{file: 'p/edited.mp4'}]}}},
+        } as any);
+
+        await service.editCandidate(mockScene as any, 0, 'make the sky purple');
+
+        const [, body] = httpClientMock.post.mock.calls[0];
+        expect((body as any).workflowDefinition.n_0.parameters.resolution).toBe(
+          resolution,
+        );
+        const finalScene = lastUpdatedScene();
+        expect(finalScene.candidates[1]).toEqual(
+          expect.objectContaining({resolution}),
+        );
+      },
+    );
+
+    it('posts no resolution when the source candidate has none', async () => {
+      const {mockScene, sourceCandidate} = mockSceneWithCandidate();
+      delete sourceCandidate.resolution;
+      enableEditing();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockReturnValue(new Promise(() => {}));
+
+      void service.editCandidate(mockScene as any, 0, 'make the sky purple');
+      await settle();
+
+      const [, body] = httpClientMock.post.mock.calls[0];
+      const parameters = (body as any).workflowDefinition.n_0.parameters;
+      expect(parameters.resolution).toBeUndefined();
+      // The key is dropped once serialised to JSON, so an older backend
+      // (or a candidate with no resolution) never sees the field at all.
+      expect(JSON.parse(JSON.stringify(parameters))).not.toHaveProperty(
+        'resolution',
+      );
+    });
+
+    it('keeps the trim the edit was started with when the storyboard mutates the live candidate mid-run', async () => {
+      // storyboard.ts mutates candidate.trim in place while an edit is
+      // running; the attached edited candidate must carry the trim from the
+      // moment the run was submitted, not whatever trim the storyboard has
+      // moved on to by completion.
+      const {mockScene, sourceCandidate} = mockSceneWithCandidate({
+        trim: {start: 1, end: 4},
+      });
+      enableEditing();
+      setupHappyMedia();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      let resolvePoll!: (value: any) => void;
+      vi.spyOn(service, 'pollWorkflow').mockReturnValue(
+        new Promise(resolve => (resolvePoll = resolve)),
+      );
+
+      const editPromise = service.editCandidate(
+        mockScene as any,
+        0,
+        'make the sky purple',
+      );
+      await settle(); // reach the poll await; the source has been captured
+
+      // The storyboard mutates the live candidate's trim while the edit runs.
+      sourceCandidate.trim.end = 9;
+
+      resolvePoll({
+        sink: {output: {'0': {video: [{file: 'p/edited.mp4'}]}}},
+      });
+      await editPromise;
+
+      const finalScene = lastUpdatedScene();
+      expect(finalScene.candidates[1]).toEqual(
+        expect.objectContaining({trim: {start: 1, end: 4}}),
+      );
+    });
+
     it('chooses the edit model from the catalog default, never the project model', async () => {
       const {mockScene} = mockSceneWithCandidate();
       enableEditing();
@@ -696,7 +784,11 @@ describe('RemixEngineService (mediated)', () => {
         expect.objectContaining({
           workflowDefinition: expect.objectContaining({
             n_0: expect.objectContaining({
-              parameters: {model: 'omni-1', gcp_location: 'mock-veo-loc'},
+              parameters: {
+                model: 'omni-1',
+                gcp_location: 'mock-veo-loc',
+                resolution: '720p',
+              },
             }),
           }),
         }),
@@ -724,6 +816,7 @@ describe('RemixEngineService (mediated)', () => {
       expect((body as any).workflowDefinition.n_0.parameters).toEqual({
         model: 'omni-1',
         gcp_location: 'mock-veo-loc',
+        resolution: '720p',
       });
     });
 
@@ -746,6 +839,7 @@ describe('RemixEngineService (mediated)', () => {
       expect((body as any).workflowDefinition.n_0.parameters).toEqual({
         model: 'a-model',
         gcp_location: 'mock-veo-loc',
+        resolution: '720p',
       });
     });
 
@@ -956,6 +1050,133 @@ describe('RemixEngineService (mediated)', () => {
         'Dismiss',
         {panelClass: ['error-snackbar']},
       );
+    });
+
+    describe('project guards (never write into the wrong project)', () => {
+      it('does not post the workflow when the project changes while the prompt is uploading, and leaves project B untouched', async () => {
+        const {mockScene} = mockSceneWithCandidate();
+        enableEditing();
+        let resolveUpload!: (path: string) => void;
+        vi.spyOn(service, 'uploadText').mockReturnValue(
+          new Promise<string>(resolve => (resolveUpload = resolve)),
+        );
+
+        const editPromise = service.editCandidate(
+          mockScene as any,
+          0,
+          'make the sky purple',
+        );
+        await settle(); // reach the upload await
+
+        // User leaves project-1 for another project before the upload
+        // finishes.
+        projectConfigSignal.set({id: 'project-B', storyboard: []});
+        resolveUpload('p/edit-prompt.txt');
+        await editPromise;
+
+        // Nothing is paid yet: the workflow is never posted, and nothing was
+        // written into the now-loaded project-B.
+        expect(httpClientMock.post).not.toHaveBeenCalled();
+        expect(configServiceMock.updateProjectConfig).not.toHaveBeenCalled();
+      });
+
+      it('does not write an error into project B when the project changes while the prompt is uploading and the upload rejects', async () => {
+        const {mockScene} = mockSceneWithCandidate();
+        enableEditing();
+        // The orphaned-run log is expected; spy to keep it out of the test
+        // output.
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        let rejectUpload!: (err: Error) => void;
+        vi.spyOn(service, 'uploadText').mockReturnValue(
+          new Promise<string>((_, reject) => (rejectUpload = reject)),
+        );
+
+        const editPromise = service.editCandidate(
+          mockScene as any,
+          0,
+          'make the sky purple',
+        );
+        await settle();
+
+        projectConfigSignal.set({id: 'project-B', storyboard: []});
+        rejectUpload(new Error('upload failed'));
+        await editPromise;
+
+        // The failure must not be stamped onto whatever project is loaded
+        // now (project-B), and no failure snackbar is shown for it.
+        expect(configServiceMock.updateProjectConfig).not.toHaveBeenCalled();
+        expect(matSnackBarMock.open).not.toHaveBeenCalled();
+      });
+
+      it('does not write the pending marker or poll when the project changes while the workflow POST is pending', async () => {
+        const {mockScene} = mockSceneWithCandidate();
+        enableEditing();
+        vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+        let resolvePost!: (value: {executionId: string}) => void;
+        httpClientMock.post.mockReturnValue(
+          from(
+            new Promise<{executionId: string}>(
+              resolve => (resolvePost = resolve),
+            ),
+          ),
+        );
+        const pollSpy = vi.spyOn(service, 'pollWorkflow');
+
+        const editPromise = service.editCandidate(
+          mockScene as any,
+          0,
+          'make the sky purple',
+        );
+        await settle(); // reach the POST await
+
+        // User leaves project-1 for another project before the POST
+        // resolves.
+        projectConfigSignal.set({id: 'project-B', storyboard: []});
+        resolvePost({executionId: 'edit-exec-id'});
+        await editPromise;
+
+        // The run is paid for and started, but the marker is never written
+        // and it is never polled: it would otherwise leak into project-B.
+        expect(pollSpy).not.toHaveBeenCalled();
+        expect(configServiceMock.updateProjectConfig).not.toHaveBeenCalled();
+      });
+
+      it('logs the orphaned run instead of writing an error into project B when the poll rejects with a generic error after the project changed', async () => {
+        const {mockScene} = mockSceneWithCandidate();
+        enableEditing();
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+        httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+        let rejectPoll!: (err: Error) => void;
+        vi.spyOn(service, 'pollWorkflow').mockReturnValue(
+          new Promise((_, reject) => (rejectPoll = reject)),
+        );
+
+        const editPromise = service.editCandidate(
+          mockScene as any,
+          0,
+          'make the sky purple',
+        );
+        await settle(); // the marker is persisted into project-1, now polling
+
+        projectConfigSignal.set({id: 'project-B', storyboard: []});
+        rejectPoll(new Error('poll failed'));
+        await editPromise;
+
+        // Only the original in-flight marker (written into project-1 before
+        // the switch) was ever persisted: the failure is not written into
+        // project-B, and no failure snackbar is shown for it.
+        expect(configServiceMock.updateProjectConfig).toHaveBeenCalledTimes(1);
+        expect(matSnackBarMock.open).not.toHaveBeenCalled();
+        expect(errSpy).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            sceneId: 'scene-1',
+            projectId: 'project-1',
+            executionId: 'edit-exec-id',
+          }),
+        );
+      });
     });
   });
 

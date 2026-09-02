@@ -112,6 +112,8 @@ export interface VideoEditWorkflowParameters extends CommonWorkflowParameters {
   location: string;
   videoPath: string;
   promptPath: string;
+  // Optional because candidates saved by older versions may lack it.
+  resolution?: Resolution;
 }
 
 /**
