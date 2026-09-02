@@ -123,7 +123,16 @@ def test_location_params_name_real_actions_json_params():
 def test_models_for_action():
   assert set(models_for_action('generate_video')) == {
       'veo-3.1-generate-001', 'veo-3.1-fast-generate-001',
-      'veo-3.1-lite-generate-001'}
+      'veo-3.1-lite-generate-001', 'gemini-omni-1.1-flash-preview'}
+
+
+def test_omni_models_are_global_only():
+  # Omni runs only on the global endpoint; a regional pair is rejected by
+  # Vertex, so the catalog must never offer one.
+  for mid, m in _MODELS['models'].items():
+    if m['family'] == 'omni':
+      assert m['locations'] == ['global'], (
+          f'{mid} is family omni; locations must be [\'global\'], got {m["locations"]}')
   assert 'gemini-3-pro-image' in models_for_action('generate_image')
 
 

@@ -138,6 +138,8 @@ The model catalog — which models exist, their locations and capabilities, and 
 - **The worker does not see live edits.** Capability flags read at execution time (for example `supports_audio`) come from the shipped file until the next deploy. Live edits change which submissions are accepted immediately; they change execution behavior only after a deploy. (Exception: local dev runs everything in one `ROLE=app` process, so in-process actions there read the live doc.)
 - Consider enabling Firestore point-in-time recovery on the UI database as a general safety net for console edits.
 
+**Gemini Omni**: generates one clip per call and always with sound, 3 to 10 seconds long, `global` location only (the dropdown shows it only while `VEO_REGION` is `global`), about $0.10 per output second, generated through `actions_lib/omni.py` via the Interactions API, and the `family` field of the catalog decides which transport `actions/generate_video.py` uses. The edit_video action sends an existing clip plus a prompt back to Omni and stores the edited clip; only models whose catalog entry lists edit_video can run it. In the app, the Edit button on a candidate runs edit_video with the candidate's clip and a prompt; it is shown only when the catalog lists a model with edit_video at the configured video location.
+
 ## Creating Applications
 
 [< Local Development](#local-development-and-faster-deploys) • [Top](#developing-top) • [Modules not used by Scene Machine >](#modules-not-used-by-scene-machine)

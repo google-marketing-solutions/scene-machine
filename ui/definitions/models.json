@@ -10,7 +10,8 @@
     "generate_storyboard":   { "location_param": "gemini_model_location", "default_key": "geminiModel" },
     "outpaint_image":        { "location_param": "image_model_location",  "default_key": "imageModel" },
     "generate_image":        { "location_param": "image_model_location",  "default_key": "imageModel" },
-    "generate_video":        { "location_param": "gcp_location",          "default_key": "veoModel" }
+    "generate_video":        { "location_param": "gcp_location",          "default_key": "veoModel" },
+    "edit_video":            { "location_param": "gcp_location",          "default_key": "veoModel" }
   },
   "models": {
     "gemini-3.5-flash": {
@@ -73,6 +74,22 @@
         "allowed_resolutions": ["720p", "1080p"],
         "duration_by_resolution": {"720p": [4, 6, 8], "1080p": [4, 6, 8]},
         "supports_last_frame": true,
+        "supports_reference_images": false
+      }
+    },
+    "gemini-omni-1.1-flash-preview": {
+      "family": "omni",
+      "actions": ["generate_video", "edit_video"],
+      "locations": ["global"],
+      "capabilities": {
+        "supports_audio": true,
+        "audio_always_on": true,
+        "enhance_prompt_locked": true,
+        "max_videos_per_request": 1,
+        "allowed_aspect_ratios": ["16:9", "9:16"],
+        "allowed_resolutions": ["360p", "720p", "1080p", "4k"],
+        "duration_by_resolution": {"360p": [3, 4, 5, 6, 7, 8, 9, 10], "720p": [3, 4, 5, 6, 7, 8, 9, 10], "1080p": [3, 4, 5, 6, 7, 8, 9, 10], "4k": [3, 4, 5, 6, 7, 8, 9, 10]},
+        "supports_last_frame": false,
         "supports_reference_images": false
       }
     },

@@ -178,6 +178,30 @@
     },
     "tasksClass": "Veo"
   },
+  "edit_video": {
+    "input": {
+      "video": {
+        "type": "video"
+      },
+      "prompt": {
+        "type": "string"
+      }
+    },
+    "parameters": {
+      "model": {
+        "type": "string"
+      },
+      "gcp_location": {
+        "type": "string"
+      }
+    },
+    "output": {
+      "edited_video": {
+        "type": "video"
+      }
+    },
+    "tasksClass": "Veo"
+  },
   "generate_arrangement": {
     "input": {
       "video": {
