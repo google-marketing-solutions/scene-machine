@@ -22,7 +22,7 @@ import {MatSnackBar} from '@angular/material/snack-bar';
 import {Router} from '@angular/router';
 import {of} from 'rxjs';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
-import {ConfigService, ModelCatalog} from './config';
+import {ConfigService, ModelCatalog, ProjectConfig} from './config';
 
 const CATALOG: ModelCatalog = {
   defaults: {veo: 'veo-default', image: 'image-a'},
@@ -525,5 +525,465 @@ describe('ConfigService model catalog', () => {
     TestBed.tick();
 
     expect(service.projectConfig.value().model).toBe('veo-central-only');
+  });
+});
+
+describe('ConfigService video controls', () => {
+  let service: ConfigService;
+  let httpClientMock: any;
+  let matSnackBarMock: any;
+
+  /** Veo capabilities as documented for the catalog (PR spec). */
+  const VEO_CAPABILITIES = {
+    allowed_resolutions: ['720p', '1080p', '4k'],
+    allowed_aspect_ratios: ['16:9', '9:16'],
+    duration_by_resolution: {
+      '720p': [4, 6, 8],
+      '1080p': [4, 6, 8],
+      '4k': [8],
+    },
+  };
+  /** Omni capabilities: wider resolutions, 3-10s at every resolution. */
+  const OMNI_DURATIONS = [3, 4, 5, 6, 7, 8, 9, 10];
+  const OMNI_CAPABILITIES = {
+    audio_always_on: true,
+    allowed_resolutions: ['360p', '720p', '1080p', '4k'],
+    allowed_aspect_ratios: ['16:9', '9:16'],
+    duration_by_resolution: {
+      '360p': OMNI_DURATIONS,
+      '720p': OMNI_DURATIONS,
+      '1080p': OMNI_DURATIONS,
+      '4k': OMNI_DURATIONS,
+    },
+  };
+  const CATALOG_WITH_CAPABILITIES: ModelCatalog = {
+    ...CATALOG_WITH_OMNI,
+    models: {
+      ...CATALOG_WITH_OMNI.models,
+      'veo-default': {
+        ...CATALOG.models['veo-default'],
+        capabilities: VEO_CAPABILITIES,
+      },
+      'omni-1': {
+        ...CATALOG_WITH_OMNI.models['omni-1'],
+        capabilities: OMNI_CAPABILITIES,
+      },
+      // A model with a restricted, single-value allowed_aspect_ratios, used
+      // to exercise the persisted-value-append path for aspect ratio.
+      'veo-9-16-only': {
+        family: 'veo',
+        actions: ['generate_video'],
+        locations: ['global'],
+        capabilities: {allowed_aspect_ratios: ['9:16']},
+      },
+      // A model whose catalog lists an unknown value alongside known ones,
+      // out of KNOWN_RESOLUTIONS/KNOWN_ASPECT_RATIOS order, to pin that the
+      // unknown value is dropped and catalog order (not KNOWN order) wins.
+      'veo-odd-caps': {
+        family: 'veo',
+        actions: ['generate_video'],
+        locations: ['global'],
+        capabilities: {
+          allowed_resolutions: ['8k', '1080p', '720p'],
+          allowed_aspect_ratios: ['1:1', '9:16', '16:9'],
+        },
+      },
+      // A model whose duration_by_resolution list is not already sorted, to
+      // pin that allowedDurations() sorts it rather than passing it through.
+      'veo-unsorted-durations': {
+        family: 'veo',
+        actions: ['generate_video'],
+        locations: ['global'],
+        capabilities: {
+          allowed_resolutions: ['720p'],
+          duration_by_resolution: {'720p': [8, 4, 6]},
+        },
+      },
+      // A model whose allowed_resolutions lists only unknown values, so the
+      // filtered list is empty; used to pin that selectVideoModel leaves the
+      // current resolution untouched rather than writing undefined.
+      'veo-unknown-only': {
+        family: 'veo',
+        actions: ['generate_video'],
+        locations: ['global'],
+        capabilities: {allowed_resolutions: ['8k']},
+      },
+    },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    httpClientMock = {
+      get: vi.fn().mockReturnValue(of({})),
+      post: vi.fn().mockReturnValue(of({id: 'created'})),
+      patch: vi.fn().mockReturnValue(of({})),
+      delete: vi.fn().mockReturnValue(of({})),
+    };
+    matSnackBarMock = {
+      open: vi.fn().mockReturnValue({onAction: () => of()}),
+    };
+    const documentMock = {
+      documentElement: {classList: {add: vi.fn(), remove: vi.fn()}},
+      defaultView: {
+        matchMedia: vi
+          .fn()
+          .mockReturnValue({matches: false, addEventListener: vi.fn()}),
+      },
+      querySelector: vi.fn(),
+    };
+    (globalThis as any).localStorage = {getItem: vi.fn(), setItem: vi.fn()};
+
+    TestBed.configureTestingModule({
+      providers: [
+        ConfigService,
+        {provide: HttpClient, useValue: httpClientMock},
+        {provide: MatSnackBar, useValue: matSnackBarMock},
+        {provide: Router, useValue: {navigate: vi.fn()}},
+        {provide: DOCUMENT, useValue: documentMock},
+      ],
+    });
+    service = TestBed.inject(ConfigService);
+  });
+
+  async function settle() {
+    TestBed.tick();
+    await Promise.resolve();
+    await Promise.resolve();
+    TestBed.tick();
+  }
+
+  /** Sets globalConfig to the capabilities catalog and the project to the given fields. */
+  async function withProject(fields: Partial<ProjectConfig>) {
+    await settle();
+    (service as any).globalConfig.set(
+      liveGlobalConfig({modelCatalog: CATALOG_WITH_CAPABILITIES}),
+    );
+    service.projectConfig.value.set({
+      ...service.projectConfig.value(),
+      id: 'proj-1',
+      ...fields,
+    });
+    TestBed.tick(); // flush the catalog-correction effect
+  }
+
+  describe('allowedResolutions', () => {
+    it("returns the model's allowed_resolutions in catalog order", async () => {
+      await withProject({model: 'veo-default', resolution: '1080p'});
+      expect(service.allowedResolutions()).toEqual(['720p', '1080p', '4k']);
+    });
+
+    it('falls back to 720p/1080p when the model has no allowed_resolutions', async () => {
+      await withProject({model: 'veo-fast', resolution: '720p'});
+      expect(service.allowedResolutions()).toEqual(['720p', '1080p']);
+    });
+
+    it('always includes the persisted resolution, appended if the model no longer offers it', async () => {
+      await withProject({model: 'veo-fast', resolution: '4k'});
+      expect(service.allowedResolutions()).toEqual(['720p', '1080p', '4k']);
+    });
+
+    it('drops values that are not a known Resolution and keeps the catalog order', async () => {
+      await withProject({model: 'veo-odd-caps', resolution: '720p'});
+      expect(service.allowedResolutions()).toEqual(['1080p', '720p']);
+    });
+  });
+
+  describe('allowedAspectRatios', () => {
+    it("returns the model's allowed_aspect_ratios", async () => {
+      await withProject({model: 'omni-1', aspectRatio: '16:9'});
+      expect(service.allowedAspectRatios()).toEqual(['16:9', '9:16']);
+    });
+
+    it('falls back to 16:9/9:16 when the model has no allowed_aspect_ratios', async () => {
+      await withProject({model: 'veo-fast', aspectRatio: '16:9'});
+      expect(service.allowedAspectRatios()).toEqual(['16:9', '9:16']);
+    });
+
+    it('always includes the persisted aspect ratio, appended if the model no longer offers it', async () => {
+      await withProject({model: 'veo-9-16-only', aspectRatio: '16:9'});
+      expect(service.allowedAspectRatios()).toEqual(['9:16', '16:9']);
+    });
+
+    it('drops values that are not a known AspectRatio and keeps the catalog order', async () => {
+      await withProject({model: 'veo-odd-caps', aspectRatio: '9:16'});
+      expect(service.allowedAspectRatios()).toEqual(['9:16', '16:9']);
+    });
+  });
+
+  describe('allowedDurations', () => {
+    it('returns duration_by_resolution for the current resolution, sorted', async () => {
+      await withProject({
+        model: 'veo-default',
+        resolution: '720p',
+        candidateDurationSeconds: 6,
+      });
+      expect(service.allowedDurations()).toEqual([4, 6, 8]);
+    });
+
+    it('is a single value when the resolution only allows one duration', async () => {
+      await withProject({
+        model: 'veo-default',
+        resolution: '4k',
+        candidateDurationSeconds: 8,
+      });
+      expect(service.allowedDurations()).toEqual([8]);
+    });
+
+    it('falls back to 4/6/8 when duration_by_resolution or the resolution key is missing', async () => {
+      await withProject({
+        model: 'veo-fast',
+        resolution: '720p',
+        candidateDurationSeconds: 6,
+      });
+      expect(service.allowedDurations()).toEqual([4, 6, 8]);
+
+      await withProject({
+        model: 'veo-default',
+        resolution: '360p',
+        candidateDurationSeconds: 6,
+      });
+      expect(service.allowedDurations()).toEqual([4, 6, 8]);
+    });
+
+    it('always includes the persisted duration, resorted if appended', async () => {
+      await withProject({
+        model: 'veo-default',
+        resolution: '4k',
+        candidateDurationSeconds: 10,
+      });
+      expect(service.allowedDurations()).toEqual([8, 10]);
+    });
+
+    it('sorts an unsorted duration_by_resolution list ascending', async () => {
+      await withProject({
+        model: 'veo-unsorted-durations',
+        resolution: '720p',
+        candidateDurationSeconds: 6,
+      });
+      expect(service.allowedDurations()).toEqual([4, 6, 8]);
+      expect(service.durationSlider()).toEqual({min: 4, max: 8, step: 2});
+    });
+  });
+
+  describe('durationSlider', () => {
+    it('gives Veo at 720p a step of 2 (the gcd of the gaps)', async () => {
+      await withProject({
+        model: 'veo-default',
+        resolution: '720p',
+        candidateDurationSeconds: 4,
+      });
+      expect(service.durationSlider()).toEqual({min: 4, max: 8, step: 2});
+    });
+
+    it('gives Veo at 4k a single-value slider', async () => {
+      await withProject({
+        model: 'veo-default',
+        resolution: '4k',
+        candidateDurationSeconds: 8,
+      });
+      expect(service.durationSlider()).toEqual({min: 8, max: 8, step: 1});
+    });
+
+    it('gives Omni a 3-10s, 1s-step slider at any resolution', async () => {
+      await withProject({
+        model: 'omni-1',
+        resolution: '1080p',
+        candidateDurationSeconds: 6,
+      });
+      expect(service.durationSlider()).toEqual({min: 3, max: 10, step: 1});
+    });
+
+    it('uses the gcd of unequal gaps once the persisted value is appended', async () => {
+      await withProject({
+        model: 'veo-default',
+        resolution: '720p',
+        candidateDurationSeconds: 7,
+      });
+      expect(service.allowedDurations()).toEqual([4, 6, 7, 8]);
+      expect(service.durationSlider()).toEqual({min: 4, max: 8, step: 1});
+    });
+  });
+
+  describe('selectVideoModel', () => {
+    it('keeps resolution and duration when the new model still allows them', async () => {
+      await withProject({
+        model: 'veo-default',
+        resolution: '1080p',
+        candidateDurationSeconds: 6,
+        aspectRatio: '16:9',
+      });
+
+      service.selectVideoModel('omni-1');
+
+      const project = service.projectConfig.value();
+      expect(project.model).toBe('omni-1');
+      expect(project.resolution).toBe('1080p');
+      expect(project.candidateDurationSeconds).toBe(6);
+    });
+
+    it('snaps resolution and duration to the nearest allowed value when the new model does not offer them', async () => {
+      await withProject({
+        model: 'omni-1',
+        resolution: '360p',
+        candidateDurationSeconds: 9,
+        aspectRatio: '16:9',
+      });
+
+      service.selectVideoModel('veo-default');
+
+      const project = service.projectConfig.value();
+      expect(project.model).toBe('veo-default');
+      expect(project.resolution).toBe('720p');
+      expect(project.candidateDurationSeconds).toBe(8);
+    });
+
+    it('snaps only duration when resolution is still allowed', async () => {
+      await withProject({
+        model: 'omni-1',
+        resolution: '4k',
+        candidateDurationSeconds: 10,
+        aspectRatio: '16:9',
+      });
+
+      service.selectVideoModel('veo-default');
+
+      const project = service.projectConfig.value();
+      expect(project.model).toBe('veo-default');
+      expect(project.resolution).toBe('4k');
+      expect(project.candidateDurationSeconds).toBe(8);
+    });
+
+    it('snaps a tied duration to the shorter allowed value', async () => {
+      await withProject({
+        model: 'omni-1',
+        resolution: '720p',
+        candidateDurationSeconds: 5,
+        aspectRatio: '16:9',
+      });
+
+      service.selectVideoModel('veo-default');
+
+      expect(service.projectConfig.value().resolution).toBe('720p');
+      expect(service.projectConfig.value().candidateDurationSeconds).toBe(4);
+    });
+
+    it('snaps aspect ratio to the first allowed value when the new model does not offer it', async () => {
+      await withProject({
+        model: 'omni-1',
+        resolution: '720p',
+        candidateDurationSeconds: 6,
+        aspectRatio: '16:9',
+      });
+      const updateSpy = vi.spyOn(service, 'updateProjectConfig');
+
+      service.selectVideoModel('veo-9-16-only');
+
+      expect(service.projectConfig.value().aspectRatio).toBe('9:16');
+      expect(updateSpy).toHaveBeenCalledWith({
+        model: 'veo-9-16-only',
+        aspectRatio: '9:16',
+      });
+    });
+
+    it('writes every changed field in a single updateProjectConfig call', async () => {
+      await withProject({
+        model: 'omni-1',
+        resolution: '360p',
+        candidateDurationSeconds: 9,
+        aspectRatio: '16:9',
+      });
+      const updateSpy = vi.spyOn(service, 'updateProjectConfig');
+
+      service.selectVideoModel('veo-default');
+
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+      expect(updateSpy).toHaveBeenCalledWith({
+        model: 'veo-default',
+        resolution: '720p',
+        candidateDurationSeconds: 8,
+      });
+    });
+
+    it('leaves resolution untouched when the new model filters to no known resolutions', async () => {
+      await withProject({
+        model: 'veo-default',
+        resolution: '1080p',
+        candidateDurationSeconds: 6,
+        aspectRatio: '16:9',
+      });
+      const updateSpy = vi.spyOn(service, 'updateProjectConfig');
+
+      service.selectVideoModel('veo-unknown-only');
+
+      expect(service.projectConfig.value().resolution).toBe('1080p');
+      expect(updateSpy).toHaveBeenCalledWith({model: 'veo-unknown-only'});
+    });
+  });
+
+  describe('selectResolution', () => {
+    it('snaps duration to the nearest allowed value for the new resolution', async () => {
+      await withProject({
+        model: 'veo-default',
+        resolution: '720p',
+        candidateDurationSeconds: 6,
+      });
+
+      service.selectResolution('4k');
+
+      const project = service.projectConfig.value();
+      expect(project.resolution).toBe('4k');
+      expect(project.candidateDurationSeconds).toBe(8);
+    });
+
+    it('leaves duration untouched when still allowed at the new resolution', async () => {
+      await withProject({
+        model: 'omni-1',
+        resolution: '1080p',
+        candidateDurationSeconds: 6,
+      });
+
+      service.selectResolution('360p');
+
+      const project = service.projectConfig.value();
+      expect(project.resolution).toBe('360p');
+      expect(project.candidateDurationSeconds).toBe(6);
+    });
+  });
+
+  it('does not snap on load or when the catalog changes: a persisted 360p Veo project keeps 360p', async () => {
+    await withProject({model: 'veo-default', resolution: '360p'});
+
+    expect(service.projectConfig.value().resolution).toBe('360p');
+    expect(service.allowedResolutions()).toContain('360p');
+  });
+
+  it('does not snap a project loaded over HTTP: a persisted 360p Veo project keeps 360p', async () => {
+    (service as any).globalConfig.set(
+      liveGlobalConfig({modelCatalog: CATALOG_WITH_CAPABILITIES}),
+    );
+    httpClientMock.get.mockImplementation((url: string) =>
+      url === '/api/projects/proj-360'
+        ? of({
+            id: 'proj-360',
+            name: 'Loaded Project',
+            storyboard: [],
+            aspectRatio: '16:9',
+            resolution: '360p',
+            candidateDurationSeconds: 6,
+            generateAudio: false,
+            numberOfCandidates: 1,
+            model: 'veo-default',
+            inputConfig: {products: [], composition: ''},
+            audioTracks: [],
+            visualOverlays: [],
+          })
+        : of({}),
+    );
+
+    (service as any).projectId.set('proj-360');
+    await settle();
+
+    expect(service.projectConfig.value().resolution).toBe('360p');
+    expect(service.allowedResolutions()).toContain('360p');
   });
 });

@@ -407,6 +407,8 @@ export class RemixEngineService {
       resolution = aspectRatio === '16:9' ? '1920:1080' : '1080:1920';
     } else if (projectConfig.resolution === '4k') {
       resolution = aspectRatio === '16:9' ? '3840:2160' : '2160:3840';
+    } else if (projectConfig.resolution === '360p') {
+      resolution = aspectRatio === '16:9' ? '640:360' : '360:640';
     }
     try {
       const arrangementPath = await this.uploadText(

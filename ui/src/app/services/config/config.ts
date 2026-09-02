@@ -52,7 +52,51 @@ export type AspectRatio = '16:9' | '9:16';
 /**
  * Represents the resolution of a video.
  */
-export type Resolution = '720p' | '1080p' | '4k';
+export type Resolution = '360p' | '720p' | '1080p' | '4k';
+
+/** Every known Resolution value, in ascending order. */
+const KNOWN_RESOLUTIONS: Resolution[] = ['360p', '720p', '1080p', '4k'];
+
+/** Every known AspectRatio value. */
+const KNOWN_ASPECT_RATIOS: AspectRatio[] = ['16:9', '9:16'];
+
+/** Resolutions offered when a model's catalog entry has no allowed_resolutions (today's behaviour). */
+const FALLBACK_RESOLUTIONS: Resolution[] = ['720p', '1080p'];
+
+/** Aspect ratios offered when a model's catalog entry has no allowed_aspect_ratios (today's behaviour). */
+const FALLBACK_ASPECT_RATIOS: AspectRatio[] = ['16:9', '9:16'];
+
+/** Candidate durations offered when a model/resolution has no duration_by_resolution entry (today's behaviour). */
+const FALLBACK_DURATIONS: number[] = [4, 6, 8];
+
+/**
+ * Greatest common divisor, used to derive the slider step from a list of
+ * allowed durations. gcd(0, x) === x, so seeding a reduction with 0 yields
+ * the single gap unchanged, and 1 for a durations list with no gaps.
+ */
+function gcd(a: number, b: number): number {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) {
+    [a, b] = [b, a % b];
+  }
+  return a;
+}
+
+/** The nearest value in `allowed` to `value`; ties go to the shorter (smaller) one. */
+function nearestAllowed(allowed: number[], value: number): number {
+  return allowed.reduce((best, candidate) => {
+    const bestDiff = Math.abs(best - value);
+    const candidateDiff = Math.abs(candidate - value);
+    if (candidateDiff < bestDiff) {
+      return candidate;
+    }
+    if (candidateDiff === bestDiff) {
+      return Math.min(best, candidate);
+    }
+    return best;
+  });
+}
 
 /**
  * Represents a file stored in Google Cloud Storage.
@@ -610,6 +654,176 @@ export class ConfigService {
     const model = this.projectConfig.value().model;
     return catalog?.models[model]?.capabilities?.['audio_always_on'] === true;
   });
+
+  /** The selected model's catalog entry, or undefined off-catalog/pre-load. */
+  private catalogEntry(
+    model: string | undefined,
+  ): ModelCatalogEntry | undefined {
+    if (!model) {
+      return undefined;
+    }
+    return this.globalConfig.value()?.modelCatalog?.models[model];
+  }
+
+  /**
+   * `model`'s capabilities.allowed_resolutions, filtered to known Resolution
+   * values and kept in catalog order; FALLBACK_RESOLUTIONS when missing.
+   * Does not inject the persisted project value — callers that must always
+   * include it (the public signal, the setters) add it themselves.
+   */
+  private catalogAllowedResolutions(model: string | undefined): Resolution[] {
+    const raw = this.catalogEntry(model)?.capabilities?.['allowed_resolutions'];
+    if (Array.isArray(raw)) {
+      return raw.filter((r): r is Resolution =>
+        KNOWN_RESOLUTIONS.includes(r as Resolution),
+      );
+    }
+    return [...FALLBACK_RESOLUTIONS];
+  }
+
+  /** Same pattern as {@link catalogAllowedResolutions}, for allowed_aspect_ratios. */
+  private catalogAllowedAspectRatios(model: string | undefined): AspectRatio[] {
+    const raw =
+      this.catalogEntry(model)?.capabilities?.['allowed_aspect_ratios'];
+    if (Array.isArray(raw)) {
+      return raw.filter((a): a is AspectRatio =>
+        KNOWN_ASPECT_RATIOS.includes(a as AspectRatio),
+      );
+    }
+    return [...FALLBACK_ASPECT_RATIOS];
+  }
+
+  /**
+   * `model`'s capabilities.duration_by_resolution[resolution] as a sorted
+   * list of integers; FALLBACK_DURATIONS when the field or the resolution
+   * key is missing. Does not inject the persisted project value.
+   */
+  private catalogAllowedDurations(
+    model: string | undefined,
+    resolution: Resolution | undefined,
+  ): number[] {
+    const byResolution = this.catalogEntry(model)?.capabilities?.[
+      'duration_by_resolution'
+    ] as Record<string, unknown> | undefined;
+    const raw = resolution ? byResolution?.[resolution] : undefined;
+    if (Array.isArray(raw)) {
+      return raw
+        .filter((n): n is number => typeof n === 'number')
+        .sort((a, b) => a - b);
+    }
+    return [...FALLBACK_DURATIONS];
+  }
+
+  /**
+   * Resolutions the current project's model offers, per its catalog entry
+   * (see {@link catalogAllowedResolutions}), always including the project's
+   * currently persisted resolution so a value the model no longer offers
+   * never leaves the select showing a blank option.
+   */
+  readonly allowedResolutions = computed(() => {
+    const project = this.projectConfig.value();
+    const list = this.catalogAllowedResolutions(project.model);
+    return project.resolution && !list.includes(project.resolution)
+      ? [...list, project.resolution]
+      : list;
+  });
+
+  /** Same pattern as {@link allowedResolutions}, for aspect ratios. */
+  readonly allowedAspectRatios = computed(() => {
+    const project = this.projectConfig.value();
+    const list = this.catalogAllowedAspectRatios(project.model);
+    return project.aspectRatio && !list.includes(project.aspectRatio)
+      ? [...list, project.aspectRatio]
+      : list;
+  });
+
+  /**
+   * Candidate durations the current project's model/resolution offers (see
+   * {@link catalogAllowedDurations}), always including the project's
+   * currently persisted duration, resorted if that value was appended.
+   */
+  readonly allowedDurations = computed(() => {
+    const project = this.projectConfig.value();
+    const list = this.catalogAllowedDurations(
+      project.model,
+      project.resolution,
+    );
+    const persisted = project.candidateDurationSeconds;
+    return persisted && !list.includes(persisted)
+      ? [...list, persisted].sort((a, b) => a - b)
+      : list;
+  });
+
+  /**
+   * The candidate-duration slider's bounds, derived from allowedDurations():
+   * min/max are its first/last values; step is the greatest common divisor
+   * of the gaps between consecutive values (1 when there is only one value).
+   */
+  readonly durationSlider = computed(() => {
+    const durations = this.allowedDurations();
+    const min = durations[0];
+    const max = durations[durations.length - 1];
+    const gaps: number[] = [];
+    for (let i = 1; i < durations.length; i++) {
+      gaps.push(durations[i] - durations[i - 1]);
+    }
+    const step = gaps.length > 0 ? gaps.reduce((g, d) => gcd(g, d), 0) : 1;
+    return {min, max, step};
+  });
+
+  /**
+   * Switches the project's video model and snaps resolution, duration and
+   * aspect ratio to values the new model's catalog entry allows, in one
+   * updateProjectConfig call. A value already allowed is left untouched.
+   */
+  selectVideoModel(model: string) {
+    const project = this.projectConfig.value();
+    const partial: Partial<ProjectConfig> = {model};
+
+    const resolutions = this.catalogAllowedResolutions(model);
+    let resolution = project.resolution;
+    if (resolutions.length > 0 && !resolutions.includes(resolution)) {
+      resolution = resolutions[0];
+      partial.resolution = resolution;
+    }
+
+    const durations = this.catalogAllowedDurations(model, resolution);
+    if (!durations.includes(project.candidateDurationSeconds)) {
+      partial.candidateDurationSeconds = nearestAllowed(
+        durations,
+        project.candidateDurationSeconds,
+      );
+    }
+
+    const aspectRatios = this.catalogAllowedAspectRatios(model);
+    if (
+      aspectRatios.length > 0 &&
+      !aspectRatios.includes(project.aspectRatio)
+    ) {
+      partial.aspectRatio = aspectRatios[0];
+    }
+
+    this.updateProjectConfig(partial);
+  }
+
+  /**
+   * Switches the project's resolution and snaps the candidate duration to
+   * the nearest value the new resolution allows (ties go to the shorter one).
+   */
+  selectResolution(resolution: Resolution) {
+    const project = this.projectConfig.value();
+    const partial: Partial<ProjectConfig> = {resolution};
+
+    const durations = this.catalogAllowedDurations(project.model, resolution);
+    if (!durations.includes(project.candidateDurationSeconds)) {
+      partial.candidateDurationSeconds = nearestAllowed(
+        durations,
+        project.candidateDurationSeconds,
+      );
+    }
+
+    this.updateProjectConfig(partial);
+  }
 
   /**
    * Only choose replacements from the live catalog.

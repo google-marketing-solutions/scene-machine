@@ -15,9 +15,14 @@
  */
 
 import {CdkDragDrop} from '@angular/cdk/drag-drop';
+import {HarnessLoader} from '@angular/cdk/testing';
+import {TestbedHarnessEnvironment} from '@angular/cdk/testing/testbed';
 import {signal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {MatDialog} from '@angular/material/dialog';
+import {MatSelectHarness} from '@angular/material/select/testing';
+import {MatSlider} from '@angular/material/slider';
+import {By} from '@angular/platform-browser';
 import {of} from 'rxjs';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -35,6 +40,7 @@ import {Storyboard} from './storyboard';
 describe('Storyboard', () => {
   let component: Storyboard;
   let fixture: ComponentFixture<Storyboard>;
+  let loader: HarnessLoader;
   const sceneIdCounterSignal = signal(0);
   const projectConfigSignal = signal<ProjectConfig>({
     id: 'test-id',
@@ -51,6 +57,7 @@ describe('Storyboard', () => {
     visualOverlays: [],
   });
   const canEditCandidatesSignal = signal(false);
+  const durationSliderSignal = signal({min: 4, max: 8, step: 2});
   let mockConfigService = {
     projectConfig: {
       value: projectConfigSignal,
@@ -71,6 +78,8 @@ describe('Storyboard', () => {
     videoModels: () => [],
     canEditCandidates: canEditCandidatesSignal,
     audioLocked: () => false,
+    durationSlider: durationSliderSignal,
+    selectVideoModel: vi.fn(),
     sceneIdCounter: sceneIdCounterSignal,
     primaryColor: signal('theme-green'),
     isGeneratedScene: (
@@ -94,6 +103,7 @@ describe('Storyboard', () => {
   beforeEach(async () => {
     sceneIdCounterSignal.set(0);
     canEditCandidatesSignal.set(false);
+    durationSliderSignal.set({min: 4, max: 8, step: 2});
     mockConfigService = {
       projectConfig: {
         value: projectConfigSignal,
@@ -114,6 +124,8 @@ describe('Storyboard', () => {
       videoModels: () => [],
       canEditCandidates: canEditCandidatesSignal,
       audioLocked: () => false,
+      durationSlider: durationSliderSignal,
+      selectVideoModel: vi.fn(),
       sceneIdCounter: sceneIdCounterSignal,
       primaryColor: signal('theme-green'),
       isGeneratedScene: (
@@ -152,6 +164,7 @@ describe('Storyboard', () => {
 
     fixture = TestBed.createComponent(Storyboard);
     component = fixture.componentInstance;
+    loader = TestbedHarnessEnvironment.loader(fixture);
     projectConfigSignal.set({
       id: 'test-id',
       name: 'Test Project',
@@ -184,6 +197,48 @@ describe('Storyboard', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('drives the candidate-duration slider from durationSlider()', () => {
+    durationSliderSignal.set({min: 3, max: 10, step: 1});
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [
+        {id: '1', type: 'generated', name: 'Scene 1', prompt: 'test'},
+      ],
+    }));
+    component.selectScene('1');
+    fixture.detectChanges();
+
+    const sliders = fixture.debugElement.queryAll(
+      By.css('.setting-group mat-slider'),
+    );
+    const durationSlider = sliders[1].componentInstance as MatSlider;
+
+    expect(durationSlider.min).toBe(3);
+    expect(durationSlider.max).toBe(10);
+    expect(durationSlider.step).toBe(1);
+  });
+
+  it('calls selectVideoModel when a model is chosen for the selected scene', async () => {
+    (mockConfigService as {videoModels: () => string[]}).videoModels = () => [
+      'veo-default',
+      'omni-1',
+    ];
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [
+        {id: '1', type: 'generated', name: 'Scene 1', prompt: 'test'},
+      ],
+    }));
+    component.selectScene('1');
+    fixture.detectChanges();
+
+    const select = await loader.getHarness(MatSelectHarness);
+    await select.open();
+    await select.clickOptions({text: 'omni-1'});
+
+    expect(mockConfigService.selectVideoModel).toHaveBeenCalledWith('omni-1');
   });
 
   it('should automatically select a newly added scene', () => {
