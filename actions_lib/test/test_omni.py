@@ -299,66 +299,153 @@ class TestOmni(unittest.TestCase):
         )
     self.assertEqual(handler.requests, [])
 
-  # -- 4. clamps ------------------------------------------------------
+  # -- 4. validation ----------------------------------------------------
 
-  def test_duration_clamped_above_range(self):
+  def test_duration_below_range_rejected(self):
     handler = _Handler()
-    handler.queue_completed_from_request()
     p_client, p_uuid, p_sleep = self._patched(handler)
     with p_client, p_uuid, p_sleep:
-      omni.generate(
-          self.gcp_project,
-          self.gcp_location,
-          self.prompt,
-          None,
-          None,
-          self.model,
-          duration_seconds=12,
-          output_gcs=self.output_gcs,
-      )
-    self.assertEqual(
-        handler.posts[0]['body']['response_format']['duration'], '10s'
-    )
+      with self.assertRaises(omni.OmniError):
+        omni.generate(
+            self.gcp_project,
+            self.gcp_location,
+            self.prompt,
+            None,
+            None,
+            self.model,
+            duration_seconds=2,
+            output_gcs=self.output_gcs,
+        )
+    self.assertEqual(handler.requests, [])
 
-  def test_duration_clamped_below_range(self):
+  def test_duration_above_range_rejected(self):
     handler = _Handler()
-    handler.queue_completed_from_request()
     p_client, p_uuid, p_sleep = self._patched(handler)
     with p_client, p_uuid, p_sleep:
-      omni.generate(
-          self.gcp_project,
-          self.gcp_location,
-          self.prompt,
-          None,
-          None,
-          self.model,
-          duration_seconds=1,
-          output_gcs=self.output_gcs,
-      )
-    self.assertEqual(
-        handler.posts[0]['body']['response_format']['duration'], '3s'
-    )
+      with self.assertRaises(omni.OmniError):
+        omni.generate(
+            self.gcp_project,
+            self.gcp_location,
+            self.prompt,
+            None,
+            None,
+            self.model,
+            duration_seconds=11,
+            output_gcs=self.output_gcs,
+        )
+    self.assertEqual(handler.requests, [])
 
-  def test_amount_clamped_to_four_creates(self):
+  def test_duration_boundaries_accepted(self):
+    for duration_seconds, expected in ((3, '3s'), (10, '10s')):
+      with self.subTest(duration_seconds=duration_seconds):
+        handler = _Handler()
+        handler.queue_completed_from_request()
+        p_client, p_uuid, p_sleep = self._patched(handler)
+        with p_client, p_uuid, p_sleep:
+          omni.generate(
+              self.gcp_project,
+              self.gcp_location,
+              self.prompt,
+              None,
+              None,
+              self.model,
+              duration_seconds=duration_seconds,
+              aspect_ratio='16:9',
+              resolution='720p',
+              output_gcs=self.output_gcs,
+          )
+        self.assertEqual(
+            handler.posts[0]['body']['response_format']['duration'], expected
+        )
+
+  def test_duration_non_integer_rejected(self):
+    for bad_duration in (3.5, '5', True):
+      with self.subTest(duration_seconds=bad_duration):
+        handler = _Handler()
+        p_client, p_uuid, p_sleep = self._patched(handler)
+        with p_client, p_uuid, p_sleep:
+          with self.assertRaises(omni.OmniError):
+            omni.generate(
+                self.gcp_project,
+                self.gcp_location,
+                self.prompt,
+                None,
+                None,
+                self.model,
+                duration_seconds=bad_duration,
+                output_gcs=self.output_gcs,
+            )
+        self.assertEqual(handler.requests, [])
+
+  def test_amount_non_integer_rejected(self):
+    for bad_amount in (2.0, '2', True):
+      with self.subTest(amount=bad_amount):
+        handler = _Handler()
+        p_client, p_uuid, p_sleep = self._patched(handler)
+        with p_client, p_uuid, p_sleep:
+          with self.assertRaises(omni.OmniError):
+            omni.generate(
+                self.gcp_project,
+                self.gcp_location,
+                self.prompt,
+                None,
+                None,
+                self.model,
+                amount=bad_amount,
+                output_gcs=self.output_gcs,
+            )
+        self.assertEqual(handler.requests, [])
+
+  def test_bad_aspect_ratio_rejected(self):
     handler = _Handler()
-    for _ in range(4):
-      handler.queue_completed_from_request()
-    p_client, p_uuid, p_sleep = self._patched(
-        handler, hexes=('h1', 'h2', 'h3', 'h4')
-    )
+    p_client, p_uuid, p_sleep = self._patched(handler)
     with p_client, p_uuid, p_sleep:
-      uris = omni.generate(
-          self.gcp_project,
-          self.gcp_location,
-          self.prompt,
-          None,
-          None,
-          self.model,
-          amount=6,
-          output_gcs=self.output_gcs,
-      )
-    self.assertEqual(len(handler.posts), 4)
-    self.assertEqual(len(uris), 4)
+      with self.assertRaises(omni.OmniError):
+        omni.generate(
+            self.gcp_project,
+            self.gcp_location,
+            self.prompt,
+            None,
+            None,
+            self.model,
+            aspect_ratio='1:1',
+            output_gcs=self.output_gcs,
+        )
+    self.assertEqual(handler.requests, [])
+
+  def test_amount_zero_rejected(self):
+    handler = _Handler()
+    p_client, p_uuid, p_sleep = self._patched(handler)
+    with p_client, p_uuid, p_sleep:
+      with self.assertRaises(omni.OmniError):
+        omni.generate(
+            self.gcp_project,
+            self.gcp_location,
+            self.prompt,
+            None,
+            None,
+            self.model,
+            amount=0,
+            output_gcs=self.output_gcs,
+        )
+    self.assertEqual(handler.requests, [])
+
+  def test_amount_above_four_rejected(self):
+    handler = _Handler()
+    p_client, p_uuid, p_sleep = self._patched(handler)
+    with p_client, p_uuid, p_sleep:
+      with self.assertRaises(omni.OmniError):
+        omni.generate(
+            self.gcp_project,
+            self.gcp_location,
+            self.prompt,
+            None,
+            None,
+            self.model,
+            amount=5,
+            output_gcs=self.output_gcs,
+        )
+    self.assertEqual(handler.requests, [])
 
   def test_bad_resolution_makes_no_request(self):
     handler = _Handler()

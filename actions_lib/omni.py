@@ -32,6 +32,7 @@ POLL_DEADLINE_SECONDS = 1500  # below the worker's 1800 s dispatch deadline
 MIN_DURATION_SECONDS = 3
 MAX_DURATION_SECONDS = 10
 RESOLUTIONS = ('360p', '720p', '1080p', '4k')
+ASPECT_RATIOS = ('16:9', '9:16')
 PENDING_STATES = frozenset({'queued', 'in_progress'})
 USE_BACKGROUND = True  # flip to False if the live probe shows Vertex refuses it
 # Per-call timeouts, in seconds, passed as call arguments. Never put a
@@ -214,13 +215,31 @@ def generate(
   first create's failure. Once at least one candidate has been accepted,
   the clips it bought are real; a later create that fails is terminal,
   never retried, so nothing already paid for is generated twice.
+
+  `amount` is Scene Machine's own batch size, not an Omni parameter: Omni
+  returns one clip per call, so each candidate up to `amount` is a
+  separate Omni API call.
   """
   if resolution not in RESOLUTIONS:
     raise OmniError(f'Unsupported Omni resolution: {resolution!r}')
-  duration = min(
-      max(duration_seconds, MIN_DURATION_SECONDS), MAX_DURATION_SECONDS
-  )
-  count = min(max(amount, 1), 4)
+  if aspect_ratio not in ASPECT_RATIOS:
+    raise OmniError(f'Unsupported Omni aspect ratio: {aspect_ratio!r}')
+  if (
+      isinstance(duration_seconds, bool)
+      or not isinstance(duration_seconds, int)
+      or not MIN_DURATION_SECONDS <= duration_seconds <= MAX_DURATION_SECONDS
+  ):
+    raise OmniError(
+        'Omni duration_seconds must be a whole number of seconds in '
+        f'{MIN_DURATION_SECONDS}..{MAX_DURATION_SECONDS}, got '
+        f'{duration_seconds!r}'
+    )
+  if (
+      isinstance(amount, bool)
+      or not isinstance(amount, int)
+      or not 1 <= amount <= 4
+  ):
+    raise OmniError(f'Omni amount must be 1..4, got {amount!r}')
   if image_url:
     task = 'image_to_video'
     input_parts = [
@@ -233,13 +252,13 @@ def generate(
   client = _client(gcp_project, gcp_location)
   deadline = time.monotonic() + POLL_DEADLINE_SECONDS
   pending: list[tuple[Interaction, str]] = []
-  for i in range(count):
+  for i in range(amount):
     prefix = _unique_prefix(output_gcs)
     response_format = _video_format(
         prefix,
         aspect_ratio=aspect_ratio,
         resolution=resolution,
-        duration_seconds=duration,
+        duration_seconds=duration_seconds,
     )
     try:
       interaction = _create(client, model, input_parts, response_format, task)
@@ -247,7 +266,7 @@ def generate(
       if not pending:
         raise
       raise OmniError(
-          f'create {i + 1} of {count} failed after {len(pending)} accepted: '
+          f'create {i + 1} of {amount} failed after {len(pending)} accepted: '
           f'{exc}'
       ) from exc
     pending.append((interaction, prefix))
