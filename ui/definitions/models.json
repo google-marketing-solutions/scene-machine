@@ -16,13 +16,13 @@
     "gemini-3.8-flash": {
       "family": "gemini",
       "actions": ["translate", "write_products_script", "generate_storyboard"],
-      "locations": ["global"],
+      "locations": ["global", "us", "eu"],
       "capabilities": {}
     },
     "gemini-3.7-flash": {
       "family": "gemini",
       "actions": ["translate", "write_products_script", "generate_storyboard"],
-      "locations": ["global"],
+      "locations": ["global", "us", "eu"],
       "capabilities": {}
     },
     "gemini-3.5-flash": {

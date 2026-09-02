@@ -83,6 +83,16 @@ def test_model_set_without_region_flagged():
   assert any('region is required' in e for e in errors)
 
 
+def test_flash_model_allows_us_and_eu_region():
+  # gemini-3.8-flash was widened beyond global; the deploy-time check must
+  # accept the shipped allowlist's us and eu regions for it.
+  models = load_shipped_allowlist()['models']
+  for region in ('us', 'eu'):
+    assert validate_config_models.collect_errors(
+        {'GEMINI_MODEL': 'gemini-3.8-flash', 'GEMINI_REGION': region},
+        models) == []
+
+
 def test_config_template_defaults_pass_real_allowlist():
   # The actual config.template.txt defaults must validate against the shipped
   # allowlist -- parsed from the file, not hard-coded, so a drifted default
