@@ -677,9 +677,9 @@ describe('ConfigService video controls', () => {
       expect(service.allowedResolutions()).toEqual(['720p', '1080p']);
     });
 
-    it('always includes the persisted resolution, appended if the model no longer offers it', async () => {
+    it('does not include the persisted resolution when the model no longer offers it', async () => {
       await withProject({model: 'veo-fast', resolution: '4k'});
-      expect(service.allowedResolutions()).toEqual(['720p', '1080p', '4k']);
+      expect(service.allowedResolutions()).toEqual(['720p', '1080p']);
     });
 
     it('drops values that are not a known Resolution and keeps the catalog order', async () => {
@@ -699,9 +699,9 @@ describe('ConfigService video controls', () => {
       expect(service.allowedAspectRatios()).toEqual(['16:9', '9:16']);
     });
 
-    it('always includes the persisted aspect ratio, appended if the model no longer offers it', async () => {
+    it('does not include the persisted aspect ratio when the model no longer offers it', async () => {
       await withProject({model: 'veo-9-16-only', aspectRatio: '16:9'});
-      expect(service.allowedAspectRatios()).toEqual(['9:16', '16:9']);
+      expect(service.allowedAspectRatios()).toEqual(['9:16']);
     });
 
     it('drops values that are not a known AspectRatio and keeps the catalog order', async () => {
@@ -745,13 +745,13 @@ describe('ConfigService video controls', () => {
       expect(service.allowedDurations()).toEqual([4, 6, 8]);
     });
 
-    it('always includes the persisted duration, resorted if appended', async () => {
+    it('does not include the persisted duration when the resolution no longer offers it', async () => {
       await withProject({
         model: 'veo-default',
         resolution: '4k',
         candidateDurationSeconds: 10,
       });
-      expect(service.allowedDurations()).toEqual([8, 10]);
+      expect(service.allowedDurations()).toEqual([8]);
     });
 
     it('sorts an unsorted duration_by_resolution list ascending', async () => {
@@ -793,15 +793,11 @@ describe('ConfigService video controls', () => {
       expect(service.durationSlider()).toEqual({min: 3, max: 10, step: 1});
     });
 
-    it('uses the gcd of unequal gaps once the persisted value is appended', async () => {
-      await withProject({
-        model: 'veo-default',
-        resolution: '720p',
-        candidateDurationSeconds: 7,
-      });
-      expect(service.allowedDurations()).toEqual([4, 6, 7, 8]);
-      expect(service.durationSlider()).toEqual({min: 4, max: 8, step: 1});
-    });
+    // The former "uses the gcd of unequal gaps once the persisted value is
+    // appended" test is removed: it exercised the stale-value append that
+    // allowedDurations() no longer performs. Coverage of the exact
+    // catalog-backed slider bounds ({min:4,max:8,step:2} for Veo at 720p,
+    // {min:3,max:10,step:1} for Omni) lives in the two tests above.
   });
 
   describe('selectVideoModel', () => {
@@ -950,26 +946,74 @@ describe('ConfigService video controls', () => {
     });
   });
 
-  it('does not snap on load or when the catalog changes: a persisted 360p Veo project keeps 360p', async () => {
-    await withProject({model: 'veo-default', resolution: '360p'});
+  it('automatic fallback posts a valid combination', async () => {
+    // A project whose model has left the catalog, seeded with resolution and
+    // duration the fallback model does not allow either.
+    await withProject({
+      model: 'veo-removed-by-operator',
+      resolution: '360p',
+      candidateDurationSeconds: 3,
+      aspectRatio: '16:9',
+    });
 
-    expect(service.projectConfig.value().resolution).toBe('360p');
-    expect(service.allowedResolutions()).toContain('360p');
+    const project = service.projectConfig.value();
+    expect(project.model).toBe('veo-default');
+    expect(service.allowedResolutions()).toContain(project.resolution);
+    expect(service.allowedDurations()).toContain(
+      project.candidateDurationSeconds,
+    );
   });
 
-  it('does not snap a project loaded over HTTP: a persisted 360p Veo project keeps 360p', async () => {
+  it('a loaded saved Omni project at 360p/10s whose model is gone falls back to Veo and posts a valid combination', async () => {
     (service as any).globalConfig.set(
       liveGlobalConfig({modelCatalog: CATALOG_WITH_CAPABILITIES}),
     );
     httpClientMock.get.mockImplementation((url: string) =>
-      url === '/api/projects/proj-360'
+      url === '/api/projects/proj-omni-gone'
         ? of({
-            id: 'proj-360',
-            name: 'Loaded Project',
+            id: 'proj-omni-gone',
+            name: 'Loaded Omni Project',
             storyboard: [],
             aspectRatio: '16:9',
             resolution: '360p',
-            candidateDurationSeconds: 6,
+            candidateDurationSeconds: 10,
+            generateAudio: true,
+            numberOfCandidates: 1,
+            model: 'omni-retired',
+            inputConfig: {products: [], composition: ''},
+            audioTracks: [],
+            visualOverlays: [],
+          })
+        : of({}),
+    );
+
+    (service as any).projectId.set('proj-omni-gone');
+    await settle();
+    TestBed.tick(); // flush the catalog-correction effect
+
+    const project = service.projectConfig.value();
+    expect(project.model).toBe('veo-default');
+    expect(service.allowedResolutions()).toContain(project.resolution);
+    expect(project.resolution).not.toBe('360p');
+    expect(service.allowedDurations()).toContain(
+      project.candidateDurationSeconds,
+    );
+    expect(project.candidateDurationSeconds).not.toBe(10);
+  });
+
+  it('a loaded project whose model exists but whose duration is outside the catalog snaps to the nearest allowed value', async () => {
+    (service as any).globalConfig.set(
+      liveGlobalConfig({modelCatalog: CATALOG_WITH_CAPABILITIES}),
+    );
+    httpClientMock.get.mockImplementation((url: string) =>
+      url === '/api/projects/proj-720'
+        ? of({
+            id: 'proj-720',
+            name: 'Loaded Project',
+            storyboard: [],
+            aspectRatio: '16:9',
+            resolution: '720p',
+            candidateDurationSeconds: 7,
             generateAudio: false,
             numberOfCandidates: 1,
             model: 'veo-default',
@@ -980,10 +1024,42 @@ describe('ConfigService video controls', () => {
         : of({}),
     );
 
-    (service as any).projectId.set('proj-360');
+    (service as any).projectId.set('proj-720');
     await settle();
 
-    expect(service.projectConfig.value().resolution).toBe('360p');
-    expect(service.allowedResolutions()).toContain('360p');
+    const project = service.projectConfig.value();
+    // duration_by_resolution['720p'] is [4, 6, 8]; 7 is equidistant from 6
+    // and 8, and nearestAllowed ties go to the smaller value.
+    expect(project.resolution).toBe('720p');
+    expect(project.candidateDurationSeconds).toBe(6);
+  });
+
+  it('normalizes the quiet (unsaved deploy-default) fallback branch: snaps resolution and duration without dirtying the project', async () => {
+    await settle();
+    (service as any).globalConfig.set(
+      liveGlobalConfig({
+        modelCatalog: CATALOG_WITH_CAPABILITIES,
+        veoModel: 'veo-retired-default',
+      }),
+    );
+    service.projectConfig.value.set({
+      ...service.projectConfig.value(),
+      id: 'proj-new',
+      model: 'veo-retired-default',
+      resolution: '360p',
+      candidateDurationSeconds: 3,
+    });
+    (service as any).shouldSave = false;
+
+    TestBed.tick();
+
+    const project = service.projectConfig.value();
+    expect(project.model).toBe('veo-default');
+    expect(service.allowedResolutions()).toContain(project.resolution);
+    expect(service.allowedDurations()).toContain(
+      project.candidateDurationSeconds,
+    );
+    expect(matSnackBarMock.open).not.toHaveBeenCalled();
+    expect((service as any).shouldSave).toBe(false);
   });
 });

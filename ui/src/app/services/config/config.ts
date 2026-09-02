@@ -716,42 +716,28 @@ export class ConfigService {
 
   /**
    * Resolutions the current project's model offers, per its catalog entry
-   * (see {@link catalogAllowedResolutions}), always including the project's
-   * currently persisted resolution so a value the model no longer offers
-   * never leaves the select showing a blank option.
+   * (see {@link catalogAllowedResolutions}). A persisted value the model no
+   * longer offers is not appended here; it is snapped to an allowed value by
+   * {@link computeModelSwitch} on model switch, fallback and project load.
    */
-  readonly allowedResolutions = computed(() => {
-    const project = this.projectConfig.value();
-    const list = this.catalogAllowedResolutions(project.model);
-    return project.resolution && !list.includes(project.resolution)
-      ? [...list, project.resolution]
-      : list;
-  });
+  readonly allowedResolutions = computed(() =>
+    this.catalogAllowedResolutions(this.projectConfig.value().model),
+  );
 
   /** Same pattern as {@link allowedResolutions}, for aspect ratios. */
-  readonly allowedAspectRatios = computed(() => {
-    const project = this.projectConfig.value();
-    const list = this.catalogAllowedAspectRatios(project.model);
-    return project.aspectRatio && !list.includes(project.aspectRatio)
-      ? [...list, project.aspectRatio]
-      : list;
-  });
+  readonly allowedAspectRatios = computed(() =>
+    this.catalogAllowedAspectRatios(this.projectConfig.value().model),
+  );
 
   /**
    * Candidate durations the current project's model/resolution offers (see
-   * {@link catalogAllowedDurations}), always including the project's
-   * currently persisted duration, resorted if that value was appended.
+   * {@link catalogAllowedDurations}). A persisted value the model no longer
+   * offers is not appended here; it is snapped to the nearest allowed value
+   * by {@link computeModelSwitch} on model switch, fallback and project load.
    */
   readonly allowedDurations = computed(() => {
     const project = this.projectConfig.value();
-    const list = this.catalogAllowedDurations(
-      project.model,
-      project.resolution,
-    );
-    const persisted = project.candidateDurationSeconds;
-    return persisted && !list.includes(persisted)
-      ? [...list, persisted].sort((a, b) => a - b)
-      : list;
+    return this.catalogAllowedDurations(project.model, project.resolution);
   });
 
   /**
@@ -772,12 +758,14 @@ export class ConfigService {
   });
 
   /**
-   * Switches the project's video model and snaps resolution, duration and
-   * aspect ratio to values the new model's catalog entry allows, in one
-   * updateProjectConfig call. A value already allowed is left untouched.
+   * Partial ProjectConfig changes to switch to `model`: the model itself, plus
+   * resolution, duration and aspect ratio snapped to values model's catalog
+   * entry allows (left untouched if already allowed).
    */
-  selectVideoModel(model: string) {
-    const project = this.projectConfig.value();
+  private computeModelSwitch(
+    model: string,
+    project: ProjectConfig,
+  ): Partial<ProjectConfig> {
     const partial: Partial<ProjectConfig> = {model};
 
     const resolutions = this.catalogAllowedResolutions(model);
@@ -803,6 +791,16 @@ export class ConfigService {
       partial.aspectRatio = aspectRatios[0];
     }
 
+    return partial;
+  }
+
+  /**
+   * Switches the project's video model and snaps resolution, duration and
+   * aspect ratio to values the new model's catalog entry allows, in one
+   * updateProjectConfig call. A value already allowed is left untouched.
+   */
+  selectVideoModel(model: string) {
+    const partial = this.computeModelSwitch(model, this.projectConfig.value());
     this.updateProjectConfig(partial);
   }
 
@@ -924,7 +922,11 @@ export class ConfigService {
     if (!data.visualOverlays) {
       data.visualOverlays = [];
     }
-    return data;
+    // Snap resolution/duration/aspect ratio a persisted project's own (still
+    // valid) model no longer allows, so a stale combination from before a
+    // catalog change is never posted verbatim.
+    const partial = this.computeModelSwitch(data.model, data);
+    return {...data, ...partial};
   }
 
   shouldSave = false;
@@ -1006,8 +1008,9 @@ export class ConfigService {
         previous === config?.veoModel && !isPersistedProject;
       const shouldPersistCorrection =
         isPersistedProject || (!!previous && !isUnsavedDeployDefault);
+      const partial = this.computeModelSwitch(fallback, project);
       if (shouldPersistCorrection) {
-        this.updateProjectConfig({model: fallback});
+        this.updateProjectConfig(partial);
         const unavailableModel = previous
           ? `Video model ${previous}`
           : 'The saved video model';
@@ -1017,7 +1020,7 @@ export class ConfigService {
         );
       } else {
         // A catalog correction alone must not create a new project.
-        this.projectConfig.value.update(c => ({...c, model: fallback}));
+        this.projectConfig.value.update(c => ({...c, ...partial}));
       }
     });
     this.initFaviconListener();
