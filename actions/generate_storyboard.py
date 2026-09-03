@@ -351,8 +351,6 @@ def execute(
       system_instruction=generate_system_prompt(
           len(products), len(images)
       ),
-      temperature=0.7,
-      top_p=0.2,
       response_schema=response_schema,
       response_mime_type=ContentType.JSON.value,
       safety_settings=[

@@ -85,10 +85,8 @@ def prompt(
     ] = None,
     file_uris: list[str] = None,
     need_to_remove_md_notation=True,
-    location="us-central1",
-    model="gemini-3.5-flash",
-    temperature: float = 0.2,
-    top_p: float = 0.2,
+    location="global",
+    model="gemini-3.8-flash",
     tracking_type: TrackingType | None = None,
 ):
     """Prompts Gemini for a response.
@@ -102,10 +100,8 @@ def prompt(
         prompt.
       need_to_remove_md_notation: If True and response_schema is not provided,
         removes markdown code block notations (like ```json) from the output.
-      location: The Vertex AI location to use (default: "us-central1").
-      model: The Gemini model to use (default: "gemini-3.5-flash").
-      temperature: Sampling temperature to control creativity.
-      top_p: Nucleus sampling probability.
+      location: The Vertex AI location to use (default: "global").
+      model: The Gemini model to use (default: "gemini-3.8-flash").
 
     Returns:
       A dictionary containing the parsed JSON response if response_schema is
@@ -155,8 +151,6 @@ def prompt(
     ]
 
     generate_content_config = types.GenerateContentConfig(
-        temperature=temperature,
-        top_p=top_p,
         max_output_tokens=8192,
         response_modalities=[types.Modality.TEXT.value]
         if not response_schema

@@ -68,9 +68,12 @@ class TestGemini(unittest.TestCase):
         mock_client_class.assert_called_once_with(
             vertexai=True,
             project="test-proj",
-            location="us-central1",
+            location="global",
             http_options=mock.ANY,
         )
+
+        args, kwargs = mock_client.models.generate_content.call_args
+        self.assertEqual(kwargs["model"], "gemini-3.8-flash")
 
 
     @mock.patch("google.genai.Client")
@@ -153,6 +156,35 @@ class TestGemini(unittest.TestCase):
         self.assertEqual(
             kwargs["config"].thinking_config.thinking_budget, expected_budget
         )
+
+    @parameterized.expand([
+        ("gemini-3.8-flash",),
+        ("gemini-3.7-flash",),
+        ("gemini-3.1-pro-preview",),
+    ])
+    @mock.patch("google.genai.Client")
+    def test_prompt_gemini3_has_no_sampling_knobs(
+        self, model_name, mock_client_class
+    ):
+        """Gemini 3 models get no temperature or top_p in the config."""
+        mock_client = mock_client_class.return_value
+        mock_response = mock.Mock()
+        mock_candidate = mock.Mock()
+        mock_part = mock.Mock()
+        mock_part.text = "success"
+        mock_candidate.content.parts = [mock_part]
+        mock_response.candidates = [mock_candidate]
+        mock_client.models.generate_content.return_value = mock_response
+
+        gemini.prompt(
+            gcp_project="test-proj",
+            text_prompt="hi",
+            model=model_name,
+        )
+
+        _, kwargs = mock_client.models.generate_content.call_args
+        self.assertIsNone(kwargs["config"].temperature)
+        self.assertIsNone(kwargs["config"].top_p)
 
     @parameterized.expand([
         ("gemini-3.5-flash",),

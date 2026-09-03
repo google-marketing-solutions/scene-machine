@@ -82,6 +82,25 @@ def test_gemini_action_disallowed_location():
               ) == 'MODEL_LOCATION_PAIR_INVALID'
 
 
+@pytest.mark.parametrize(
+    ('action', 'location'),
+    (
+        ('translate', 'us'),
+        ('translate', 'eu'),
+        ('write_products_script', 'us'),
+        ('write_products_script', 'eu'),
+        ('generate_storyboard', 'us'),
+        ('generate_storyboard', 'eu'),
+    ),
+)
+def test_flash_text_actions_accept_us_and_eu(action, location):
+  # gemini-3.8-flash was widened to serve us and eu alongside global; every
+  # text action must accept the pair.
+  assert _code(_sub(action,
+                    {'gemini_model': 'gemini-3.8-flash',
+                     'gemini_model_location': location})) is None
+
+
 def test_image_action_disallowed_location():
   # Same for the image_model_location gate.
   assert _code(_sub('generate_image',
