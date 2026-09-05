@@ -151,7 +151,12 @@ def _as_values(value: Any) -> list:
 
 
 def _capability_violation(
-    node_id: str, action: str, model: str, caps: dict, params: dict
+    node_id: str,
+    action: str,
+    model: str,
+    caps: dict,
+    params: dict,
+    action_params: set[str],
 ) -> tuple[str, str] | None:
   """Checks `params` against `model`'s catalog capabilities.
 
@@ -161,6 +166,11 @@ def _capability_violation(
   checked element-wise via `_as_values`, matching the engine's cross-product
   expansion (util/workflow.py) -- a non-string/odd value simply fails the
   membership test and is reported as not allowed.
+
+  `action_params` is the action's declared parameter/input names, used to
+  scope the audio-required check to actions that actually declare
+  `generate_audio` -- an action that never sends it (edit_video today) cannot
+  be held to it, whatever the model's capabilities say.
   """
   if 'aspect_ratio' in params and 'allowed_aspect_ratios' in caps:
     for value in _as_values(params['aspect_ratio']):
@@ -214,7 +224,7 @@ def _capability_violation(
               'DURATION_NOT_ALLOWED',
           )
 
-  if caps.get('audio_always_on') is True:
+  if caps.get('audio_always_on') is True and 'generate_audio' in action_params:
     if 'generate_audio' not in params:
       return (
           (
@@ -493,7 +503,14 @@ def validate_submission(
             return (f'Node {node_id!r}: {action} model {model!r} is not allowed '
                     f'in {location!r}', 'MODEL_LOCATION_PAIR_INVALID')
       caps = models[model].get('capabilities') or {}
-      violation = _capability_violation(node_id, action, model, caps, params)
+      violation = _capability_violation(
+          node_id,
+          action,
+          model,
+          caps,
+          params,
+          _action_params(action, actions_json),
+      )
       if violation is not None:
         return violation
 

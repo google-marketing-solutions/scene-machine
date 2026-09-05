@@ -918,6 +918,22 @@ def test_generate_audio_omitted_rejected_when_always_on():
   assert _code(_sub('generate_video', _OMNI)) == 'AUDIO_REQUIRED'
 
 
+def test_edit_video_without_generate_audio_is_accepted_on_audio_locked_model():
+  # Mirrors the UI's edit request (getVideoEditWorkflowDefinition): model,
+  # gcp_location, resolution -- no generate_audio, since edit_video does not
+  # declare that parameter.
+  assert _code(_sub('edit_video', {**_OMNI, 'resolution': '360p'})) is None
+
+
+@pytest.mark.parametrize('action,expected', [
+    ('generate_video', 'AUDIO_REQUIRED'),
+    ('edit_video', None),
+])
+def test_audio_required_is_driven_by_the_action_declared_parameters(
+    action, expected):
+  assert _code(_sub(action, _OMNI)) == expected
+
+
 def test_duration_must_be_a_non_bool_int():
   for bad in (3.5, 4.0, '5', True):
     assert _code(_sub('generate_video',
