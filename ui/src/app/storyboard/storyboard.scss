@@ -679,6 +679,22 @@
             }
           }
 
+          .edit-btn {
+            position: absolute;
+            top: 4px;
+            right: 40px;
+            z-index: 2;
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            transform: scale(0.8);
+            backdrop-filter: blur(4px);
+
+            &:hover {
+              background: var(--mat-sys-primary-container);
+              color: var(--mat-sys-on-primary-container);
+            }
+          }
+
           .reference-image-bg {
             position: absolute;
             top: 0;

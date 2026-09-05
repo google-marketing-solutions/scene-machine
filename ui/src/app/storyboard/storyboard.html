@@ -235,6 +235,16 @@
                                 <div class="resolution">
                                   {{ candidate.resolution === '4k' ? '4K' : candidate.resolution }}
                                 </div>
+                                @if (config.canEditCandidates()) {
+                                  <button
+                                    mat-icon-button
+                                    class="edit-btn"
+                                    (click)="editCandidate($event, scene, $index)"
+                                    matTooltip="Edit with a prompt"
+                                  >
+                                    <mat-icon>auto_fix_high</mat-icon>
+                                  </button>
+                                }
                                 <button
                                   mat-icon-button
                                   class="archive-btn"
@@ -356,6 +366,16 @@
                                   #thumbContainer
                                   [style.aspect-ratio]="previewAspectRatio()"
                                 >
+                                  @if (config.canEditCandidates()) {
+                                    <button
+                                      mat-icon-button
+                                      class="edit-btn"
+                                      (click)="editCandidate($event, scene, $index)"
+                                      matTooltip="Edit with a prompt"
+                                    >
+                                      <mat-icon>auto_fix_high</mat-icon>
+                                    </button>
+                                  }
                                   <button
                                     mat-icon-button
                                     class="archive-btn"
@@ -798,7 +818,7 @@
                   >
                     <mat-select
                       [ngModel]="config.projectConfig.value().model"
-                      (ngModelChange)="config.updateProjectConfig({model: $event})"
+                      (ngModelChange)="config.selectVideoModel($event)"
                     >
                       @for (model of config.videoModels(); track model) {
                         <mat-option [value]="model">{{ model }}</mat-option>
@@ -832,7 +852,13 @@
                       >{{ config.projectConfig.value().candidateDurationSeconds }}s</span
                     >
                   </div>
-                  <mat-slider min="4" max="8" step="2" discrete showTickMarks>
+                  <mat-slider
+                    [min]="config.durationSlider().min"
+                    [max]="config.durationSlider().max"
+                    [step]="config.durationSlider().step"
+                    discrete
+                    showTickMarks
+                  >
                     <input
                       matSliderThumb
                       [ngModel]="config.projectConfig.value().candidateDurationSeconds"
@@ -852,8 +878,10 @@
                     </div>
                     <mat-slide-toggle
                       color="primary"
-                      [ngModel]="config.projectConfig.value().generateAudio"
+                      [ngModel]="config.audioLocked() || config.projectConfig.value().generateAudio"
                       (ngModelChange)="config.updateProjectConfig({generateAudio: $event})"
+                      [disabled]="config.audioLocked()"
+                      [matTooltip]="config.audioLocked() ? 'This model always generates audio' : ''"
                     ></mat-slide-toggle>
                   </div>
                 </div>

@@ -42,14 +42,12 @@
             name="aspectRatio"
             aria-label="Aspect Ratio"
           >
-            <mat-button-toggle value="16:9">
-              <mat-icon>crop_16_9</mat-icon>
-              16:9
-            </mat-button-toggle>
-            <mat-button-toggle value="9:16">
-              <mat-icon>crop_portrait</mat-icon>
-              9:16
-            </mat-button-toggle>
+            @for (a of config.allowedAspectRatios(); track a) {
+              <mat-button-toggle [value]="a">
+                <mat-icon>{{ a === '9:16' ? 'crop_portrait' : 'crop_16_9' }}</mat-icon>
+                {{ a }}
+              </mat-button-toggle>
+            }
           </mat-button-toggle-group>
         </div>
 
@@ -58,10 +56,11 @@
           <mat-form-field appearance="outline" class="resolution-select">
             <mat-select
               [ngModel]="config.projectConfig.value().resolution"
-              (ngModelChange)="config.updateProjectConfig({resolution: $event})"
+              (ngModelChange)="config.selectResolution($event)"
             >
-              <mat-option value="720p">720p</mat-option>
-              <mat-option value="1080p">1080p</mat-option>
+              @for (r of config.allowedResolutions(); track r) {
+                <mat-option [value]="r">{{ r === '4k' ? '4K' : r }}</mat-option>
+              }
             </mat-select>
           </mat-form-field>
         </div>
@@ -71,7 +70,7 @@
           <mat-form-field appearance="outline" class="veo-model-select">
             <mat-select
               [ngModel]="config.projectConfig.value().model"
-              (ngModelChange)="config.updateProjectConfig({model: $event})"
+              (ngModelChange)="config.selectVideoModel($event)"
             >
               @for (model of config.videoModels(); track model) {
                 <mat-option [value]="model">{{ model }}</mat-option>
@@ -98,7 +97,13 @@
             >Candidate duration: {{ config.projectConfig.value().candidateDurationSeconds
             }}<span class="unit-label">s</span></span
           >
-          <mat-slider min="4" max="8" step="2" discrete showTickMarks>
+          <mat-slider
+            [min]="config.durationSlider().min"
+            [max]="config.durationSlider().max"
+            [step]="config.durationSlider().step"
+            discrete
+            showTickMarks
+          >
             <input
               matSliderThumb
               [ngModel]="config.projectConfig.value().candidateDurationSeconds"
@@ -110,8 +115,10 @@
         <div class="setting-item">
           <span class="setting-label">Generate audio</span>
           <mat-slide-toggle
-            [ngModel]="config.projectConfig.value().generateAudio"
+            [ngModel]="config.audioLocked() || config.projectConfig.value().generateAudio"
             (ngModelChange)="config.updateProjectConfig({generateAudio: $event})"
+            [disabled]="config.audioLocked()"
+            [matTooltip]="config.audioLocked() ? 'This model always generates audio' : ''"
           ></mat-slide-toggle>
         </div>
       </div>

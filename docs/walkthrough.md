@@ -50,14 +50,14 @@ To use this flow:
 - **Upload Images**: Provide at least one product image. **Tip:** You can find example assets in [media/example_assets](media/example_assets).
 - **Add Details (optional)**: Enter product descriptions and specify your target audience, market, video style, and composition preferences.
 - **Generate**: Scene Machine automatically sequences these inputs into a storyboard.
-- **Create Video**: Once the storyboard is ready, use the Veo model to execute Image-to-Video generation.
+- **Create Video**: Once the storyboard is ready, use the video model to execute Image-to-Video generation.
 
 > [!NOTE]
 > **Project Settings:** Configure these parameters before generating scenes (recommended).
 > - **Project Name**: Assign a descriptive name to your project.
 > - **Aspect Ratio & Resolution**: Select your desired format. Note: These are locked once scenes are generated to ensure compatibility.
-> - **Video Model**: Select the specific Veo model enabled for your deployment.
-> - **Number of Candidates**: Define how many video variations Veo generates per scene.
+> - **Video Model**: Select the specific video model enabled for your deployment.
+> - **Number of Candidates**: Define how many video variations the video model generates per scene.
 > - **Candidate Duration**: Set the length (in seconds) for each generated video.
 > - **Generate Audio**: Toggle to enable or disable audio generation for your scenes.
 
@@ -65,7 +65,7 @@ To use this flow:
 
 ### Actions:
 - **Configure Settings**: Enter your Project Name, and set your desired `Aspect Ratio` and `Resolution`.
-- **Select Model**: Choose the Veo Model for your deployment (we recommend fast/lite for quick demonstrations).
+- **Select Model**: Choose the video model for your deployment (we recommend fast/lite for quick demonstrations).
 - **Manually Create (Optional)**: To bypass the Generate with AI flow, select `Manually create` and click Proceed to Storyboard to navigate directly to the Storyboard stage.
 
 > [!IMPORTANT]
@@ -124,9 +124,9 @@ For example, the [Single Product - 3 Scenes](../creative_templates/single_produc
 ## Step 5: Generating and Reviewing the Visual Storyboard
 [< previous step](#step-4-applying-creative-templates-to-standardize-composition) | [Top](#walkthrough-top) | [next step >](#step-6-organizing-and-supplementing-the-video-timeline)
 ### Overview
-Scene Machine is now sending your inputs to Gemini to craft a cohesive visual storyboard and corresponding prompts. We included this review step so you can verify the storyboard and prompts before Veo begins video generation, as generation is billed per second for each candidate.
+Scene Machine is now sending your inputs to Gemini to craft a cohesive visual storyboard and corresponding prompts. We included this review step so you can verify the storyboard and prompts before the video model begins video generation, as generation is billed per second for each candidate.
 
-Review the generated storyboard. Scene Machine has mapped your input images to scene descriptions and created corresponding Veo prompts to animate them. Once you are satisfied with the sequence, proceed to video generation. (optional): When reviewing, you can make changes to the storyboard. You can edit the prompts or delete a scene from being generated.
+Review the generated storyboard. Scene Machine has mapped your input images to scene descriptions and created corresponding video-generation prompts to animate them. Once you are satisfied with the sequence, proceed to video generation. (optional): When reviewing, you can make changes to the storyboard. You can edit the prompts or delete a scene from being generated.
 
 ![](media/04_generate_review_change_visual_storyboard.gif)
 
@@ -137,9 +137,9 @@ Review the generated storyboard. Scene Machine has mapped your input images to s
 - **Generate**: Click `Generate Videos` to begin the video generation process.
 
 > [!NOTE]
-> **Aspect Ratio Mismatch:** If your input images do not match the project’s aspect ratio, Scene Machine prompts you to choose an adjustment method to ensure compatibility with Veo:
+> **Aspect Ratio Mismatch:** If your input images do not match the project’s aspect ratio, Scene Machine prompts you to choose an adjustment method to ensure compatibility with the video model:
 > 
-> - **Use as is**: Retains the original aspect ratio (the Veo model's default behavior applies).
+> - **Use as is**: Retains the original aspect ratio (the video model's default behavior applies).
 > - **Crop**: Crops the image to the target aspect ratio, starting from the top-left.
 > - **Outpaint**: Uses Nano Banana to generate an outpainted version that matches the target aspect ratio.
 
@@ -148,7 +148,7 @@ Review the generated storyboard. Scene Machine has mapped your input images to s
 ## Step 6: Organizing and Supplementing the Video Timeline
 [< previous step](#step-5-generating-and-reviewing-the-visual-storyboard) | [Top](#walkthrough-top) | [next step >](#step-7-generating-reviewing-and-trimming-video-candidates)
 ### Overview
-You have arrived at the Storyboard stage, where you can generate and manage video candidates scene-by-scene. Use the central timeline to reorder scenes or click the (+) button to add new content, such as an existing end slate. Scene Machine sends video generation requests to Veo in parallel, which significantly reduces the total time required for all scenes to be generated. While a single video generation by Veo typically takes 1–3 minutes, your actual experience may vary based on your chosen model, resolution, duration, and current system load.
+You have arrived at the Storyboard stage, where you can generate and manage video candidates scene-by-scene. Use the central timeline to reorder scenes or click the (+) button to add new content, such as an existing end slate. Scene Machine sends video generation requests to the video model in parallel, which significantly reduces the total time required for all scenes to be generated. While a single video generation by the video model typically takes 1–3 minutes, your actual experience may vary based on your chosen model, resolution, duration, and current system load.
 
 ![](media/05_storyboard_drag_scenes_in_timeline.gif)
 ![](media/06_add_new_scene_from_video.gif)
@@ -165,7 +165,7 @@ You have arrived at the Storyboard stage, where you can generate and manage vide
 ## Step 7: Generating, Reviewing, and Trimming Video Candidates
 [< previous step](#step-6-organizing-and-supplementing-the-video-timeline) | [Top](#walkthrough-top) | [next step >](#step-8-composing-and-enhancing-with-transitions-audio-and-overlays)
 ### Overview
-Let’s examine a specific scene. On the left, you will see a list of candidate videos generated by Veo. Hover over any candidate to preview it at 2x speed without sound. Click a candidate to load it in the central workspace for detailed review and trimming. 
+Let’s examine a specific scene. On the left, you will see a list of candidate videos generated by the video model. Hover over any candidate to preview it at 2x speed without sound. Click a candidate to load it in the central workspace for detailed review and trimming.
 
 **Note** All generated candidates are immutable. When you select a candidate, Scene Machine loads the prompt and settings used for its creation. You can update these parameters and click `Generate Candidates` to create a new run of variations in the left panel; your original candidate remains unchanged. 
 

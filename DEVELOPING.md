@@ -142,6 +142,8 @@ The model catalog — which models exist, their locations and capabilities, and 
 
 `max_videos_per_request` is how many clips one provider call returns: Veo returns up to 4 in a single call, Omni exactly 1, so four Omni candidates take four separate calls. It is not the app's candidate limit, which is 1 to 4 for every model regardless of this field. Every `generate_video` catalog entry must carry `allowed_aspect_ratios`, `allowed_resolutions`, `duration_by_resolution`, and `audio_always_on`, and each `duration_by_resolution` list must be a strictly ascending arithmetic progression, since the UI derives the duration slider's min, max, and step from it.
 
+The Setup and Storyboard video controls read `allowed_resolutions`, `allowed_aspect_ratios` and `duration_by_resolution` from the selected model's entry; a model without them falls back to 720p/1080p, 16:9/9:16 and 4/6/8 s. Changing the model or the resolution snaps the other settings to allowed values; saved projects are never changed on load.
+
 ## Creating Applications
 
 [< Local Development](#local-development-and-faster-deploys) • [Top](#developing-top) • [Modules not used by Scene Machine >](#modules-not-used-by-scene-machine)

@@ -63,6 +63,7 @@ import {
   StoryboardGenerationWorkflowParameters,
   StoryboardItem,
   SupplyNodeResponse,
+  VideoEditWorkflowParameters,
   VideoGenerationWorkflowParameters,
   WORKFLOW_STATUS_POLL_INTERVAL_MS,
   WORKFLOW_STATUS_POLL_TIMEOUT_MS,
@@ -329,9 +330,15 @@ export class RemixEngineService {
           forceExecution,
           numberOfVideos: projectConfig.numberOfCandidates,
           videoDuration: projectConfig.candidateDurationSeconds,
-          generateAudio: projectConfig.generateAudio,
+          // A model whose catalog entry always generates audio overrides the
+          // project's own toggle (the toggle itself is shown on and disabled
+          // for such a model, but the posted value must match regardless).
+          generateAudio:
+            this.configService.audioLocked() || projectConfig.generateAudio,
           veoModel: projectConfig.model,
-          veoLocation: globalConfig!.veoLocation,
+          veoLocation: this.configService.resolveVideoLocation(
+            projectConfig.model,
+          )!,
           aspectRatio: projectConfig!.aspectRatio,
           productImagePath: scene.referenceImage?.path,
           promptPath,
@@ -400,6 +407,8 @@ export class RemixEngineService {
       resolution = aspectRatio === '16:9' ? '1920:1080' : '1080:1920';
     } else if (projectConfig.resolution === '4k') {
       resolution = aspectRatio === '16:9' ? '3840:2160' : '2160:3840';
+    } else if (projectConfig.resolution === '360p') {
+      resolution = aspectRatio === '16:9' ? '640:360' : '360:640';
     }
     try {
       const arrangementPath = await this.uploadText(
@@ -624,6 +633,81 @@ export class RemixEngineService {
     };
   }
 
+  /**
+   * Builds the edit_video workflow body for a single candidate edit. The
+   * sink's input is named `video` on purpose (not `edited_video`): the same
+   * pollWorkflow/resumeGeneration consumers that read a generation's
+   * sink.output['0']['video'] read this run's output too. inputFiles carry
+   * only `file` (no image_id/run number/timestamp) and parameters carry only
+   * `model` and `gcp_location`, so two identical edits hash to the same
+   * worker cache key.
+   */
+  private getVideoEditWorkflowDefinition(params: VideoEditWorkflowParameters) {
+    return {
+      workflowDefinition: {
+        root: {
+          action: 'pass',
+          input: {
+            video: null,
+            prompt: null,
+          },
+          types: {
+            video: 'video',
+            prompt: 'string',
+          },
+        },
+        n_0: {
+          action: 'edit_video',
+          input: {
+            video: {
+              node: 'root',
+              output: 'video',
+            },
+            prompt: {
+              node: 'root',
+              output: 'prompt',
+            },
+          },
+          parameters: {
+            model: params.model,
+            gcp_location: params.location,
+            resolution: params.resolution,
+          },
+        },
+        sink: {
+          action: 'pass',
+          input: {
+            video: {
+              node: 'n_0',
+              output: 'edited_video',
+            },
+          },
+        },
+      },
+      nodeId: 'root',
+      workflowId: params.workflowId,
+      forceExecution: params.forceExecution,
+      workflowParams: {
+        gcpProject: params.gcpProject,
+        gcpLocation: params.gcpLocation,
+        gcsBucket: params.gcsBucket,
+        tasksQueuePrefix: params.tasksQueuePrefix,
+      },
+      inputFiles: {
+        video: [
+          {
+            file: params.videoPath,
+          },
+        ],
+        prompt: [
+          {
+            file: params.promptPath,
+          },
+        ],
+      },
+    };
+  }
+
   private getCombineScenesWorkflowDefinition(
     params: CombineScenesWorkflowParameters,
   ) {
@@ -715,7 +799,7 @@ export class RemixEngineService {
     {
       durationSeconds,
       model,
-      generateAudio,
+      generateAudio: requestedGenerateAudio,
       resolution,
     }: {
       durationSeconds: number;
@@ -724,6 +808,11 @@ export class RemixEngineService {
       resolution: Resolution;
     },
   ) {
+    // A model whose catalog entry always generates audio overrides the
+    // caller's own choice (the toggle is shown on and disabled for such a
+    // model, but a caller that read a stale value must not undercut it).
+    const generateAudio =
+      this.configService.audioLocked() || requestedGenerateAudio;
     const projectId = this.configService.projectConfig.value().id;
     if (this.generatingSceneIds().has(s.id)) {
       return;
@@ -875,6 +964,262 @@ export class RemixEngineService {
   }
 
   /**
+   * Selects the model edit_video runs with: the first (sorted) edit-capable
+   * model at the configured Veo location, preferring the catalog's own Omni
+   * default when that default is itself edit-capable there. Never derived
+   * from the project's own model — a project set to a Veo id must still
+   * route edits through an edit-capable model. Returns undefined when no
+   * model can edit at this location.
+   */
+  private selectEditModel(): string | undefined {
+    const editModels = this.configService.videoEditModels();
+    if (editModels.length === 0) {
+      return undefined;
+    }
+    const omniDefault =
+      this.configService.globalConfig.value()?.modelCatalog?.defaults['omni'];
+    return omniDefault && editModels.includes(omniDefault)
+      ? omniDefault
+      : editModels[0];
+  }
+
+  /**
+   * Turns one candidate into a new candidate by running edit_video with a
+   * text instruction. Follows the same start/persist/poll/collect/attach path
+   * as generateCandidates, with requestedCount 1 and the source candidate's
+   * own duration/trim/resolution/prompt/referenceImage carried onto both the
+   * request and the resulting candidate (an edit changes only the video,
+   * never the scene's other settings). Identical edits hash to the same
+   * worker cache key: a cache-hit result (a path already attached to the
+   * scene) is deduped rather than attached a second time.
+   */
+  async editCandidate(
+    scene: GeneratedScene,
+    candidateIndex: number,
+    editPrompt: string,
+  ): Promise<void> {
+    const source = structuredClone(scene.candidates?.[candidateIndex]);
+    const model = this.selectEditModel();
+    if (!model) {
+      this.matSnackBar.open(
+        'No model can edit video at this location.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      return;
+    }
+    if (!source?.video) {
+      // An errored candidate has nothing to edit — not a catalog problem, so
+      // no "no model" message.
+      return;
+    }
+    if (this.generatingSceneIds().has(scene.id)) {
+      return;
+    }
+    const globalConfig = this.configService.globalConfig.value();
+    if (!globalConfig) {
+      this.matSnackBar.open(
+        'Configuration is not loaded yet. Please try again in a moment.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      return;
+    }
+    const projectId = this.configService.projectConfig.value().id;
+    this.generatingSceneIds.update(ids => {
+      const newIds = new Set(ids);
+      newIds.add(scene.id);
+      return newIds;
+    });
+
+    let executionId = '';
+    try {
+      const workflowId = crypto.randomUUID();
+      const promptPath = await this.uploadText(editPrompt, 'edit-prompt');
+      // Nothing is paid yet: bail like a navigation if the project changed
+      // during the upload rather than posting into whatever project is now
+      // loaded.
+      this.assertProjectUnchanged(projectId);
+      const response = this.startWorkflow(
+        this.getVideoEditWorkflowDefinition({
+          workflowId,
+          gcpProject: globalConfig.gcpProject,
+          gcpLocation: globalConfig.gcpLocation,
+          gcsBucket: globalConfig.gcsBucket,
+          forceExecution: false,
+          tasksQueuePrefix: globalConfig.tasksQueuePrefix,
+          model,
+          location: this.configService.resolveVideoLocation(model)!,
+          videoPath: source.video.path,
+          promptPath,
+          resolution: source.resolution,
+        }),
+      );
+      executionId = (await firstValueFrom(response)).executionId;
+      if (!this.projectMatches(projectId)) {
+        // The run is paid for and already started, but the project changed
+        // before the marker could be written. Do not write it (or anything
+        // else) into whatever project is now loaded, and do not poll: that
+        // would leak this run's result into the wrong project. Log the
+        // orphaned run with the captured ids (not sceneLabel(), which would
+        // read the newly loaded project) so it can be found. `finally` still
+        // clears the spinner.
+        console.error('Orphaned video edit run (project changed):', {
+          sceneId: scene.id,
+          projectId,
+          executionId,
+        });
+        return;
+      }
+      console.debug(
+        `${this.sceneLabel(scene.id)} — video edit workflow started:`,
+        `${window.location.origin}/status?executionId=${executionId}`,
+      );
+      // Persist the in-flight run immediately, exactly like generateCandidates:
+      // navigating away must not lose it.
+      const pending: PendingGeneration = {
+        executionId,
+        requestedCount: 1,
+        startedAt: new Date().toISOString(),
+        durationSeconds: source.durationSeconds,
+        model,
+        // An edit always runs through the edit-capable (Omni) model, which
+        // always generates audio.
+        generateAudio: true,
+        resolution: source.resolution,
+        prompt: source.prompt,
+        editPrompt,
+        editedFromRun: source.runNumber,
+      };
+      if (source.trim) {
+        pending.trim = {...source.trim};
+      }
+      if (source.referenceImage) {
+        pending.referenceImage = {...source.referenceImage};
+      }
+      this.setScenePendingGeneration(scene.id, pending);
+      const workflowStatus = await this.pollWorkflow(executionId, projectId);
+      if (workflowStatus.sink?.output['0']['video'][0]['_error']) {
+        const errorMsg =
+          workflowStatus.sink?.output['0']['video'][0]['_error'] ||
+          'Unknown error';
+        throw new Error(errorMsg);
+      }
+      if (!workflowStatus.sink) {
+        throw new Error('Workflow completed without output');
+      }
+      const currentScene = this.configService.projectConfig
+        .value()
+        .storyboard.find(
+          (s): s is GeneratedScene =>
+            s.id === scene.id && this.configService.isGeneratedScene(s),
+        );
+      const existingCandidates = currentScene?.candidates ?? [];
+      // Dedupe against a cache hit: an identical edit hashes to the same
+      // worker output path, which may already be attached as a candidate.
+      const attachedPaths = new Set(
+        existingCandidates
+          .map(c => c.video?.path)
+          .filter((p): p is string => p !== undefined),
+      );
+      const videoItems = workflowStatus.sink.output['0']['video'];
+      const newVideoItems = videoItems.filter(
+        e => e.file === undefined || !attachedPaths.has(e.file),
+      );
+      // Signing/collecting below is async; bail like a navigation if the
+      // project changed meanwhile, mirroring generateCandidates. (E5)
+      this.assertProjectUnchanged(projectId);
+      if (newVideoItems.length === 0 && videoItems.length > 0) {
+        this.setScenePendingGeneration(scene.id, undefined);
+        this.matSnackBar.open(
+          'This edit already exists as a candidate',
+          'Dismiss',
+        );
+        return;
+      }
+      const currentMaxRun = existingCandidates.length
+        ? Math.max(...existingCandidates.map(c => c.runNumber))
+        : 0;
+      const newCandidates = await this.collectCandidates(
+        newVideoItems,
+        currentMaxRun,
+        {
+          durationSeconds: source.durationSeconds,
+          model,
+          generateAudio: true,
+          resolution: source.resolution,
+          prompt: source.prompt,
+          referenceImage: source.referenceImage,
+          trim: source.trim,
+          editPrompt,
+          editedFromRun: source.runNumber,
+        },
+      );
+      this.assertProjectUnchanged(projectId);
+      if (newCandidates.length === 0) {
+        this.setScenePendingGeneration(scene.id, undefined);
+        return;
+      }
+      this.attachCandidates(scene.id, [
+        ...existingCandidates,
+        ...newCandidates,
+      ]);
+    } catch (error) {
+      if (error instanceof ProjectChangedError) {
+        console.info(error.message);
+        return;
+      } else if (error instanceof PollTimeoutError) {
+        this.matSnackBar.open(
+          'Generation is taking longer than expected. It may still finish — ' +
+            'reopen the project to check.',
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
+        return;
+      } else if (error instanceof CandidateSigningError) {
+        this.matSnackBar.open(
+          'Generated videos are ready but could not be loaded right now — ' +
+            'reopen the project to retry.',
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
+        return;
+      } else if (error instanceof Error) {
+        if (!this.projectMatches(projectId)) {
+          // The project changed under us; the error belongs to the run
+          // started against `projectId`, not whatever project is loaded
+          // now. Writing it there would corrupt an unrelated scene, so log
+          // the orphaned run with the captured ids instead.
+          console.error('Orphaned video edit run (project changed):', {
+            sceneId: scene.id,
+            projectId,
+            executionId,
+            error,
+          });
+          return;
+        }
+        this.setSceneGenerationError(scene.id, error.message);
+        console.error('Video edit error:', {executionId, error});
+        console.error(
+          `${this.sceneLabel(scene.id)} — debug URL:`,
+          `${window.location.origin}/status?executionId=${executionId}`,
+        );
+        this.matSnackBar.open(
+          `${this.sceneLabel(scene.id)} failed to generate — open the marked scene to see why.`,
+          'Dismiss',
+          {panelClass: ['error-snackbar']},
+        );
+      }
+    } finally {
+      this.generatingSceneIds.update(ids => {
+        const newIds = new Set(ids);
+        newIds.delete(scene.id);
+        return newIds;
+      });
+    }
+  }
+
+  /**
    * Resumes a candidate generation persisted in the project document
    * (mediated data plane): re-registers the scene as generating (so the
    * storyboard renders its loading placeholders), polls the persisted
@@ -938,6 +1283,9 @@ export class RemixEngineService {
           resolution: pending.resolution,
           prompt: pending.prompt,
           referenceImage: pending.referenceImage,
+          trim: pending.trim,
+          editPrompt: pending.editPrompt,
+          editedFromRun: pending.editedFromRun,
         },
       );
       // Attach even when newCandidates is empty: the run is complete, so
@@ -1021,6 +1369,11 @@ export class RemixEngineService {
       resolution: Resolution;
       prompt: string;
       referenceImage?: GcsFile;
+      // Present only for a run started by editCandidate; carried onto the
+      // resulting candidate below.
+      trim?: {start?: number; end?: number};
+      editPrompt?: string;
+      editedFromRun?: number;
     },
   ): Promise<Candidate[]> {
     const buildCandidate = async (
@@ -1058,6 +1411,15 @@ export class RemixEngineService {
       };
       if (params.referenceImage) {
         newCandidate.referenceImage = {...params.referenceImage};
+      }
+      if (params.trim) {
+        newCandidate.trim = {...params.trim};
+      }
+      if (params.editPrompt !== undefined) {
+        newCandidate.editPrompt = params.editPrompt;
+      }
+      if (params.editedFromRun !== undefined) {
+        newCandidate.editedFromRun = params.editedFromRun;
       }
       return newCandidate;
     };
@@ -1505,9 +1867,14 @@ export class RemixEngineService {
    * original project re-collects the finished result. (E5)
    */
   private assertProjectUnchanged(projectId: string) {
-    if (this.configService.projectConfig.value().id !== projectId) {
+    if (!this.projectMatches(projectId)) {
       throw new ProjectChangedError();
     }
+  }
+
+  /** Whether the currently loaded project is still `projectId`. */
+  private projectMatches(projectId: string): boolean {
+    return this.configService.projectConfig.value().id === projectId;
   }
 
   /**
