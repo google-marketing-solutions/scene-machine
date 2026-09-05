@@ -1,0 +1,63 @@
+{
+  "workflowDefinition": {
+    "root": {
+      "action": "pass",
+      "input": {
+        "video": null,
+        "prompt": null
+      },
+      "types": {
+        "video": "video",
+        "prompt": "string"
+      }
+    },
+    "n_0": {
+      "action": "edit_video",
+      "input": {
+        "video": {
+          "node": "root",
+          "output": "video"
+        },
+        "prompt": {
+          "node": "root",
+          "output": "prompt"
+        }
+      },
+      "parameters": {
+        "model": "gemini-omni-1.1-flash-preview",
+        "gcp_location": "global",
+        "resolution": "720p"
+      }
+    },
+    "sink": {
+      "action": "pass",
+      "input": {
+        "n_0.edited_video": {
+          "node": "n_0",
+          "output": "edited_video"
+        }
+      }
+    }
+  },
+  "nodeId": "root",
+  "workflowId": "73454546",
+  "forceExecution": false,
+  "workflowParams": {
+    "gcpProject": "${PROJECT}",
+    "gcpLocation": "${REGION}",
+    "gcsBucket": "${GCS_BUCKET}",
+    "tasksQueuePrefix": "${TASKS_QUEUE_PREFIX}"
+  },
+  "inputFiles": {
+    "video": [
+      {
+        "file": "examples/BlueSofaDog.mp4"
+      }
+    ],
+    "prompt": [
+      {
+        "file": "examples/prompt_edit.txt"
+      }
+    ]
+  }
+}

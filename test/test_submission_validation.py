@@ -17,12 +17,14 @@
 Tests assert on the stable error CODE, never the message.
 """
 
+import copy
 import glob
 import json
 import os
 
 import pytest
 
+from util.model_allowlist import load_shipped_allowlist
 from util.submission_validation import validate_submission
 
 _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -882,3 +884,126 @@ def test_wellformed_dimension_controls_accepted():
       node_id='root',
   )
   assert validate_submission(wf) is None
+
+
+# --- per-model capability checks (Pass 1) ------------------------------------
+
+_OMNI = {'model': 'gemini-omni-1.1-flash-preview', 'gcp_location': 'global'}
+
+
+def test_aspect_ratio_not_allowed_for_model():
+  assert _code(
+      _sub('generate_video', {**_OMNI, 'aspect_ratio': '1:1'})
+  ) == 'ASPECT_RATIO_NOT_ALLOWED'
+
+
+def test_resolution_not_allowed_for_model():
+  assert _code(
+      _sub('generate_video', {**_OMNI, 'resolution': '480p'})
+  ) == 'RESOLUTION_NOT_ALLOWED'
+
+
+def test_duration_not_allowed_for_resolution():
+  assert _code(_sub('generate_video',
+                    {**_OMNI, 'resolution': '360p', 'duration_seconds': 999})
+              ) == 'DURATION_NOT_ALLOWED'
+
+
+def test_generate_audio_false_rejected_when_always_on():
+  assert _code(_sub('generate_video',
+                    {**_OMNI, 'generate_audio': False})) == 'AUDIO_REQUIRED'
+
+
+def test_generate_audio_omitted_rejected_when_always_on():
+  assert _code(_sub('generate_video', _OMNI)) == 'AUDIO_REQUIRED'
+
+
+def test_edit_video_without_generate_audio_is_accepted_on_audio_locked_model():
+  # Mirrors the UI's edit request (getVideoEditWorkflowDefinition): model,
+  # gcp_location, resolution -- no generate_audio, since edit_video does not
+  # declare that parameter.
+  assert _code(_sub('edit_video', {**_OMNI, 'resolution': '360p'})) is None
+
+
+@pytest.mark.parametrize('action,expected', [
+    ('generate_video', 'AUDIO_REQUIRED'),
+    ('edit_video', None),
+])
+def test_audio_required_is_driven_by_the_action_declared_parameters(
+    action, expected):
+  assert _code(_sub(action, _OMNI)) == expected
+
+
+def test_duration_must_be_a_non_bool_int():
+  for bad in (3.5, 4.0, '5', True):
+    assert _code(_sub('generate_video',
+                      {**_OMNI, 'resolution': '360p', 'duration_seconds': bad})
+                ) == 'DURATION_NOT_ALLOWED', f'duration_seconds={bad!r} passed'
+
+
+def test_omni_full_valid_submission_accepted():
+  assert validate_submission(
+      _sub('generate_video',
+           {**_OMNI, 'resolution': '360p', 'duration_seconds': 9,
+            'aspect_ratio': '9:16', 'generate_audio': True})) is None
+
+
+def test_veo_duration_not_allowed_at_4k():
+  assert _code(_sub('generate_video',
+                    {**_VALID_VIDEO, 'resolution': '4k', 'duration_seconds': 6})
+              ) == 'DURATION_NOT_ALLOWED'
+
+
+def test_veo_duration_allowed_at_4k():
+  assert validate_submission(
+      _sub('generate_video',
+           {**_VALID_VIDEO, 'resolution': '4k', 'duration_seconds': 8})) is None
+
+
+def test_veo_duration_pairwise_cross_product_rejected():
+  # resolution=['720p','4k'], duration_seconds=6 really executes a 4k 6s clip
+  # (full cross product, util/workflow.py); it must be rejected, not accepted
+  # via a union of what each resolution alone allows.
+  assert _code(_sub('generate_video',
+                    {**_VALID_VIDEO, 'resolution': ['720p', '4k'],
+                     'duration_seconds': 6})) == 'DURATION_NOT_ALLOWED'
+
+
+def test_veo_duration_pairwise_cross_product_accepted():
+  assert validate_submission(
+      _sub('generate_video',
+           {**_VALID_VIDEO, 'resolution': ['720p', '1080p'],
+            'duration_seconds': [4, 8]})) is None
+
+
+def test_model_without_capability_fields_is_unrestricted():
+  # gemini-3.5-flash carries no aspect_ratio/resolution/duration/audio
+  # capability fields, so a stray resolution param on it must pass through.
+  assert validate_submission(
+      _sub('translate',
+           {'gemini_model': 'gemini-3.5-flash',
+            'gemini_model_location': 'global',
+            'resolution': '480p'})) is None
+
+
+def _allowlist_without_omni_allowed_resolutions() -> dict:
+  # A live config/models edit can drop allowed_resolutions while keeping
+  # duration_by_resolution (validate_catalog_shape allows it, both fields are
+  # optional); the pairwise duration check must still not crash on an odd
+  # resolution value once the RESOLUTION_NOT_ALLOWED check no longer catches
+  # it first.
+  allowlist = copy.deepcopy(load_shipped_allowlist())
+  del allowlist['models']['gemini-omni-1.1-flash-preview'][
+      'capabilities']['allowed_resolutions']
+  return allowlist
+
+
+@pytest.mark.parametrize('bad_resolution', [{'a': 1}, [['720p']]])
+def test_duration_check_rejects_unhashable_resolution_without_crashing(
+    bad_resolution):
+  assert validate_submission(
+      _sub('generate_video',
+           {**_OMNI, 'resolution': bad_resolution, 'duration_seconds': 8,
+            'generate_audio': True}),
+      allowlist=_allowlist_without_omni_allowed_resolutions(),
+  ) is None

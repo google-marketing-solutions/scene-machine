@@ -1120,7 +1120,13 @@ def test_config_returns_seeded_doc_plus_model_catalog(
   live_catalog = model_allowlist.load_shipped_allowlist()
   live_catalog['models']['veo-live-hotfix'] = {
       'family': 'veo', 'actions': ['generate_video'],
-      'locations': ['global'], 'capabilities': {}}
+      'locations': ['global'],
+      'capabilities': {
+          'allowed_aspect_ratios': ['16:9'],
+          'allowed_resolutions': ['720p'],
+          'duration_by_resolution': {'720p': [4, 6, 8]},
+          'audio_always_on': False,
+      }}
   monkeypatch.setattr(
       model_allowlist, '_fetch_live_catalog', lambda: live_catalog)
   client = orch.app.test_client()

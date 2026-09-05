@@ -6,6 +6,6 @@ google-cloud-firestore
 google-cloud-logging
 google-cloud-storage
 google-cloud-tasks
-google-genai==2.7.0
+google-genai==2.21.0
 gunicorn
 Pillow

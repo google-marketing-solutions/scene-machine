@@ -150,6 +150,102 @@ def _as_values(value: Any) -> list:
   return value if isinstance(value, list) else [value]
 
 
+def _capability_violation(
+    node_id: str,
+    action: str,
+    model: str,
+    caps: dict,
+    params: dict,
+    action_params: set[str],
+) -> tuple[str, str] | None:
+  """Checks `params` against `model`'s catalog capabilities.
+
+  Generic across actions: a parameter is only checked when it is present in
+  `params` AND the model's capabilities carry the matching field, so absent
+  parameters and unrestricted models always pass. List-valued parameters are
+  checked element-wise via `_as_values`, matching the engine's cross-product
+  expansion (util/workflow.py) -- a non-string/odd value simply fails the
+  membership test and is reported as not allowed.
+
+  `action_params` is the action's declared parameter/input names, used to
+  scope the audio-required check to actions that actually declare
+  `generate_audio` -- an action that never sends it (edit_video today) cannot
+  be held to it, whatever the model's capabilities say.
+  """
+  if 'aspect_ratio' in params and 'allowed_aspect_ratios' in caps:
+    for value in _as_values(params['aspect_ratio']):
+      if value not in caps['allowed_aspect_ratios']:
+        return (
+            (
+                f'Node {node_id!r}: {action} aspect_ratio {value!r} is not '
+                f'allowed for {model!r}'
+            ),
+            'ASPECT_RATIO_NOT_ALLOWED',
+        )
+
+  if 'resolution' in params and 'allowed_resolutions' in caps:
+    for value in _as_values(params['resolution']):
+      if value not in caps['allowed_resolutions']:
+        return (
+            (
+                f'Node {node_id!r}: {action} resolution {value!r} is not '
+                f'allowed for {model!r}'
+            ),
+            'RESOLUTION_NOT_ALLOWED',
+        )
+
+  if (
+      'duration_seconds' in params
+      and 'duration_by_resolution' in caps
+      and 'resolution' in params
+  ):
+    duration_by_resolution = caps['duration_by_resolution']
+    # Pairwise, not a union of what each resolution alone allows: list
+    # parameters expand as a full cross product, so every (resolution,
+    # duration) combination the engine would actually run must be checked.
+    for resolution in _as_values(params['resolution']):
+      if not isinstance(resolution, str):
+        continue  # can never be a key of the mapping
+      allowed_durations = duration_by_resolution.get(resolution)
+      if allowed_durations is None:
+        continue  # not a key of the mapping; the resolution check above owns it
+      for duration in _as_values(params['duration_seconds']):
+        if (
+            isinstance(duration, bool)
+            or not isinstance(duration, int)
+            or duration not in allowed_durations
+        ):
+          return (
+              (
+                  f'Node {node_id!r}: {action} duration_seconds {duration!r} '
+                  f'is not allowed for {model!r} at resolution '
+                  f'{resolution!r}'
+              ),
+              'DURATION_NOT_ALLOWED',
+          )
+
+  if caps.get('audio_always_on') is True and 'generate_audio' in action_params:
+    if 'generate_audio' not in params:
+      return (
+          (
+              f'Node {node_id!r}: {model!r} always generates audio; '
+              'generate_audio must be true'
+          ),
+          'AUDIO_REQUIRED',
+      )
+    for value in _as_values(params['generate_audio']):
+      if value is not True:
+        return (
+            (
+                f'Node {node_id!r}: {model!r} always generates audio; '
+                'generate_audio must be true'
+            ),
+            'AUDIO_REQUIRED',
+        )
+
+  return None
+
+
 def validate_submission(
     data: Any,
     allowlist: dict | None = None,
@@ -406,6 +502,17 @@ def validate_submission(
           if not is_pair_allowed(action, model, location, allowlist):
             return (f'Node {node_id!r}: {action} model {model!r} is not allowed '
                     f'in {location!r}', 'MODEL_LOCATION_PAIR_INVALID')
+      caps = models[model].get('capabilities') or {}
+      violation = _capability_violation(
+          node_id,
+          action,
+          model,
+          caps,
+          params,
+          _action_params(action, actions_json),
+      )
+      if violation is not None:
+        return violation
 
   # Pass 2: graph-aware fan-out -- bound total executions (queue) and billable
   # generations (cost) along the actual DAG.

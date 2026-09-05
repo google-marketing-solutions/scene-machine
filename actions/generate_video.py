@@ -12,18 +12,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Generates videos using Veo."""
+"""Generates videos using Veo or Gemini Omni."""
 
 from __future__ import annotations
 from typing import cast
 
+from actions_lib import omni
 from actions_lib import veo
 from common import Dimension
 from common import Key
 from common import NodeInput
 from common import NodeOutput
 from common import Params
+from util import model_allowlist
 from util.gcs_wrapper import GCS
+
+
+def _family(model: str) -> str | None:
+  """The model's catalog family, or None if the model is not listed."""
+  return (
+      model_allowlist.load_allowlist()
+      .get('models', {})
+      .get(model, {})
+      .get('family')
+  )
 
 
 def execute(
@@ -50,20 +62,38 @@ def execute(
   image_type = (
       gcs.get_mime_type(image[0][Key.FILE.value]) if has_image else None
   )
-  video_uris = veo.generate(
-      gcp_project=gcp_project or workflow_params[Key.GCP_PROJECT.value],
-      gcp_location=gcp_location or workflow_params[Key.GCP_LOCATION.value],
-      prompt=prompt_text,
-      image_url=image_url,
-      image_type=image_type,
-      duration_seconds=duration_seconds,
-      amount=video_variant_quantity,
-      aspect_ratio=aspect_ratio,
-      resolution=cast(veo.Resolution, resolution),
-      output_gcs=gcs.get_path_uri(),
-      model=model,
-      generate_audio=generate_audio,
-  )
+  family = _family(model)
+  if family == 'veo':
+    video_uris = veo.generate(
+        gcp_project=gcp_project or workflow_params[Key.GCP_PROJECT.value],
+        gcp_location=gcp_location or workflow_params[Key.GCP_LOCATION.value],
+        prompt=prompt_text,
+        image_url=image_url,
+        image_type=image_type,
+        duration_seconds=duration_seconds,
+        amount=video_variant_quantity,
+        aspect_ratio=aspect_ratio,
+        resolution=cast(veo.Resolution, resolution),
+        output_gcs=gcs.get_path_uri(),
+        model=model,
+        generate_audio=generate_audio,
+    )
+  elif family == 'omni':
+    video_uris = omni.generate(
+        gcp_project=gcp_project or workflow_params[Key.GCP_PROJECT.value],
+        gcp_location=gcp_location or workflow_params[Key.GCP_LOCATION.value],
+        prompt=prompt_text,
+        image_url=image_url,
+        image_type=image_type,
+        duration_seconds=duration_seconds,
+        amount=video_variant_quantity,
+        aspect_ratio=aspect_ratio,
+        resolution=cast(omni.Resolution, resolution),
+        output_gcs=gcs.get_path_uri(),
+        model=model,
+    )
+  else:
+    raise ValueError(f'Unknown video model family for {model!r}: {family!r}')
   if not video_uris:
     video_paths = []
   else:

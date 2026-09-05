@@ -83,6 +83,19 @@ def test_model_set_without_region_flagged():
   assert any('region is required' in e for e in errors)
 
 
+def test_catalog_missing_generate_video_field_flagged():
+  catalog = load_shipped_allowlist()
+  del catalog['models']['veo-3.1-generate-001']['capabilities'][
+      'audio_always_on']
+  errors = validate_config_models.catalog_shape_errors(catalog)
+  assert errors and 'audio_always_on' in errors[0]
+
+
+def test_shipped_catalog_shape_passes():
+  assert validate_config_models.catalog_shape_errors(
+      load_shipped_allowlist()) == []
+
+
 def test_config_template_defaults_pass_real_allowlist():
   # The actual config.template.txt defaults must validate against the shipped
   # allowlist -- parsed from the file, not hard-coded, so a drifted default

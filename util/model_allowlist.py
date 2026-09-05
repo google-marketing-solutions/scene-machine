@@ -133,6 +133,52 @@ def _first_non_json_value(value: object, path: str) -> str | None:
   return f'{path} ({type(value).__name__})'
 
 
+def _generate_video_capability_problem(
+    mid: str, capabilities: dict
+) -> str | None:
+  """Returns why a generate_video model's capability schema is incomplete or
+  inconsistent, or None. `capabilities` has already passed the present-implies-
+  typed checks above; this enforces presence plus the cross-field consistency
+  the submission validator and the UI's duration slider both rely on."""
+  aspect_ratios = capabilities.get('allowed_aspect_ratios')
+  if not aspect_ratios:
+    return f'model {mid!r}: allowed_aspect_ratios is required and non-empty'
+  resolutions = capabilities.get('allowed_resolutions')
+  if not resolutions:
+    return f'model {mid!r}: allowed_resolutions is required and non-empty'
+  duration_by_resolution = capabilities.get('duration_by_resolution')
+  if duration_by_resolution is None:
+    return f'model {mid!r}: duration_by_resolution is required'
+  if set(duration_by_resolution) != set(resolutions):
+    return (
+        f'model {mid!r}: duration_by_resolution keys must match '
+        'allowed_resolutions exactly'
+    )
+  for resolution, durations in duration_by_resolution.items():
+    if not durations or not all(
+        isinstance(d, int) and not isinstance(d, bool) and d > 0
+        for d in durations
+    ):
+      return (
+          f'model {mid!r}: duration_by_resolution[{resolution!r}] must be a '
+          'non-empty list of positive ints'
+      )
+    if durations != sorted(durations) or len(set(durations)) != len(durations):
+      return (
+          f'model {mid!r}: duration_by_resolution[{resolution!r}] must be '
+          'strictly ascending'
+      )
+    diffs = {b - a for a, b in zip(durations, durations[1:])}
+    if len(diffs) > 1:
+      return (
+          f'model {mid!r}: duration_by_resolution[{resolution!r}] must be an '
+          'arithmetic progression'
+      )
+  if not isinstance(capabilities.get('audio_always_on'), bool):
+    return f'model {mid!r}: audio_always_on is required and must be a boolean'
+  return None
+
+
 def validate_catalog_shape(catalog: object, shipped_actions: dict) -> str | None:
   """Returns why `catalog` is unusable, or None if it is well-formed.
 
@@ -166,10 +212,39 @@ def validate_catalog_shape(catalog: object, shipped_actions: dict) -> str | None
     # veo.generate applies these with `is True`; a string "false" is a
     # console-edit mistake, not a policy. Required-and-boolean is the
     # snapshot PR's job; present-implies-boolean holds the line here.
-    for flag in ('supports_audio', 'enhance_prompt_locked'):
+    for flag in ('supports_audio', 'enhance_prompt_locked', 'audio_always_on'):
       flag_value = capabilities.get(flag)
       if flag_value is not None and not isinstance(flag_value, bool):
         return f'model {mid!r}: {flag} must be a boolean'
+    for field in ('allowed_aspect_ratios', 'allowed_resolutions'):
+      values = capabilities.get(field)
+      if values is not None and (
+          not isinstance(values, list)
+          or not all(isinstance(v, str) for v in values)
+      ):
+        return f'model {mid!r}: {field!r} is not a list of strings'
+    # Non-string keys never reach here: _first_non_json_value above already
+    # rejects them (a live edit's map keys are always strings).
+    duration_by_resolution = capabilities.get('duration_by_resolution')
+    if duration_by_resolution is not None and (
+        not isinstance(duration_by_resolution, dict)
+        or not all(
+            isinstance(durations, list)
+            and all(
+                isinstance(d, int) and not isinstance(d, bool)
+                for d in durations
+            )
+            for durations in duration_by_resolution.values()
+        )
+    ):
+      return (
+          f'model {mid!r}: duration_by_resolution is not a dict of string to'
+          ' list of ints'
+      )
+    if 'generate_video' in model.get('actions', []):
+      problem = _generate_video_capability_problem(mid, capabilities)
+      if problem:
+        return problem
   for family, mid in catalog['defaults'].items():
     model = catalog['models'].get(mid)
     if model is None:
