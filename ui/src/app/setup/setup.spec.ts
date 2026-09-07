@@ -527,8 +527,9 @@ describe('Setup video controls', () => {
     ).toBe('crop_portrait');
   });
 
-  it('shows the audio toggle checked and disabled when the model always generates audio', async () => {
+  it('keeps the audio toggle enabled so always-audio models can be muted in previews', async () => {
     configMock.audioLocked = () => true;
+    projectConfigSignal.update(c => ({...c, generateAudio: false}));
     fixture.detectChanges();
     // NgModel writes to its ControlValueAccessor (MatSlideToggle.checked) in
     // a microtask, so let that settle before reading it back.
@@ -537,8 +538,8 @@ describe('Setup video controls', () => {
     const toggle = fixture.debugElement.query(By.directive(MatSlideToggle))
       .componentInstance as MatSlideToggle;
 
-    expect(toggle.checked).toBe(true);
-    expect(toggle.disabled).toBe(true);
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(false);
   });
 
   it('leaves the audio toggle enabled and following generateAudio when the model does not always generate audio', async () => {

@@ -621,6 +621,32 @@ describe('CompositionComponent', () => {
     expect(button.textContent).toContain('Render Video');
   });
 
+  it('carries generated candidate audio intent into the composition playlist', () => {
+    const scene: GeneratedScene = {
+      id: 'audio-off',
+      type: 'generated',
+      name: 'Silent scene',
+      prompt: 'test prompt',
+      candidates: [
+        {
+          runNumber: 1,
+          durationSeconds: 5,
+          model: 'veo-3.0-generate-001',
+          prompt: 'test prompt',
+          generateAudio: false,
+          resolution: '1080p',
+          video: {url: 'http://video.url', path: 'path/to/video'},
+        },
+      ],
+      selectedCandidateIndex: 0,
+    };
+    projectConfigSignal.set({...projectConfigSignal(), storyboard: [scene]});
+    fixture.detectChanges();
+
+    expect(component.playlist()[0].includeAudio).toBe(false);
+    expect(component.currentClipIncludesAudio()).toBe(false);
+  });
+
   describe('player src (held, never null)', () => {
     // Two clips: clip 1 spans 0-10s, clip 2 spans 10-15s on the timeline.
     const twoClipStoryboard: ProvidedVideoScene[] = [
@@ -701,6 +727,79 @@ describe('CompositionComponent', () => {
         expect(component.heldVideoSrc()).toBe('https://signed/clip2');
       });
       expect(component.currentPlaylistIndex()).toBe(1);
+    });
+
+    it('becomes ready after a cache-miss resolve so an audio-enabled clip unmutes', async () => {
+      mockMediaService.getCachedUrl.mockImplementation((path: string) =>
+        path === 'videos/clip1.mp4' ? 'https://signed/clip1' : undefined,
+      );
+      let resolveClip2!: (url: string) => void;
+      mockMediaService.resolve.mockImplementation(
+        () => new Promise<string>(resolve => (resolveClip2 = resolve)),
+      );
+      const scenes: GeneratedScene[] = [
+        {
+          id: 's1',
+          type: 'generated',
+          name: 'Clip 1',
+          prompt: 'one',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {
+              video: {url: '', path: 'videos/clip1.mp4'},
+              durationSeconds: 10,
+              runNumber: 1,
+              prompt: 'one',
+              model: 'm',
+              resolution: '1080p',
+              generateAudio: false,
+            },
+          ],
+        },
+        {
+          id: 's2',
+          type: 'generated',
+          name: 'Clip 2',
+          prompt: 'two',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {
+              video: {url: '', path: 'videos/clip2.mp4'},
+              durationSeconds: 5,
+              generateAudio: true,
+              runNumber: 1,
+              prompt: 'two',
+              model: 'm',
+              resolution: '1080p',
+            },
+          ],
+        },
+      ];
+      projectConfigSignal.set({...projectConfigSignal(), storyboard: scenes});
+      fixture.detectChanges();
+      component.seek({target: {value: '12'}} as unknown as Event);
+      fixture.detectChanges();
+      expect(component.heldVideoSrc()).toBe('https://signed/clip1');
+      expect(component.currentClipSourceReady()).toBe(false);
+
+      resolveClip2('https://signed/clip2');
+      mockMediaService.getCachedUrl.mockImplementation((path: string) =>
+        path === 'videos/clip1.mp4'
+          ? 'https://signed/clip1'
+          : 'https://signed/clip2',
+      );
+      await vi.waitFor(() =>
+        expect(component.heldVideoSrc()).toBe('https://signed/clip2'),
+      );
+      fixture.detectChanges();
+      expect(component.currentClipSourceReady()).toBe(true);
+      expect(
+        (
+          fixture.nativeElement.querySelector(
+            '.preview-video',
+          ) as HTMLVideoElement
+        ).muted,
+      ).toBe(false);
     });
 
     it('swaps the src synchronously on a cross-clip seek when the URL is cached', () => {

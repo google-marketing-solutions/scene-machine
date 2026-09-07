@@ -114,6 +114,30 @@ class TestFFMPEG(unittest.TestCase):
     self.assertIn('duration=1.0', full_command)
     self.assertIn('offset=4.0', full_command)
 
+  @mock.patch('actions_lib.ffmpeg.get_video_properties')
+  @mock.patch('subprocess.run')
+  def test_add_video_can_exclude_source_audio(self, mock_run, mock_get_props):
+    mock_get_props.return_value = {
+        'duration': 5.0,
+        'dimensions': '1280:720',
+        'fps': 30.0,
+        'has_audio': True,
+    }
+
+    self.ffmpeg.add_video(
+        path='video.mp4',
+        skip_time=0,
+        duration=5.0,
+        transition=None,
+        transition_overlap=0,
+        include_audio=False,
+    )
+    self.ffmpeg.combine('output.mp4')
+
+    command = ' '.join(mock_run.call_args.args[0])
+    self.assertIn('anullsrc=', command)
+    self.assertNotIn('[0:a:0]', command)
+
 
 if __name__ == '__main__':
   unittest.main()

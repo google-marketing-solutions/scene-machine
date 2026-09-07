@@ -319,6 +319,8 @@ export class RemixEngineService {
     const globalConfig = this.configService.globalConfig.value();
     const projectConfig = this.configService.projectConfig.value();
     const resolution = projectConfig.resolution;
+    const providerGenerateAudio =
+      this.configService.audioLocked() || projectConfig.generateAudio;
     const veoLocation = this.configService.resolveVideoLocation(
       projectConfig.model,
     );
@@ -336,11 +338,9 @@ export class RemixEngineService {
           forceExecution,
           numberOfVideos: projectConfig.numberOfCandidates,
           videoDuration: projectConfig.candidateDurationSeconds,
-          // A model whose catalog entry always generates audio overrides the
-          // project's own toggle (the toggle itself is shown on and disabled
-          // for such a model, but the posted value must match regardless).
-          generateAudio:
-            this.configService.audioLocked() || projectConfig.generateAudio,
+          // Provider-required audio is independent of the candidate
+          // playback/render choice.
+          generateAudio: providerGenerateAudio,
           veoModel: projectConfig.model,
           veoLocation,
           aspectRatio: projectConfig!.aspectRatio,
@@ -812,11 +812,8 @@ export class RemixEngineService {
       resolution: Resolution;
     },
   ) {
-    // A model whose catalog entry always generates audio overrides the
-    // caller's own choice (the toggle is shown on and disabled for such a
-    // model, but a caller that read a stale value must not undercut it).
-    const generateAudio =
-      this.configService.audioLocked() || requestedGenerateAudio;
+    // The provider may require audio, but the caller's choice is retained on
+    // the candidate for preview and final render.
     const projectConfig = this.configService.projectConfig.value();
     const projectId = this.configService.projectConfig.value().id;
     if (this.generatingSceneIds().has(s.id)) {
@@ -873,7 +870,7 @@ export class RemixEngineService {
         startedAt: new Date().toISOString(),
         durationSeconds,
         model,
-        generateAudio,
+        generateAudio: requestedGenerateAudio,
         resolution,
         prompt: scene.prompt,
       };
@@ -900,7 +897,7 @@ export class RemixEngineService {
         {
           durationSeconds,
           model,
-          generateAudio,
+          generateAudio: requestedGenerateAudio,
           resolution,
           prompt: scene.prompt,
           referenceImage: scene.referenceImage,
@@ -1096,9 +1093,9 @@ export class RemixEngineService {
         startedAt: new Date().toISOString(),
         durationSeconds: source.durationSeconds,
         model,
-        // An edit always runs through the edit-capable (Omni) model, which
-        // always generates audio.
-        generateAudio: true,
+        // edit_video has no provider audio toggle; inherit the source choice
+        // for preview and final render (legacy candidates default to on).
+        generateAudio: source.generateAudio !== false,
         resolution: source.resolution,
         prompt: source.prompt,
         editPrompt,
@@ -1159,7 +1156,7 @@ export class RemixEngineService {
         {
           durationSeconds: source.durationSeconds,
           model,
-          generateAudio: true,
+          generateAudio: source.generateAudio !== false,
           resolution: source.resolution,
           prompt: source.prompt,
           referenceImage: source.referenceImage,
@@ -2043,13 +2040,14 @@ export class RemixEngineService {
       if (resolution.state !== 'ready') {
         continue;
       }
-      const {video, start, duration} = resolution.clip;
+      const {video, start, duration, includeAudio} = resolution.clip;
       const videoArrangement: CombineScenesArrangement = {
         file_type: 'video',
         file_path: video.path,
         start_time: 0,
         skip_time: start,
         duration,
+        include_audio: includeAudio,
       };
       if (scene.transition) {
         videoArrangement.transition = scene.transition;

@@ -142,6 +142,8 @@ export interface CombineVideoArrangement {
   scenes?: number[]; // (for images) list of videos in which to show this
   transition?: string;
   transition_overlap?: number;
+  /** Defaults to true for arrangements produced by older clients. */
+  include_audio?: boolean;
 }
 
 /**

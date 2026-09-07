@@ -113,12 +113,11 @@
         </div>
 
         <div class="setting-item">
-          <span class="setting-label">Generate audio</span>
+          <span class="setting-label">Use clip audio</span>
           <mat-slide-toggle
-            [ngModel]="config.audioLocked() || config.projectConfig.value().generateAudio"
+            [ngModel]="config.projectConfig.value().generateAudio"
             (ngModelChange)="config.updateProjectConfig({generateAudio: $event})"
-            [disabled]="config.audioLocked()"
-            [matTooltip]="config.audioLocked() ? 'This model always generates audio' : ''"
+            [matTooltip]="config.audioLocked() ? 'This model always generates audio. Turn off to mute new candidates in previews and the final video.' : ''"
           ></mat-slide-toggle>
         </div>
       </div>

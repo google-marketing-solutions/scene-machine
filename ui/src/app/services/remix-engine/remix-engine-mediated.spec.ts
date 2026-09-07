@@ -963,7 +963,7 @@ describe('RemixEngineService (mediated)', () => {
         durationSeconds: sourceCandidate.durationSeconds,
         trim: {start: 1, end: 4},
         model: 'omni-1',
-        generateAudio: true,
+        generateAudio: false,
         resolution: sourceCandidate.resolution,
         prompt: sourceCandidate.prompt,
         editPrompt: 'make the sky purple',
@@ -1001,7 +1001,7 @@ describe('RemixEngineService (mediated)', () => {
           resolution: sourceCandidate.resolution,
           prompt: sourceCandidate.prompt,
           model: 'omni-1',
-          generateAudio: true,
+          generateAudio: false,
           editPrompt: 'make the sky purple',
           editedFromRun: sourceCandidate.runNumber,
           trim: {start: 1, end: 4},
@@ -1295,6 +1295,24 @@ describe('RemixEngineService (mediated)', () => {
         }),
       ]);
       expect(configServiceMock.flushPendingSave).toHaveBeenCalled();
+    });
+
+    it('resumes a persisted audio-off choice without re-enabling candidate audio', async () => {
+      const project = mockProjectWithPending();
+      project.storyboard[0].pendingGeneration.generateAudio = false;
+      setupHappyMedia();
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/v1.mp4'}]}}},
+      } as any);
+
+      runResumeScan();
+      await vi.waitFor(() =>
+        expect(configServiceMock.updateProjectConfig).toHaveBeenCalled(),
+      );
+
+      expect(lastUpdatedScene().candidates).toEqual([
+        expect.objectContaining({generateAudio: false}),
+      ]);
     });
 
     it('should not double-poll when the scan triggers repeatedly', async () => {
@@ -1839,7 +1857,7 @@ describe('RemixEngineService (mediated)', () => {
       return mockScene;
     }
 
-    it('posts generate_audio: true and records generateAudio: true when the model always generates audio', async () => {
+    it('posts generate_audio: true but preserves the user audio choice when the model always generates audio', async () => {
       configServiceMock.audioLocked.mockReturnValue(true);
       const mockScene = mockSceneAndProject();
       setupHappyMedia();
@@ -1869,14 +1887,14 @@ describe('RemixEngineService (mediated)', () => {
       );
       const finalScene = lastUpdatedScene();
       expect(finalScene.candidates).toEqual([
-        expect.objectContaining({generateAudio: true}),
+        expect.objectContaining({generateAudio: false}),
       ]);
-      // The persisted in-flight marker must also carry the locked value, not
-      // the caller-requested one, so a resumed run stays locked too.
+      // The persisted in-flight marker carries the caller's choice, so a
+      // resumed run keeps the user's audio intent.
       const pendingScene =
         configServiceMock.updateProjectConfig.mock.calls[0][0].storyboard[0];
       expect(pendingScene.pendingGeneration).toEqual(
-        expect.objectContaining({generateAudio: true}),
+        expect.objectContaining({generateAudio: false}),
       );
     });
   });
@@ -2341,10 +2359,60 @@ describe('RemixEngineService (mediated)', () => {
             start_time: 0,
             skip_time: 2,
             duration: 6,
+            include_audio: true,
           },
         ],
         false,
       );
+    });
+
+    it('includes candidate audio intent and preserves audio for legacy candidates', async () => {
+      setRenderStoryboard([
+        {
+          id: 'audio-off',
+          type: 'generated',
+          name: 'Audio off',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {
+              video: {path: 'videos/off.mp4', url: ''},
+              durationSeconds: 5,
+              generateAudio: false,
+            },
+          ],
+        },
+        {
+          id: 'legacy',
+          type: 'generated',
+          name: 'Legacy',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {video: {path: 'videos/legacy.mp4', url: ''}, durationSeconds: 5},
+          ],
+        },
+      ]);
+      const startSpy = vi
+        .spyOn(service, 'startCombineScenesWorkflow')
+        .mockResolvedValue(of({executionId: 'render-exec-id'}) as any);
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'renders/output.mp4'}]}}},
+      } as any);
+      mediaServiceMock.signUrl.mockResolvedValue(
+        'https://signed.example/renders/output.mp4',
+      );
+
+      await service.combineScenes();
+
+      expect(startSpy.mock.calls[0][0]).toEqual([
+        expect.objectContaining({
+          file_path: 'videos/off.mp4',
+          include_audio: false,
+        }),
+        expect.objectContaining({
+          file_path: 'videos/legacy.mp4',
+          include_audio: true,
+        }),
+      ]);
     });
   });
 

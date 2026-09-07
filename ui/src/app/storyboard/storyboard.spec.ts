@@ -221,10 +221,11 @@ describe('Storyboard', () => {
     expect(durationSlider.step).toBe(1);
   });
 
-  it('shows the audio toggle checked and disabled when the model always generates audio', async () => {
+  it('keeps the audio toggle enabled so always-audio models can be muted in previews', async () => {
     mockConfigService.audioLocked = () => true;
     projectConfigSignal.update(config => ({
       ...config,
+      generateAudio: false,
       storyboard: [
         {id: '1', type: 'generated', name: 'Scene 1', prompt: 'test'},
       ],
@@ -238,8 +239,8 @@ describe('Storyboard', () => {
     const toggle = fixture.debugElement.query(By.directive(MatSlideToggle))
       .componentInstance as MatSlideToggle;
 
-    expect(toggle.checked).toBe(true);
-    expect(toggle.disabled).toBe(true);
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(false);
   });
 
   it('leaves the audio toggle enabled and following generateAudio when the model does not always generate audio', async () => {
@@ -260,6 +261,46 @@ describe('Storyboard', () => {
 
     expect(toggle.checked).toBe(true);
     expect(toggle.disabled).toBe(false);
+  });
+
+  it('mutes an audio-off selected candidate and disables its preview volume controls', () => {
+    const scene: GeneratedScene = {
+      id: 'audio-scene',
+      type: 'generated',
+      name: 'Audio scene',
+      prompt: 'test',
+      selectedCandidateIndex: 0,
+      candidates: [
+        {
+          runNumber: 1,
+          durationSeconds: 4,
+          model: 'veo-1',
+          prompt: 'test',
+          generateAudio: false,
+          resolution: '1080p',
+          video: {url: 'https://video/off.mp4', path: 'video/off.mp4'},
+        },
+      ],
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    component.selectScene(scene.id);
+    fixture.detectChanges();
+
+    const video = fixture.nativeElement.querySelector(
+      '.preview-video',
+    ) as HTMLVideoElement;
+    const volumeButton = fixture.nativeElement.querySelector(
+      '.volume-controls button',
+    ) as HTMLButtonElement;
+    expect(video.muted).toBe(true);
+    expect(volumeButton.disabled).toBe(true);
+    expect(volumeButton.textContent).toContain('volume_off');
+
+    scene.candidates![0].generateAudio = true;
+    projectConfigSignal.set({...projectConfigSignal()});
+    fixture.detectChanges();
+    expect(video.muted).toBe(false);
+    expect(volumeButton.disabled).toBe(false);
   });
 
   it('calls selectVideoModel when a model is chosen for the selected scene', async () => {

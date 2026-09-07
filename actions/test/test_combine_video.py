@@ -356,6 +356,7 @@ class TestCombineVideo(unittest.TestCase):
         duration=-1,
         transition='circlecrop',
         transition_overlap=0.5,
+        include_audio=True,
     )
 
   def test_execute_preserves_explicit_zero_transition_overlap(self):
@@ -383,6 +384,33 @@ class TestCombineVideo(unittest.TestCase):
         duration=-1,
         transition='circlecrop',
         transition_overlap=0,
+        include_audio=True,
+    )
+
+  def test_execute_forwards_include_audio_false(self):
+    arrangement = [{
+        'file_type': 'video',
+        'file_path': 'video1.mp4',
+        'include_audio': False,
+    }]
+    self.mock_gcs.load_text.return_value = json.dumps(arrangement)
+
+    combine_video.execute(
+        self.mock_gcs,
+        self.mock_workflow_params,
+        [{Key.FILE.value: 'arrangement.json'}],
+        '1280:720',
+        6,
+        20,
+    )
+
+    self.mock_ffmpeg.add_video.assert_called_with(
+        path=mock.ANY,
+        skip_time=0,
+        duration=-1,
+        transition=None,
+        transition_overlap=None,
+        include_audio=False,
     )
 
 

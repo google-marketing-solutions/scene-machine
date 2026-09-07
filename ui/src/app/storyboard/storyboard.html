@@ -504,7 +504,7 @@
                       (loadedmetadata)="onVideoLoadedMetadata()"
                       (ended)="onVideoEnded()"
                       class="preview-video"
-                      [muted]="isMuted()"
+                      [muted]="isMuted() || candidate.generateAudio === false"
                       [volume]="videoVolume()"
                       loop
                     ></video>
@@ -558,13 +558,25 @@
                           </div>
 
                           <div class="volume-controls">
-                            <button mat-icon-button (click)="isMuted.set(!isMuted())">
+                            <button
+                              mat-icon-button
+                              [disabled]="candidate.generateAudio === false"
+                              (click)="isMuted.set(!isMuted())"
+                            >
                               <mat-icon>{{
-                                isMuted() || videoVolume() == 0 ? 'volume_off' : 'volume_up'
+                                isMuted() || candidate.generateAudio === false || videoVolume() == 0
+                                  ? 'volume_off'
+                                  : 'volume_up'
                               }}</mat-icon>
                             </button>
                             <div class="slider-popup">
-                              <mat-slider class="volume-slider" min="0" max="1" step="0.05">
+                              <mat-slider
+                                class="volume-slider"
+                                min="0"
+                                max="1"
+                                step="0.05"
+                                [disabled]="candidate.generateAudio === false"
+                              >
                                 <input
                                   matSliderThumb
                                   [value]="isMuted() ? 0 : videoVolume()"
@@ -878,14 +890,17 @@
                   <div class="audio-toggle">
                     <div>
                       <mat-icon class="setting-icon">music_note</mat-icon>
-                      <span class="subtitle">Generate audio</span>
+                      <span class="subtitle">Use clip audio</span>
                     </div>
                     <mat-slide-toggle
                       color="primary"
-                      [ngModel]="config.audioLocked() || config.projectConfig.value().generateAudio"
+                      [ngModel]="config.projectConfig.value().generateAudio"
                       (ngModelChange)="config.updateProjectConfig({generateAudio: $event})"
-                      [disabled]="config.audioLocked()"
-                      [matTooltip]="config.audioLocked() ? 'This model always generates audio' : ''"
+                      [matTooltip]="
+                        config.audioLocked()
+                          ? 'This model always generates audio. Turn off to mute new candidates in previews and the final video.'
+                          : ''
+                      "
                     ></mat-slide-toggle>
                   </div>
                 </div>

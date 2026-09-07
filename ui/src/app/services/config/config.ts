@@ -301,6 +301,7 @@ export interface Candidate {
   // Generation properties
   model: string;
   prompt: string;
+  /** User's audio choice for preview and final render. */
   generateAudio: boolean;
   resolution: Resolution;
   referenceImage?: GcsFile;
@@ -334,6 +335,7 @@ export interface PendingGeneration {
   // Candidates from these.
   durationSeconds: number;
   model: string;
+  /** Snapshot of the user's audio choice for preview and final render. */
   generateAudio: boolean;
   resolution: Resolution;
   prompt: string;
@@ -384,6 +386,8 @@ export interface SceneRenderClip {
   video: GcsFile;
   start: number;
   duration: number;
+  /** Whether the source video's audio should be retained in the render. */
+  includeAudio: boolean;
 }
 
 export type SceneRenderClipResolution =
@@ -404,6 +408,7 @@ export function resolveSceneRenderClip(
   let video: GcsFile | undefined;
   let sourceDuration: number | undefined;
   let trim: {start?: number; end?: number} | undefined;
+  let includeAudio = true;
 
   if (scene.type === 'generated') {
     const generatedScene = scene as GeneratedScene;
@@ -418,6 +423,8 @@ export function resolveSceneRenderClip(
     video = candidate.video;
     sourceDuration = candidate.durationSeconds;
     trim = candidate.trim;
+    // Legacy candidates without the field retain their source audio.
+    includeAudio = candidate.generateAudio !== false;
   } else {
     const providedScene = scene as ProvidedVideoScene;
     video = providedScene.video;
@@ -452,7 +459,7 @@ export function resolveSceneRenderClip(
   ) {
     return {state: 'invalid'};
   }
-  return {state: 'ready', clip: {video, start, duration}};
+  return {state: 'ready', clip: {video, start, duration, includeAudio}};
 }
 
 /**
@@ -649,8 +656,8 @@ export class ConfigService {
 
   /**
    * True when the project's current model always generates audio (per the
-   * catalog's capabilities.audio_always_on), so the audio toggle should show
-   * on and disabled instead of following projectConfig.generateAudio.
+   * catalog's capabilities.audio_always_on), so generation requests must ask
+   * the provider for audio even when the user's render choice is off.
    */
   readonly audioLocked = computed(() => {
     const model = this.projectConfig.value().model;

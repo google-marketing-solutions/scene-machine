@@ -144,6 +144,8 @@ The model catalog — which models exist, their locations and capabilities, and 
 
 The Setup and Storyboard video controls read `allowed_resolutions`, `allowed_aspect_ratios` and `duration_by_resolution` from the selected model's entry; a model without them falls back to 720p/1080p, 16:9/9:16 and 4/6/8 s. Changing the model or the resolution snaps the other settings to allowed values. Saved projects retain their settings until the catalog is available; then invalid combinations are corrected to allowed values.
 
+The project's “Use clip audio” choice is retained on each generated candidate, including Omni candidates: Omni always produces an audio track, but turning the choice off mutes it in previews and the final video.
+
 ## Creating Applications
 
 [< Local Development](#local-development-and-faster-deploys) • [Top](#developing-top) • [Modules not used by Scene Machine >](#modules-not-used-by-scene-machine)
