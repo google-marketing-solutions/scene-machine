@@ -136,6 +136,14 @@ def test_is_pair_allowed_location_gated():
   assert not is_pair_allowed('generate_video', 'gemini-3-pro-image', 'global')
 
 
+def test_flash_models_allow_us_and_eu():
+  for mid in ('gemini-3.8-flash', 'gemini-3.7-flash'):
+    for loc in ('global', 'us', 'eu'):
+      assert is_pair_allowed('translate', mid, loc)
+    assert not is_pair_allowed('translate', mid, 'us-central1')
+  assert not is_pair_allowed('translate', 'gemini-3.1-pro-preview', 'us')
+
+
 # --- coverage: every literal (model, location) pair in workflow_examples ------
 
 def _example_pairs():

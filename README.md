@@ -294,7 +294,7 @@ gcloud auth application-default login   # 2. Application Default Credentials (AD
     :--------------------- | :--------------------------------------------------------- | :-------------------------
     `PROJECT`              | Your Google Cloud Platform Project ID.                     | Required
     `REGION`               | Deployment region for various GCP resources.               | e.g., `us-central1`
-    `GEMINI_MODEL`         | Text generation model for prompts and analysis.            | `gemini-3.5-flash`
+    `GEMINI_MODEL`         | Text generation model for prompts and analysis.            | `gemini-3.8-flash`
     `GEMINI_REGION`        | Region for model invocation.                               | Check locations availability. Recommended `global`.
     `VEO_MODEL`            | Video generation model.                                    | `veo-3.1-generate-001`
     `VEO_REGION`           | Region for Veo model invocation.                           | Check availability. Recommended `global`.

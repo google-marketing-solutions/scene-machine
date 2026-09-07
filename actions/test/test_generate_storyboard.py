@@ -107,6 +107,37 @@ class TestGenerateStoryboard(unittest.TestCase):
       )
     self.assertIn("No storyboard found in the response.", str(cm.exception))
 
+  @patch("actions.generate_storyboard.genai.Client")
+  def test_execute_config_has_no_sampling_knobs(self, mock_genai_client_class):
+    mock_client = MagicMock()
+    mock_genai_client_class.return_value = mock_client
+
+    mock_response = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    mock_candidate = MagicMock()
+    mock_part = MagicMock()
+    mock_part.text = (
+      '{"storyboard": [{"image_id": "i1", "product_id": "p1",'
+      ' "scene_name": "Scene 1", "video_prompt": "Prompt 1'
+      ' list"}]}'
+    )
+    mock_candidate.content.parts = [mock_part]
+    mock_response.candidates = [mock_candidate]
+
+    generate_storyboard.execute(
+      self.mock_gcs,
+      self.mock_params,
+      self.mock_images,
+      self.mock_user_prompt,
+      self.gemini_model,
+      self.gemini_model_location,
+    )
+
+    _, kwargs = mock_client.models.generate_content.call_args
+    self.assertIsNone(kwargs["config"].temperature)
+    self.assertIsNone(kwargs["config"].top_p)
+
 
 if __name__ == "__main__":
   unittest.main()
