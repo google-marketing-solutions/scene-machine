@@ -83,6 +83,15 @@ def test_model_set_without_region_flagged():
   assert any('region is required' in e for e in errors)
 
 
+def test_config_template_defaults_pass_real_allowlist():
+  # The actual config.template.txt defaults must validate against the shipped
+  # allowlist -- parsed from the file, not hard-coded, so a drifted default
+  # (e.g. a model bumped in the template but not the allowlist) fails here.
+  env = _parse_shell_env(os.path.join(_REPO, 'config.template.txt'))
+  assert validate_config_models.collect_errors(
+      env, load_shipped_allowlist()['models']) == []
+
+
 def test_catalog_missing_generate_video_field_flagged():
   catalog = load_shipped_allowlist()
   del catalog['models']['veo-3.1-generate-001']['capabilities'][
@@ -94,12 +103,3 @@ def test_catalog_missing_generate_video_field_flagged():
 def test_shipped_catalog_shape_passes():
   assert validate_config_models.catalog_shape_errors(
       load_shipped_allowlist()) == []
-
-
-def test_config_template_defaults_pass_real_allowlist():
-  # The actual config.template.txt defaults must validate against the shipped
-  # allowlist -- parsed from the file, not hard-coded, so a drifted default
-  # (e.g. a model bumped in the template but not the allowlist) fails here.
-  env = _parse_shell_env(os.path.join(_REPO, 'config.template.txt'))
-  assert validate_config_models.collect_errors(
-      env, load_shipped_allowlist()['models']) == []
