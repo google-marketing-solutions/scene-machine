@@ -20,7 +20,7 @@ import {DOCUMENT} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import {MatSnackBar} from '@angular/material/snack-bar';
 import {Router} from '@angular/router';
-import {of} from 'rxjs';
+import {of, Subject} from 'rxjs';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {ConfigService, ModelCatalog, ProjectConfig} from './config';
 
@@ -1061,5 +1061,93 @@ describe('ConfigService video controls', () => {
     );
     expect(matSnackBarMock.open).not.toHaveBeenCalled();
     expect((service as any).shouldSave).toBe(false);
+  });
+
+  it('does not apply fallback video settings when the project loads before the catalog', async () => {
+    const configResponse = new Subject<unknown>();
+    const savedProject = {
+      id: 'proj-omni',
+      name: 'Saved Omni Project',
+      storyboard: [],
+      aspectRatio: '16:9',
+      resolution: '360p',
+      candidateDurationSeconds: 3,
+      generateAudio: true,
+      numberOfCandidates: 1,
+      model: 'omni-1',
+      inputConfig: {products: [], composition: ''},
+      audioTracks: [],
+      visualOverlays: [],
+    };
+    httpClientMock.get.mockImplementation((url: string) =>
+      url === '/api/config' ? configResponse : of(savedProject),
+    );
+    const updateSpy = vi.spyOn(service, 'updateProjectConfig');
+
+    (service as any).projectId.set('proj-omni');
+    await settle();
+
+    expect(service.projectConfig.value()).toMatchObject({
+      model: 'omni-1',
+      resolution: '360p',
+      candidateDurationSeconds: 3,
+    });
+
+    configResponse.next(
+      liveGlobalConfig({modelCatalog: CATALOG_WITH_CAPABILITIES}),
+    );
+    configResponse.complete();
+    await settle();
+
+    expect(service.projectConfig.value()).toMatchObject({
+      model: 'omni-1',
+      resolution: '360p',
+      candidateDurationSeconds: 3,
+    });
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('corrects stale settings after the catalog arrives for a loaded valid model', async () => {
+    const configResponse = new Subject<unknown>();
+    const savedProject = {
+      id: 'proj-veo',
+      name: 'Saved Project',
+      storyboard: [],
+      aspectRatio: '16:9',
+      resolution: '360p',
+      candidateDurationSeconds: 3,
+      generateAudio: false,
+      numberOfCandidates: 1,
+      model: 'veo-default',
+      inputConfig: {products: [], composition: ''},
+      audioTracks: [],
+      visualOverlays: [],
+    };
+    httpClientMock.get.mockImplementation((url: string) =>
+      url === '/api/config' ? configResponse : of(savedProject),
+    );
+    const updateSpy = vi.spyOn(service, 'updateProjectConfig');
+
+    (service as any).projectId.set('proj-veo');
+    await settle();
+    configResponse.next(
+      liveGlobalConfig({modelCatalog: CATALOG_WITH_CAPABILITIES}),
+    );
+    configResponse.complete();
+    await settle();
+    TestBed.tick();
+    TestBed.tick();
+
+    expect(service.projectConfig.value()).toMatchObject({
+      model: 'veo-default',
+      resolution: '720p',
+      candidateDurationSeconds: 4,
+    });
+    expect(updateSpy).toHaveBeenCalledWith({
+      model: 'veo-default',
+      resolution: '720p',
+      candidateDurationSeconds: 4,
+    });
+    expect(updateSpy).toHaveBeenCalledTimes(1);
   });
 });

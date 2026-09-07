@@ -925,6 +925,13 @@ export class ConfigService {
     // Snap resolution/duration/aspect ratio a persisted project's own (still
     // valid) model no longer allows, so a stale combination from before a
     // catalog change is never posted verbatim.
+    // The project and global catalog resources load independently. Until the
+    // catalog is available, leave saved video settings untouched; the
+    // correction effect below reconciles them once it arrives.
+    const catalog = this.globalConfig.value()?.modelCatalog;
+    if (!catalog) {
+      return data;
+    }
     const partial = this.computeModelSwitch(data.model, data);
     return {...data, ...partial};
   }
@@ -1000,6 +1007,14 @@ export class ConfigService {
         return;
       }
       if (project.model && models.includes(project.model)) {
+        const partial = this.computeModelSwitch(project.model, project);
+        const changed = Object.entries(partial).some(
+          ([key, value]) =>
+            key !== 'model' && value !== project[key as keyof ProjectConfig],
+        );
+        if (changed) {
+          this.updateProjectConfig(partial);
+        }
         return;
       }
       const previous = project.model;
