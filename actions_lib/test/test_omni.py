@@ -76,11 +76,14 @@ class _Handler:
           {
               'id': interaction_id,
               'status': 'completed',
-              'output_video': {
-                  'type': 'video',
-                  'uri': gcs_uri + 'clip.mp4',
-                  'mime_type': 'video/mp4',
-              },
+              'steps': [{
+                  'type': 'model_output',
+                  'content': [{
+                      'type': 'video',
+                      'uri': gcs_uri + 'clip.mp4',
+                      'mime_type': 'video/mp4',
+                  }],
+              }],
           },
       )
 
@@ -110,11 +113,14 @@ def _completed_payload(prefix, interaction_id='int-done', suffix='clip.mp4'):
   return {
       'id': interaction_id,
       'status': 'completed',
-      'output_video': {
-          'type': 'video',
-          'uri': prefix + suffix,
-          'mime_type': 'video/mp4',
-      },
+      'steps': [{
+          'type': 'model_output',
+          'content': [{
+              'type': 'video',
+              'uri': prefix + suffix,
+              'mime_type': 'video/mp4',
+          }],
+      }],
   }
 
 
@@ -152,7 +158,7 @@ class TestOmni(unittest.TestCase):
     return (
         mock.patch('actions_lib.omni._client', return_value=client),
         mock.patch(
-            'actions_lib.omni.uuid.uuid4',
+            'actions_lib.omni.uuid4',
             side_effect=lambda: mock.Mock(hex=next(hex_iter)),
         ),
         mock.patch('actions_lib.omni.time.sleep'),

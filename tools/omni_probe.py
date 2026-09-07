@@ -62,6 +62,7 @@ def _client(project: str) -> genai.Client:
 def _output_prefix(bucket: str) -> str:
   """A fresh gs://bucket/_omni-probe/<date>/<uuid>/ folder for one call."""
   date = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d')
+  bucket = bucket.removeprefix('gs://').strip('/')
   return f'gs://{bucket}/_omni-probe/{date}/{uuid.uuid4().hex}/'
 
 
@@ -242,7 +243,11 @@ def _edit(
   }
   if background:
     body['background'] = True
-  interaction = _send(client, body)
+  interaction = _send(
+      client,
+      body,
+      timeout=CREATE_TIMEOUT_SECONDS if background else POLL_DEADLINE_SECONDS,
+  )
   _report(interaction)
   if background:
     interaction = _poll(client, interaction)

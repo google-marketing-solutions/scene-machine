@@ -474,6 +474,7 @@ def validate_submission(
     if action not in action_specs:
       continue  # only model-parameterized actions get the model/location checks
 
+    action_params = _action_params(action, actions_json)
     model_param = _model_param_name(action, actions_json)
     model_value = params.get(model_param) if model_param else None
     model_list = model_value if isinstance(model_value, list) else [model_value]
@@ -509,7 +510,7 @@ def validate_submission(
           model,
           caps,
           params,
-          _action_params(action, actions_json),
+          action_params,
       )
       if violation is not None:
         return violation

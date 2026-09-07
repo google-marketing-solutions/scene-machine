@@ -30,12 +30,9 @@ from util.gcs_wrapper import GCS
 
 def _family(model: str) -> str | None:
   """The model's catalog family, or None if the model is not listed."""
-  return (
-      model_allowlist.load_allowlist()
-      .get('models', {})
-      .get(model, {})
-      .get('family')
-  )
+  models = model_allowlist.load_allowlist().get('models') or {}
+  entry = models.get(model) or {}
+  return entry.get('family')
 
 
 def execute(

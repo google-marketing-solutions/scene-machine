@@ -15,8 +15,8 @@
 """Generates and edits videos with Gemini Omni through the Interactions API."""
 
 import time
-import uuid
 from typing import Literal
+from uuid import uuid4
 
 from common import get_api_client_headers
 from common import TrackingType
@@ -69,7 +69,7 @@ def _client(gcp_project: str, gcp_location: str) -> genai.Client:
 def _unique_prefix(output_gcs: str) -> str:
   """A fresh output folder so a rerun can never overwrite a live clip."""
   base = output_gcs[:-1] if output_gcs.endswith('/') else output_gcs
-  return f'{base}/{uuid.uuid4().hex}/'
+  return f'{base}/{uuid4().hex}/'
 
 
 def _video_format(
