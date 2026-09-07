@@ -17,6 +17,8 @@
 import os
 import re
 
+import pytest
+
 from scripts import validate_config_models
 from util.model_allowlist import load_shipped_allowlist
 
@@ -83,14 +85,14 @@ def test_model_set_without_region_flagged():
   assert any('region is required' in e for e in errors)
 
 
-def test_flash_model_allows_us_and_eu_region():
-  # gemini-3.8-flash was widened beyond global; the deploy-time check must
-  # accept the shipped allowlist's us and eu regions for it.
+@pytest.mark.parametrize('model', ('gemini-3.8-flash', 'gemini-3.7-flash'))
+@pytest.mark.parametrize('region', ('us', 'eu'))
+def test_flash_model_allows_us_and_eu_region(model, region):
+  # Both Flash models serve us and eu; the deploy-time check must accept the
+  # shipped allowlist's regions for each model.
   models = load_shipped_allowlist()['models']
-  for region in ('us', 'eu'):
-    assert validate_config_models.collect_errors(
-        {'GEMINI_MODEL': 'gemini-3.8-flash', 'GEMINI_REGION': region},
-        models) == []
+  assert validate_config_models.collect_errors(
+      {'GEMINI_MODEL': model, 'GEMINI_REGION': region}, models) == []
 
 
 def test_config_template_defaults_pass_real_allowlist():

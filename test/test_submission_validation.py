@@ -83,21 +83,21 @@ def test_gemini_action_disallowed_location():
 
 
 @pytest.mark.parametrize(
-    ('action', 'location'),
+    ('model', 'action', 'location'),
     (
-        ('translate', 'us'),
-        ('translate', 'eu'),
-        ('write_products_script', 'us'),
-        ('write_products_script', 'eu'),
-        ('generate_storyboard', 'us'),
-        ('generate_storyboard', 'eu'),
+        (model, action, location)
+        for model in ('gemini-3.8-flash', 'gemini-3.7-flash')
+        for action in (
+            'translate', 'write_products_script', 'generate_storyboard'
+        )
+        for location in ('us', 'eu')
     ),
 )
-def test_flash_text_actions_accept_us_and_eu(action, location):
-  # gemini-3.8-flash was widened to serve us and eu alongside global; every
-  # text action must accept the pair.
+def test_flash_text_actions_accept_us_and_eu(model, action, location):
+  # Both Flash models serve us and eu alongside global; every text action must
+  # accept each model/location pair.
   assert _code(_sub(action,
-                    {'gemini_model': 'gemini-3.8-flash',
+                    {'gemini_model': model,
                      'gemini_model_location': location})) is None
 
 

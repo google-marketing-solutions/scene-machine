@@ -85,8 +85,8 @@ def prompt(
     ] = None,
     file_uris: list[str] = None,
     need_to_remove_md_notation=True,
-    location="global",
-    model="gemini-3.8-flash",
+    location: str = "global",
+    model: str = "gemini-3.8-flash",
     tracking_type: TrackingType | None = None,
 ):
     """Prompts Gemini for a response.

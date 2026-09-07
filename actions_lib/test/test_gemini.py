@@ -72,7 +72,7 @@ class TestGemini(unittest.TestCase):
             http_options=mock.ANY,
         )
 
-        args, kwargs = mock_client.models.generate_content.call_args
+        _, kwargs = mock_client.models.generate_content.call_args
         self.assertEqual(kwargs["model"], "gemini-3.8-flash")
 
 
@@ -100,7 +100,7 @@ class TestGemini(unittest.TestCase):
         self.assertEqual(output, {"result": "success"})
 
         mock_client.models.generate_content.assert_called_once()
-        args, kwargs = mock_client.models.generate_content.call_args
+        _, kwargs = mock_client.models.generate_content.call_args
 
         # Verify prompt text is passed correctly in the complex structure
         self.assertEqual(kwargs["contents"][0].parts[0].text, "get json")
@@ -152,7 +152,7 @@ class TestGemini(unittest.TestCase):
             model=model_name,
         )
 
-        args, kwargs = mock_client.models.generate_content.call_args
+        _, kwargs = mock_client.models.generate_content.call_args
         self.assertEqual(
             kwargs["config"].thinking_config.thinking_budget, expected_budget
         )
