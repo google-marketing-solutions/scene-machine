@@ -38,7 +38,6 @@ import {MatInputModule} from '@angular/material/input';
  */
 @Component({
   selector: 'app-edit-candidate-dialog',
-  standalone: true,
   imports: [
     FormsModule,
     MatButtonModule,

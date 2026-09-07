@@ -608,6 +608,24 @@ describe('ConfigService video controls', () => {
         locations: ['global'],
         capabilities: {allowed_resolutions: ['8k']},
       },
+      'veo-duplicate-durations': {
+        // Defensive UI fixture: deploy-time validation rejects duplicate
+        // durations for generate_video entries, but the UI must still avoid a
+        // zero-step slider if it receives one.
+        family: 'veo',
+        actions: ['generate_video'],
+        locations: ['global'],
+        capabilities: {
+          allowed_resolutions: ['720p'],
+          duration_by_resolution: {'720p': [5, 5]},
+        },
+      },
+      'edit-only-empty-duration': {
+        family: 'veo',
+        actions: ['edit_video'],
+        locations: ['global'],
+        capabilities: {duration_by_resolution: {'720p': []}},
+      },
     },
   };
 
@@ -762,6 +780,16 @@ describe('ConfigService video controls', () => {
       });
       expect(service.allowedDurations()).toEqual([4, 6, 8]);
       expect(service.durationSlider()).toEqual({min: 4, max: 8, step: 2});
+    });
+
+    it('deduplicates durations before deriving slider bounds', async () => {
+      await withProject({
+        model: 'veo-duplicate-durations',
+        resolution: '720p',
+        candidateDurationSeconds: 5,
+      });
+      expect(service.allowedDurations()).toEqual([5]);
+      expect(service.durationSlider()).toEqual({min: 5, max: 5, step: 1});
     });
   });
 
@@ -1032,6 +1060,44 @@ describe('ConfigService video controls', () => {
     // and 8, and nearestAllowed ties go to the smaller value.
     expect(project.resolution).toBe('720p');
     expect(project.candidateDurationSeconds).toBe(6);
+  });
+
+  it('loads an edit-only model with empty durations without throwing', async () => {
+    httpClientMock.get.mockImplementation((url: string) =>
+      url === '/api/config'
+        ? of(liveGlobalConfig({modelCatalog: CATALOG_WITH_CAPABILITIES}))
+        : url === '/api/projects/proj-edit-only'
+          ? of({
+              id: 'proj-edit-only',
+              name: 'Loaded Edit Project',
+              storyboard: [],
+              aspectRatio: '16:9',
+              resolution: '720p',
+              candidateDurationSeconds: 5,
+              generateAudio: false,
+              numberOfCandidates: 1,
+              model: 'edit-only-empty-duration',
+              inputConfig: {products: [], composition: ''},
+              audioTracks: [],
+              visualOverlays: [],
+            })
+          : of({}),
+    );
+
+    await settle();
+    service.globalConfig.reload();
+    await settle();
+    expect(service.globalConfig.value()?.modelCatalog).toEqual(
+      CATALOG_WITH_CAPABILITIES,
+    );
+    (service as any).projectId.set('proj-edit-only');
+    await settle();
+    TestBed.tick();
+    expect(service.projectConfig.error()).toBeUndefined();
+    expect(service.projectConfig.value().id).toBe('proj-edit-only');
+    expect(service.projectConfig.value().model).toBe('veo-default');
+    expect(service.projectConfig.value().candidateDurationSeconds).toBe(4);
+    expect(service.allowedDurations()).toEqual([4, 6, 8]);
   });
 
   it('normalizes the quiet (unsaved deploy-default) fallback branch: snaps resolution and duration without dirtying the project', async () => {

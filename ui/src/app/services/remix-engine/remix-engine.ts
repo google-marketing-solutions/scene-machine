@@ -319,6 +319,12 @@ export class RemixEngineService {
     const globalConfig = this.configService.globalConfig.value();
     const projectConfig = this.configService.projectConfig.value();
     const resolution = projectConfig.resolution;
+    const veoLocation = this.configService.resolveVideoLocation(
+      projectConfig.model,
+    );
+    if (!veoLocation) {
+      return undefined;
+    }
     try {
       const promptPath = await this.uploadText(scene.prompt, 'video-prompt');
       return this.startWorkflow(
@@ -336,9 +342,7 @@ export class RemixEngineService {
           generateAudio:
             this.configService.audioLocked() || projectConfig.generateAudio,
           veoModel: projectConfig.model,
-          veoLocation: this.configService.resolveVideoLocation(
-            projectConfig.model,
-          )!,
+          veoLocation,
           aspectRatio: projectConfig!.aspectRatio,
           productImagePath: scene.referenceImage?.path,
           promptPath,
@@ -813,6 +817,7 @@ export class RemixEngineService {
     // model, but a caller that read a stale value must not undercut it).
     const generateAudio =
       this.configService.audioLocked() || requestedGenerateAudio;
+    const projectConfig = this.configService.projectConfig.value();
     const projectId = this.configService.projectConfig.value().id;
     if (this.generatingSceneIds().has(s.id)) {
       return;
@@ -826,6 +831,14 @@ export class RemixEngineService {
     if (!this.configService.globalConfig.value()) {
       this.matSnackBar.open(
         'Configuration is not loaded yet. Please try again in a moment.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      return;
+    }
+    if (!this.configService.resolveVideoLocation(projectConfig.model)) {
+      this.matSnackBar.open(
+        'The selected video model is not available at this deployment.',
         'Dismiss',
         {panelClass: ['error-snackbar']},
       );
@@ -999,6 +1012,11 @@ export class RemixEngineService {
     editPrompt: string,
   ): Promise<void> {
     const source = structuredClone(scene.candidates?.[candidateIndex]);
+    if (!source?.video) {
+      // An errored candidate has nothing to edit — not a catalog problem, so
+      // no "no model" message.
+      return;
+    }
     const model = this.selectEditModel();
     if (!model) {
       this.matSnackBar.open(
@@ -1006,11 +1024,6 @@ export class RemixEngineService {
         'Dismiss',
         {panelClass: ['error-snackbar']},
       );
-      return;
-    }
-    if (!source?.video) {
-      // An errored candidate has nothing to edit — not a catalog problem, so
-      // no "no model" message.
       return;
     }
     if (this.generatingSceneIds().has(scene.id)) {

@@ -22,7 +22,7 @@ import {MatSnackBar} from '@angular/material/snack-bar';
 import {from, of} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ClientMediaService} from '../client-media/client-media';
-import {ConfigService} from '../config/config';
+import {ConfigService, type GeneratedScene} from '../config/config';
 import {MediaService} from '../media/media';
 import {RemixEngineService} from './remix-engine';
 
@@ -897,6 +897,17 @@ describe('RemixEngineService (mediated)', () => {
         'Dismiss',
         {panelClass: ['error-snackbar']},
       );
+    });
+
+    it('does not show an edit-model error or upload when the source has no video', async () => {
+      const {mockScene} = mockSceneWithCandidate({video: undefined});
+
+      await service.editCandidate(mockScene as any, 0, 'make the sky purple');
+
+      expect(configServiceMock.videoEditModels).not.toHaveBeenCalled();
+      expect(matSnackBarMock.open).not.toHaveBeenCalled();
+      expect(mediaServiceMock.upload).not.toHaveBeenCalled();
+      expect(httpClientMock.post).not.toHaveBeenCalled();
     });
 
     it('produces byte-identical bodies for two identical edits except workflowId', async () => {
@@ -1920,6 +1931,76 @@ describe('RemixEngineService (mediated)', () => {
       );
       expect(configServiceMock.resolveVideoLocation).toHaveBeenCalledWith(
         'veo-default',
+      );
+    });
+
+    it('shows an unavailable-model message without starting or flagging the scene', async () => {
+      configServiceMock.resolveVideoLocation.mockReturnValue(undefined);
+      const mockScene = mockSceneAndProject('unavailable-model');
+
+      await service.generateCandidates(mockScene as any, generationParams);
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'The selected video model is not available at this deployment.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      expect(httpClientMock.post).not.toHaveBeenCalled();
+      expect(mediaServiceMock.upload).not.toHaveBeenCalled();
+      expect(configServiceMock.updateProjectConfig).not.toHaveBeenCalled();
+      expect(service.generatingSceneIds().has(mockScene.id)).toBe(false);
+      expect(mockScene).not.toHaveProperty('generationError');
+    });
+
+    it('returns undefined from direct workflow start when the model has no location', async () => {
+      configServiceMock.resolveVideoLocation.mockReturnValue(undefined);
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        model: 'unavailable-model',
+      });
+      const scene: GeneratedScene = {
+        id: 'scene-1',
+        name: 'Scene 1',
+        type: 'generated',
+        prompt: 'prompt',
+      };
+
+      await expect(
+        service.startVideoGenerationWorkflow(scene, true),
+      ).resolves.toBeUndefined();
+      expect(mediaServiceMock.upload).not.toHaveBeenCalled();
+      expect(httpClientMock.post).not.toHaveBeenCalled();
+    });
+
+    it('uses the location captured before a delayed prompt upload resolves', async () => {
+      const mockScene = mockSceneAndProject('model-before-upload');
+      let resolveUpload!: (path: string) => void;
+      vi.spyOn(service, 'uploadText').mockReturnValue(
+        new Promise(resolve => (resolveUpload = resolve)),
+      );
+      configServiceMock.resolveVideoLocation.mockReturnValue('location-before');
+      httpClientMock.post.mockReturnValue(of({executionId: 'execution-id'}));
+
+      const workflowPromise = service.startVideoGenerationWorkflow(
+        mockScene as any,
+        true,
+      );
+      await settle();
+      configServiceMock.resolveVideoLocation.mockReturnValue('location-after');
+      resolveUpload('p/video-prompt.txt');
+      await workflowPromise;
+
+      expect(httpClientMock.post).toHaveBeenCalledWith(
+        '/api/supplyNode',
+        expect.objectContaining({
+          workflowDefinition: expect.objectContaining({
+            n_0: expect.objectContaining({
+              parameters: expect.objectContaining({
+                gcp_location: 'location-before',
+              }),
+            }),
+          }),
+        }),
       );
     });
 

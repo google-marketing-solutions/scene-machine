@@ -239,6 +239,8 @@
                                   <button
                                     mat-icon-button
                                     class="edit-btn"
+                                    [disabled]="areCandidatesGenerating(scene.id)"
+                                    aria-label="Edit candidate with prompt"
                                     (click)="editCandidate($event, scene, $index)"
                                     matTooltip="Edit with a prompt"
                                   >
@@ -370,6 +372,8 @@
                                     <button
                                       mat-icon-button
                                       class="edit-btn"
+                                      [disabled]="areCandidatesGenerating(scene.id)"
+                                      aria-label="Edit candidate with prompt"
                                       (click)="editCandidate($event, scene, $index)"
                                       matTooltip="Edit with a prompt"
                                     >

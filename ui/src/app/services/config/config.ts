@@ -85,6 +85,9 @@ function gcd(a: number, b: number): number {
 
 /** The nearest value in `allowed` to `value`; ties go to the shorter (smaller) one. */
 function nearestAllowed(allowed: number[], value: number): number {
+  if (allowed.length === 0) {
+    return value;
+  }
   return allowed.reduce((best, candidate) => {
     const bestDiff = Math.abs(best - value);
     const candidateDiff = Math.abs(candidate - value);
@@ -650,9 +653,8 @@ export class ConfigService {
    * on and disabled instead of following projectConfig.generateAudio.
    */
   readonly audioLocked = computed(() => {
-    const catalog = this.globalConfig.value()?.modelCatalog;
     const model = this.projectConfig.value().model;
-    return catalog?.models[model]?.capabilities?.['audio_always_on'] === true;
+    return this.catalogEntry(model)?.capabilities?.['audio_always_on'] === true;
   });
 
   /** The selected model's catalog entry, or undefined off-catalog/pre-load. */
@@ -707,9 +709,13 @@ export class ConfigService {
     ] as Record<string, unknown> | undefined;
     const raw = resolution ? byResolution?.[resolution] : undefined;
     if (Array.isArray(raw)) {
-      return raw
+      const durations = raw
         .filter((n): n is number => typeof n === 'number')
+        .filter((n, index, values) => values.indexOf(n) === index)
         .sort((a, b) => a - b);
+      if (durations.length > 0) {
+        return durations;
+      }
     }
     return [...FALLBACK_DURATIONS];
   }

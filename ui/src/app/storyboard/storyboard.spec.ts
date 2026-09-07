@@ -819,6 +819,34 @@ describe('Storyboard', () => {
       fixture.detectChanges();
     };
 
+    const selectSceneWithActiveAndArchivedCandidates = () => {
+      const scene: GeneratedScene = {
+        id: '1',
+        type: 'generated',
+        name: 'Scene 1',
+        prompt: 'test',
+        candidates: [
+          makeCandidate(),
+          makeCandidate({
+            isArchived: true,
+            video: {url: 'r1-archived.mp4', path: 'path/r1-archived.mp4'},
+          }),
+        ],
+      };
+      projectConfigSignal.update(config => ({
+        ...config,
+        storyboard: [scene],
+      }));
+      component.selectScene('1');
+      fixture.detectChanges();
+      (
+        fixture.nativeElement.querySelector(
+          '.archived-panel mat-expansion-panel-header',
+        ) as HTMLElement
+      ).click();
+      fixture.detectChanges();
+    };
+
     it('does not render the Edit button when canEditCandidates() is false', () => {
       canEditCandidatesSignal.set(false);
       selectSceneWithOneCandidate();
@@ -835,6 +863,51 @@ describe('Storyboard', () => {
       expect(
         fixture.nativeElement.querySelector('.candidate-list .edit-btn'),
       ).not.toBeNull();
+    });
+
+    it('labels active and archived edit buttons and disables both during generation', () => {
+      canEditCandidatesSignal.set(true);
+      selectSceneWithActiveAndArchivedCandidates();
+
+      let buttons = Array.from(
+        fixture.nativeElement.querySelectorAll('.edit-btn'),
+      ) as HTMLButtonElement[];
+      expect(buttons).toHaveLength(2);
+      expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual([
+        'Edit candidate with prompt',
+        'Edit candidate with prompt',
+      ]);
+      expect(buttons.every(button => !button.disabled)).toBe(true);
+
+      mockRemixEngineService.generatingSceneIds.set(new Set(['1']));
+      fixture.detectChanges();
+      buttons = Array.from(
+        fixture.nativeElement.querySelectorAll('.edit-btn'),
+      ) as HTMLButtonElement[];
+      expect(buttons.every(button => button.disabled)).toBe(true);
+
+      mockRemixEngineService.generatingSceneIds.set(new Set());
+      fixture.detectChanges();
+      buttons = Array.from(
+        fixture.nativeElement.querySelectorAll('.edit-btn'),
+      ) as HTMLButtonElement[];
+      expect(buttons.every(button => !button.disabled)).toBe(true);
+    });
+
+    it('does not open the edit dialog when a candidate is generating', () => {
+      canEditCandidatesSignal.set(true);
+      selectSceneWithActiveAndArchivedCandidates();
+      mockRemixEngineService.generatingSceneIds.set(new Set(['1']));
+      fixture.detectChanges();
+
+      const buttons = Array.from(
+        fixture.nativeElement.querySelectorAll('.edit-btn'),
+      ) as HTMLButtonElement[];
+      for (const button of buttons) {
+        button.click();
+      }
+      expect(mockMatDialog.open).not.toHaveBeenCalled();
+      expect(mockRemixEngineService.editCandidate).not.toHaveBeenCalled();
     });
 
     it('opens the dialog and calls editCandidate with a non-empty result, without selecting the candidate', () => {
