@@ -2011,6 +2011,51 @@ export class RemixEngineService {
     }
   }
 
+  /** Exports one selected scene without changing project render history. */
+  async exportScene(
+    scene: GeneratedScene | ProvidedVideoScene,
+  ): Promise<GcsFile> {
+    const project = this.configService.projectConfig.value();
+    const projectId = project.id;
+    if (!this.configService.globalConfig.value()) {
+      throw new Error(
+        'Configuration is not loaded yet. Please try again in a moment.',
+      );
+    }
+    const resolved = resolveSceneRenderClip(scene);
+    if (resolved.state !== 'ready') {
+      throw new Error('Select a valid scene video to export.');
+    }
+    const {video, start, duration, includeAudio} = resolved.clip;
+    const response = await this.startCombineScenesWorkflow(
+      [
+        {
+          file_type: 'video',
+          file_path: video.path,
+          start_time: 0,
+          skip_time: start,
+          duration,
+          include_audio: includeAudio,
+        },
+      ],
+      false,
+    );
+    if (!response) {
+      throw new Error('Failed to start scene export.');
+    }
+    const executionId = (await firstValueFrom(response)).executionId;
+    const status = await this.pollWorkflow(executionId, projectId);
+    const output = status.sink?.output?.['0']?.['video']?.[0];
+    if (output?._error) {
+      throw new Error(output._error);
+    }
+    if (!output || !output.file) {
+      throw new Error('Workflow completed without a video output.');
+    }
+    this.assertProjectUnchanged(projectId);
+    return {path: output.file, url: ''};
+  }
+
   private getCombineScenesArrangements(
     scenes: Array<GeneratedScene | ProvidedVideoScene>,
     audioTracks: AudioTrack[],

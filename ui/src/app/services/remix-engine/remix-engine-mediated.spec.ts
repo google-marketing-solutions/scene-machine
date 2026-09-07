@@ -22,9 +22,14 @@ import {MatSnackBar} from '@angular/material/snack-bar';
 import {from, of} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ClientMediaService} from '../client-media/client-media';
-import {ConfigService, type GeneratedScene} from '../config/config';
+import {
+  ConfigService,
+  type GeneratedScene,
+  type ProvidedVideoScene,
+} from '../config/config';
 import {MediaService} from '../media/media';
 import {RemixEngineService} from './remix-engine';
+import type {NodeItem, WorkflowStatusResponse} from './remix-engine.interface';
 
 describe('RemixEngineService (mediated)', () => {
   let service: RemixEngineService;
@@ -2413,6 +2418,254 @@ describe('RemixEngineService (mediated)', () => {
           include_audio: true,
         }),
       ]);
+    });
+
+    describe('exportScene', () => {
+      const completedExport = (video: NodeItem[]): WorkflowStatusResponse => ({
+        sink: {
+          actualCounts: {},
+          inputFiles: {},
+          inputGroups: {},
+          lastUpdated: '',
+          output: {'0': {video}},
+          targetCounts: {},
+        },
+      });
+
+      it('exports one selected scene with its trim and audio intent', async () => {
+        const scene: GeneratedScene = {
+          id: 'export-scene',
+          name: 'Export scene',
+          type: 'generated',
+          prompt: 'prompt',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {
+              runNumber: 1,
+              durationSeconds: 10,
+              model: 'model',
+              prompt: 'prompt',
+              generateAudio: false,
+              resolution: '720p',
+              trim: {start: 2, end: 8},
+              video: {path: 'videos/source.mp4', url: ''},
+            },
+          ],
+        };
+        const startSpy = vi
+          .spyOn(service, 'startCombineScenesWorkflow')
+          .mockResolvedValue(of({executionId: 'export-exec'}));
+        vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+          completedExport([{file: 'exports/scene.mp4'}]),
+        );
+
+        await expect(service.exportScene(scene)).resolves.toEqual({
+          path: 'exports/scene.mp4',
+          url: '',
+        });
+        expect(startSpy).toHaveBeenCalledWith(
+          [
+            expect.objectContaining({
+              file_type: 'video',
+              file_path: 'videos/source.mp4',
+              start_time: 0,
+              skip_time: 2,
+              duration: 6,
+              include_audio: false,
+            }),
+          ],
+          false,
+        );
+        expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+        expect(configServiceMock.setPendingRender).not.toHaveBeenCalled();
+        expect(scene.candidates?.[0].trim).toEqual({start: 2, end: 8});
+      });
+
+      it.each([
+        [
+          'generated audio-on',
+          {
+            id: 'generated',
+            name: 'Generated',
+            type: 'generated',
+            prompt: 'p',
+            selectedCandidateIndex: 0,
+            candidates: [
+              {
+                runNumber: 1,
+                durationSeconds: 5,
+                model: 'm',
+                prompt: 'p',
+                generateAudio: true,
+                resolution: '720p',
+                video: {path: 'generated.mp4', url: ''},
+              },
+            ],
+          } as GeneratedScene,
+        ],
+        [
+          'generated legacy',
+          {
+            id: 'legacy',
+            name: 'Legacy',
+            type: 'generated',
+            prompt: 'p',
+            selectedCandidateIndex: 0,
+            candidates: [
+              {
+                runNumber: 1,
+                durationSeconds: 5,
+                model: 'm',
+                prompt: 'p',
+                resolution: '720p',
+                video: {path: 'legacy.mp4', url: ''},
+              },
+            ],
+          } as GeneratedScene,
+        ],
+        [
+          'provided video',
+          {
+            id: 'provided',
+            name: 'Provided',
+            type: 'video',
+            durationSeconds: 5,
+            video: {path: 'provided.mp4', url: ''},
+          } as ProvidedVideoScene,
+        ],
+      ])('exports %s with source audio enabled', async (_label, scene) => {
+        const startSpy = vi
+          .spyOn(service, 'startCombineScenesWorkflow')
+          .mockResolvedValue(of({executionId: 'export-exec'}));
+        vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+          completedExport([{file: 'exports/scene.mp4'}]),
+        );
+
+        await service.exportScene(scene);
+
+        expect(startSpy).toHaveBeenCalledWith(
+          [
+            {
+              file_type: 'video',
+              file_path: `${scene.id === 'generated' ? 'generated' : scene.id}.mp4`,
+              start_time: 0,
+              skip_time: 0,
+              duration: 5,
+              include_audio: true,
+            },
+          ],
+          false,
+        );
+      });
+
+      it('rejects an unselected or invalid scene before starting a workflow', async () => {
+        const scene: GeneratedScene = {
+          id: 'unselected',
+          name: 'Unselected',
+          type: 'generated',
+          prompt: 'prompt',
+        };
+
+        await expect(service.exportScene(scene)).rejects.toThrow(
+          'Select a valid scene video to export.',
+        );
+        expect(httpClientMock.post).not.toHaveBeenCalled();
+        expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+      });
+
+      it('rejects a workflow output without a video path', async () => {
+        const scene: ProvidedVideoScene = {
+          id: 'export-scene',
+          name: 'Export scene',
+          type: 'video',
+          durationSeconds: 5,
+          video: {path: 'videos/source.mp4', url: ''},
+        };
+        vi.spyOn(service, 'startCombineScenesWorkflow').mockResolvedValue(
+          of({executionId: 'export-exec'}),
+        );
+        vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+          completedExport([{}]),
+        );
+
+        await expect(service.exportScene(scene)).rejects.toThrow(
+          'Workflow completed without a video output.',
+        );
+      });
+
+      it('rejects a failed workflow output without mutating render history', async () => {
+        const scene: ProvidedVideoScene = {
+          id: 'export-scene',
+          name: 'Export scene',
+          type: 'video',
+          durationSeconds: 5,
+          video: {path: 'videos/source.mp4', url: ''},
+        };
+        vi.spyOn(service, 'startCombineScenesWorkflow').mockResolvedValue(
+          of({executionId: 'export-exec'}),
+        );
+        vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+          completedExport([{_error: 'export failed'}]),
+        );
+
+        await expect(service.exportScene(scene)).rejects.toThrow(
+          'export failed',
+        );
+        expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+        expect(configServiceMock.setPendingRender).not.toHaveBeenCalled();
+      });
+
+      it('rejects before starting when global configuration is unavailable', async () => {
+        globalConfigSignal.set(undefined);
+        const scene: ProvidedVideoScene = {
+          id: 'export-scene',
+          name: 'Export scene',
+          type: 'video',
+          durationSeconds: 5,
+          video: {path: 'videos/source.mp4', url: ''},
+        };
+
+        await expect(service.exportScene(scene)).rejects.toThrow(
+          'Configuration is not loaded yet',
+        );
+        expect(httpClientMock.post).not.toHaveBeenCalled();
+      });
+
+      it('rejects when the project changes before export returns', async () => {
+        const scene: ProvidedVideoScene = {
+          id: 'export-scene',
+          name: 'Export scene',
+          type: 'video',
+          durationSeconds: 5,
+          video: {path: 'videos/source.mp4', url: ''},
+        };
+        vi.spyOn(service, 'startCombineScenesWorkflow').mockResolvedValue(
+          of({executionId: 'export-exec'}),
+        );
+        let resolvePoll!: (status: WorkflowStatusResponse) => void;
+        vi.spyOn(service, 'pollWorkflow').mockReturnValue(
+          new Promise<WorkflowStatusResponse>(
+            resolve => (resolvePoll = resolve),
+          ),
+        );
+        const exportPromise = service.exportScene(scene);
+        await settle();
+        projectConfigSignal.set({...projectConfigSignal(), id: 'project-B'});
+        resolvePoll({
+          sink: {
+            actualCounts: {},
+            inputFiles: {},
+            inputGroups: {},
+            lastUpdated: '',
+            output: {'0': {video: [{file: 'exports/scene.mp4'}]}},
+            targetCounts: {},
+          },
+        });
+
+        await expect(exportPromise).rejects.toThrow(
+          'Project changed, cancelling workflow polling',
+        );
+      });
     });
   });
 
