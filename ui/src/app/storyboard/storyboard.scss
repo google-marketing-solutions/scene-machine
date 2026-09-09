@@ -689,9 +689,13 @@
             transform: scale(0.8);
             backdrop-filter: blur(4px);
 
-            &:hover {
+            &:hover:not(:disabled) {
               background: var(--mat-sys-primary-container);
               color: var(--mat-sys-on-primary-container);
+            }
+
+            &:disabled {
+              opacity: 0.38;
             }
           }
 

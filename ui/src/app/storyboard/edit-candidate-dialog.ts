@@ -57,7 +57,7 @@ import {MatInputModule} from '@angular/material/input';
           <textarea
             matInput
             rows="3"
-            placeholder="Make the sky purple"
+            placeholder="e.g., Make the sky purple"
             [ngModel]="editPrompt()"
             (ngModelChange)="editPrompt.set($event)"
             cdkFocusInitial
@@ -81,6 +81,11 @@ import {MatInputModule} from '@angular/material/input';
     `
       .dialog-container {
         background: var(--mat-sys-surface-container-highest);
+        width: min(460px, calc(100vw - 32px));
+
+        mat-form-field {
+          margin-top: 8px;
+        }
       }
 
       mat-form-field {
