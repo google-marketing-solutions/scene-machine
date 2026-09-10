@@ -19,6 +19,7 @@
   height: 100%;
   width: 100%;
   overflow: hidden;
+  container-type: inline-size;
 }
 
 .empty-storyboard-state {
@@ -465,19 +466,24 @@
 
 .storyboard-columns {
   display: grid;
-  // Fallback track sizing; the live left-track width is driven by an inline
-  // [style.grid-template-columns] binding (sidebarTrackWidth()) so resizing /
-  // collapsing the candidate sidebar grows or shrinks the fluid thumbnails.
-  grid-template-columns: 280px 1fr 320px;
+  // The live left-track width is carried by a CSS custom property so a
+  // container query can reflow all tracks on narrow Storyboard surfaces while
+  // desktop resize/collapse continues to control the candidate sidebar.
+  grid-template-columns: var(--storyboard-left-track, 280px) minmax(0, 1fr) 320px;
+  grid-template-rows: minmax(0, 1fr);
   flex: 1; // Take remaining height
   width: 100%;
   box-sizing: border-box;
   overflow: hidden;
+  min-width: 0;
+  min-height: 0;
 
   .column {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-width: 0;
+    min-height: 0;
     padding: 16px;
     gap: 16px;
     border-right: 1px solid var(--mat-sys-outline-variant);
@@ -861,6 +867,7 @@
     display: flex;
     flex-direction: column;
     padding: 0;
+    min-width: 0;
 
     .preview-wrapper {
       flex: 1;
@@ -871,6 +878,8 @@
       position: relative;
       overflow: hidden;
       width: 100%;
+      min-width: 0;
+      min-height: 0;
     }
 
     .preview-area {
@@ -1200,6 +1209,7 @@
     align-self: center;
     display: flex;
     box-sizing: border-box;
+    min-width: 0;
 
     .trim-controls {
       display: flex;
@@ -1232,18 +1242,72 @@
       display: flex;
       flex: 1;
       flex-direction: column;
+      min-width: 0;
 
       ::ng-deep {
         mat-form-field {
           display: flex;
           flex-grow: 1;
+          position: relative;
           .mat-mdc-form-field-flex,
           .mat-mdc-form-field-infix,
           textarea {
             height: 100%;
             resize: none;
           }
+          &.dictation-enabled textarea {
+            padding-bottom: 56px !important;
+          }
         }
+      }
+    }
+  }
+}
+
+// At tablet widths the fixed candidate/settings rails leave too little room
+// for the preview and prompt. The host is the query container because an
+// element cannot query its own inline size; the existing columns then reflow
+// into one scrollable surface without changing the desktop layout.
+@container (max-width: 1000px) {
+  .storyboard-columns {
+    display: flex;
+    flex-direction: column;
+    overflow-x: hidden;
+    overflow-y: auto;
+    align-items: stretch;
+
+    .column {
+      overflow: visible;
+      width: 100%;
+      box-sizing: border-box;
+      flex: 0 0 auto;
+    }
+
+    .left-sidebar {
+      overflow: visible;
+    }
+
+    .main-preview {
+      min-height: 420px;
+
+      .preview-wrapper {
+        flex: 0 0 260px;
+        min-height: 260px;
+      }
+
+      .controls-area {
+        flex: 0 0 auto;
+        max-height: none;
+        min-height: 220px;
+      }
+    }
+
+    .right-sidebar {
+      min-height: 0;
+
+      .settings-content {
+        height: auto;
+        overflow: visible;
       }
     }
   }

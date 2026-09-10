@@ -149,7 +149,10 @@ describe('Storyboard original download', () => {
         {provide: ConfigService, useValue: config},
         {
           provide: RemixEngineService,
-          useValue: {generatingSceneIds: signal(new Set())},
+          useValue: {
+            generatingSceneIds: signal(new Set()),
+            editingSceneIds: signal(new Set()),
+          },
         },
         {provide: MatSnackBar, useValue: snackBar},
         {provide: Router, useValue: {events: routerEvents}},

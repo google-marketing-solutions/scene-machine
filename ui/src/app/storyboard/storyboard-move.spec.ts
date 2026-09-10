@@ -126,7 +126,10 @@ describe('Storyboard move persistence', () => {
         {provide: MatSnackBar, useValue: snackBar},
         {
           provide: RemixEngineService,
-          useValue: {generatingSceneIds: signal(new Set<string>())},
+          useValue: {
+            generatingSceneIds: signal(new Set<string>()),
+            editingSceneIds: signal(new Set<string>()),
+          },
         },
         {provide: ClientMediaService, useValue: {}},
         {provide: ImageImportService, useValue: {}},

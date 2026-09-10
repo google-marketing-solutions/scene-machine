@@ -50,9 +50,12 @@ export BACKEND_SERVICE_NAME=remix-engine-backend
 #   idle instance continuously. (Worker service is unaffected.)
 export APP_MIN_INSTANCES=0
 
+# Optional microphone dictation feature. Keep disabled until the full provider
+# and browser test has passed; the backend also defaults this to 0 if omitted.
+export DICTATION_ENABLED=0
+
 # Optional: Custom domain for the application UI.
 # If you use a custom domain for the Scene Machine UI, uncomment the following
 # variable and update the value with your custom domain.
 # Do not add http:// or https:// prefix.
 # export CUSTOM_DOMAIN=scene-machine.my-company.com
-

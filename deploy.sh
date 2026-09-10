@@ -303,6 +303,12 @@ if ! [[ "$APP_MIN_INSTANCES" =~ ^[0-9]+$ ]]; then
   echo "Validation failed. Please fix config.txt and try again." >&2
   exit 1
 fi
+DICTATION_ENABLED="${DICTATION_ENABLED:-0}"
+if [[ "$DICTATION_ENABLED" != "0" && "$DICTATION_ENABLED" != "1" ]]; then
+  echo "ERROR: DICTATION_ENABLED must be 0 or 1 (got '$DICTATION_ENABLED')." >&2
+  echo "Validation failed. Please fix config.txt and try again." >&2
+  exit 1
+fi
 # Data plane: the backend brokers all project data and media through the app
 # service's /api endpoints (signed URLs). The browser holds no Firestore or
 # Storage credentials and ships no client SDK, so there is no client data-plane
@@ -840,7 +846,7 @@ if [ "$IAP_FLAG_AVAILABLE" = "true" ]; then
   gcloud run deploy app --image "$IMAGE" --region $REGION --project $PROJECT \
     --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated --iap \
     --service-account="$RUNTIME_SA" \
-    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI}
+    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI},DICTATION_ENABLED=${DICTATION_ENABLED}
 else
   # 'gcloud run deploy' on this CLI has no --iap flag, but a slightly older CLI
   # can still enable IAP via 'gcloud run services update --iap'. Deploy private,
@@ -852,7 +858,7 @@ else
   gcloud run deploy app --image "$IMAGE" --region $REGION --project $PROJECT \
     --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated \
     --service-account="$RUNTIME_SA" \
-    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI}
+    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI},DICTATION_ENABLED=${DICTATION_ENABLED}
   echo "Enabling IAP on 'app' (gcloud run services update --iap)..."
   if gcloud run services update app --iap --region=$REGION --project=$PROJECT; then
     echo "✓ IAP enabled on 'app'."
@@ -869,16 +875,20 @@ IAP_SA="service-${PROJECT_NUMBER}@gcp-sa-iap.iam.gserviceaccount.com"
 echo "Granting service-scoped run.invoker on 'app' to the IAP service agent..."
 add_run_invoker_binding app "$REGION" "$PROJECT" "serviceAccount:${IAP_SA}"
 APP_URL=$(gcloud run services describe app --region=$REGION --project=$PROJECT --format='value(status.url)')
-ACTUAL_APP_HOST="${APP_URL#https://}"
 echo "✓ App deployed: ${APP_URL}"
 # Nothing was predicted: the image carries only same-origin URLs, so the app and
-# its status viewer work on this first deploy. ACTUAL_APP_HOST (the real Cloud
-# Run host, known only now) feeds the GCS bucket CORS list below, so the browser
-# can fetch signed media URLs cross-origin from the deployed app host.
+# its status viewer work on this first deploy. The actual Cloud Run hosts,
+# known only now, feed the GCS bucket CORS list below, so the browser
+# can fetch signed media URLs cross-origin from every actual app service origin.
+APP_URL_METADATA=$(gcloud run services describe app \
+  --region=$REGION --project=$PROJECT \
+  --format='json(metadata.annotations."run.googleapis.com/urls")')
+UI_CORS_ORIGINS=$(printf '%s' "$APP_URL_METADATA" \
+  | python3 ./deploy/render_cors_origins.py)
 
-# --- Bucket CORS (needs the real app host) --------------------------------------
-phase "Applying GCS bucket CORS for ${ACTUAL_APP_HOST}..."
-export UI_HOST="$ACTUAL_APP_HOST"
+# --- Bucket CORS (needs the actual app service origins) -------------------------
+phase "Applying GCS bucket CORS for returned Cloud Run origins..."
+export UI_CORS_ORIGINS
 envsubst < ./gcs-cors-config.template.json > ./gcs-cors-config.json
 gcloud storage buckets update gs://$GCS_BUCKET --cors-file=./gcs-cors-config.json --project=$PROJECT
 

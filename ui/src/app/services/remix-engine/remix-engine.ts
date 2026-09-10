@@ -795,6 +795,8 @@ export class RemixEngineService {
   }
 
   readonly generatingSceneIds = signal<Set<string>>(new Set());
+  /** Edit runs always produce one candidate, including before start persists. */
+  readonly editingSceneIds = signal<Set<string>>(new Set());
   readonly combiningScenes = signal(false);
   private matSnackBar = inject(MatSnackBar);
 
@@ -1040,6 +1042,11 @@ export class RemixEngineService {
       newIds.add(scene.id);
       return newIds;
     });
+    this.editingSceneIds.update(ids => {
+      const newIds = new Set(ids);
+      newIds.add(scene.id);
+      return newIds;
+    });
 
     let executionId = '';
     try {
@@ -1218,6 +1225,11 @@ export class RemixEngineService {
       }
     } finally {
       this.generatingSceneIds.update(ids => {
+        const newIds = new Set(ids);
+        newIds.delete(scene.id);
+        return newIds;
+      });
+      this.editingSceneIds.update(ids => {
         const newIds = new Set(ids);
         newIds.delete(scene.id);
         return newIds;
