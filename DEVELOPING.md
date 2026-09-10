@@ -71,6 +71,20 @@ python3 scripts/seed_config_models.py convert < ui/definitions/models.json | cur
 
 This requires a Firestore database to already exist in your dev project (the one `FIRESTORE_DB_UI` names) and ADC with write access to it.
 
+### Homepage announcement
+
+The optional homepage announcement lives in the `config/announcement` document
+of the UI Firestore database. The deploy template defaults to the short message
+in `config/announcement.md`; customize `ANNOUNCEMENT_MARKDOWN_FILE` and
+`ANNOUNCEMENT_ENABLED` in `config.txt` before the first deploy. The response ID
+is derived from the exact raw Markdown content. The seed is create-only: an existing
+document, including a disabled or console-edited message, is preserved on
+redeploy. After deployment, use the Firestore console to edit the Markdown; any
+exact content change derives a new ID and makes the message reappear for users
+who dismissed the previous content, while restoring exact old text restores its
+old ID. Supported Markdown is limited to inline emphasis and HTTP(S)
+links; raw HTML, images, and other block content are not displayed.
+
 ### The local loop (two terminals)
 
 The local backend talks to a real dev GCP project through your Application Default Credentials, so run `gcloud auth application-default login` once first.

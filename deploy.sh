@@ -315,6 +315,14 @@ if [[ "$DICTATION_MODE" != "SMART" && "$DICTATION_MODE" != "VERBATIM" ]]; then
   echo "Validation failed. Please fix config.txt and try again." >&2
   exit 1
 fi
+ANNOUNCEMENT_MARKDOWN_FILE="${ANNOUNCEMENT_MARKDOWN_FILE:-config/announcement.md}"
+ANNOUNCEMENT_ENABLED="${ANNOUNCEMENT_ENABLED:-1}"
+if ! python3 scripts/seed_announcement.py convert \
+  "$ANNOUNCEMENT_MARKDOWN_FILE" "$ANNOUNCEMENT_ENABLED" \
+  >/dev/null; then
+  echo "ERROR: homepage announcement seed configuration is invalid." >&2
+  exit 1
+fi
 # Data plane: the backend brokers all project data and media through the app
 # service's /api endpoints (signed URLs). The browser holds no Firestore or
 # Storage credentials and ships no client SDK, so there is no client data-plane
@@ -949,6 +957,19 @@ MODELS_SEED_STATUS=$(python3 scripts/seed_config_models.py convert < ui/definiti
 if [ "$MODELS_SEED_STATUS" != "200" ]; then
   echo "ERROR: seeding the model catalog (config/models) failed (HTTP ${MODELS_SEED_STATUS:-no response})." >&2
   echo "       The runtime model catalog was not written; aborting." >&2
+  exit 1
+fi
+
+# The announcement is operator-authored after the first deploy. Firestore's
+# create operation makes the initial seed race-safe and returns 409 when an
+# operator document already exists; either result is a successful deploy.
+if ! ANNOUNCEMENT_SEED_STATUS=$(GOOGLE_CLOUD_PROJECT="$PROJECT" \
+  GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth application-default print-access-token)" \
+  python3 scripts/seed_announcement.py seed \
+  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config?documentId=announcement" \
+  "$ANNOUNCEMENT_MARKDOWN_FILE" "$ANNOUNCEMENT_ENABLED"); then
+  echo "ERROR: seeding homepage announcement failed (HTTP ${ANNOUNCEMENT_SEED_STATUS:-no response})." >&2
+  echo "       Existing operator content was not overwritten; aborting." >&2
   exit 1
 fi
 

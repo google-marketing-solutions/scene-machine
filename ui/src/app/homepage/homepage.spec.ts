@@ -15,6 +15,8 @@
  */
 
 import {signal} from '@angular/core';
+import {provideHttpClient} from '@angular/common/http';
+import {provideHttpClientTesting} from '@angular/common/http/testing';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {MatDialog} from '@angular/material/dialog';
 import {provideRouter} from '@angular/router';
@@ -68,6 +70,8 @@ describe('Homepage', () => {
       imports: [Homepage],
       providers: [
         provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
         {provide: ConfigService, useValue: mockConfigService},
       ],
     })
@@ -85,6 +89,15 @@ describe('Homepage', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('places the announcement strip above the hero', () => {
+    const announcement = fixture.nativeElement.querySelector(
+      'app-homepage-announcement',
+    );
+    const wrapper = fixture.nativeElement.querySelector('.homepage-wrapper');
+    expect(announcement.nextElementSibling).toBe(wrapper);
+    expect(wrapper.querySelector('.hero-section')).not.toBeNull();
   });
 
   it('fetches my projects only by default behind IAP (truthy createdBy flag)', () => {

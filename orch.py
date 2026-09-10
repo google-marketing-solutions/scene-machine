@@ -85,6 +85,12 @@ _AUTH_MODE = os.environ.get('AUTH_MODE', 'none')
 _WORKER_URL = os.environ.get('WORKER_URL')
 _IAP_AUDIENCE = os.environ.get('IAP_AUDIENCE')
 _FIRESTORE_DB_UI = os.environ.get('FIRESTORE_DB_UI')
+_MAX_ANNOUNCEMENT_MARKDOWN = 255
+_DEFAULT_ANNOUNCEMENT_EMOJI = '⚠️'
+
+
+def _announcement_emoji(raw: object) -> str:
+  return raw if isinstance(raw, str) and raw else _DEFAULT_ANNOUNCEMENT_EMOJI
 
 # DEV-ONLY: run backend actions in-process via the threaded execution path
 # instead of scheduling Cloud Tasks (orchestrator.supply_node(data, None)).
@@ -1005,6 +1011,40 @@ def ui_config_handler() -> flask_response:
   return _json_response(payload)
 
 
+def announcement_handler() -> flask_response:
+  """Returns the optional administrator-authored homepage announcement."""
+  response_payload = {'announcement': None}
+  response = _dictation_response(response_payload)
+  try:
+    ui_db = _get_ui_db()
+    if ui_db is None:
+      return response
+    snapshot = ui_db.collection('config').document('announcement').get()
+    if not snapshot.exists:
+      return response
+    raw = snapshot.to_dict()
+    if not isinstance(raw, dict):
+      return response
+    markdown = raw.get('markdown')
+    if (
+        raw.get('enabled') is not True
+        or not isinstance(markdown, str)
+        or not 0 < len(markdown) <= _MAX_ANNOUNCEMENT_MARKDOWN
+    ):
+      return response
+    announcement_id = hashlib.sha256(markdown.encode('utf-8')).hexdigest()
+    return _dictation_response({
+        'announcement': {
+            'id': announcement_id,
+            'markdown': markdown,
+            'emoji': _announcement_emoji(raw.get('emoji')),
+        }
+    })
+  except Exception:  # pylint: disable=broad-except
+    logger.exception('Failed to read homepage announcement')
+    return response
+
+
 # --- Project persistence: storyboard split ---------------------------------
 # Throughout this section "project" means a SCENE MACHINE project — one of the
 # user's creative projects (a storyboard with its scenes and candidates), stored
@@ -1385,6 +1425,9 @@ if _ROLE == 'app':
   )
   app.add_url_rule('/api/signUrl', view_func=sign_url_handler, methods=['GET'])
   app.add_url_rule('/api/config', view_func=ui_config_handler, methods=['GET'])
+  app.add_url_rule(
+      '/api/announcement', view_func=announcement_handler, methods=['GET']
+  )
   app.add_url_rule(
       '/api/transcribe', view_func=transcribe_handler, methods=['POST']
   )
