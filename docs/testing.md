@@ -120,7 +120,7 @@ optional evidence.
 For a dialog or long-form setup change, run one concrete script:
 
 1. Open an existing candidate's Edit dialog and enter representative long text
-   in **What should change?**.
+   in **Describe your edit**.
 2. Scroll inside the dialog to the bottom and back to the top.
 3. Use Tab to move through the buttons and confirm focus remains visible;
    do not activate **Generate**.
