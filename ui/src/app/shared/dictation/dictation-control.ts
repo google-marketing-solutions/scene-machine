@@ -70,16 +70,6 @@ import {
       } @else if (failureMessage(); as message) {
         <div class="dictation-recovery" role="status">
           <span>{{ message }}</span>
-          <button
-            type="button"
-            mat-icon-button
-            aria-label="Dismiss dictation message"
-            title="Dismiss dictation message"
-            [disabled]="isBusy()"
-            (click)="discard()"
-          >
-            <mat-icon>close</mat-icon>
-          </button>
         </div>
       }
       <div class="dictation-control" [class.busy]="isBusy()">
@@ -94,6 +84,7 @@ import {
                 : 'Start dictation'
           "
           [disabled]="isDisabled()"
+          (mousedown)="$event.preventDefault()"
           (click)="isRecording() ? stop() : isCancelable() ? cancel() : start()"
         >
           <mat-icon>{{
@@ -118,16 +109,6 @@ import {
                 <mat-icon>undo</mat-icon>
               </button>
             }
-            <button
-              type="button"
-              mat-icon-button
-              aria-label="Dismiss dictation message"
-              title="Dismiss dictation message"
-              [disabled]="isBusy()"
-              (click)="discard()"
-            >
-              <mat-icon>close</mat-icon>
-            </button>
           </div>
         }
       </div>
@@ -139,7 +120,8 @@ import {
         position: absolute;
         top: 0;
         left: 8px;
-        right: 8px;
+        /* Keep the toolbar clear of the textarea's reserved scrollbar lane. */
+        right: 24px;
         bottom: 6px;
         z-index: 3;
         pointer-events: none;
@@ -226,6 +208,7 @@ export class DictationControl implements OnChanges, OnDestroy {
 
   @Input() enabled = false;
   @Input() value = '';
+  @Input() textarea: HTMLTextAreaElement | undefined;
   @Input() revision = 0;
   @Input() ownerKey = '';
   @Input() maxDurationSeconds = 120;
@@ -266,6 +249,9 @@ export class DictationControl implements OnChanges, OnDestroy {
   private readonly recovery = signal<Recovery | undefined>(undefined);
   private handledEventId = 0;
   private expectedFieldChange: {value: string; revision: number} | undefined;
+  private insertionSelection:
+    | {value: string; revision: number; start: number; end: number}
+    | undefined;
   private lastOwner = '';
   private lastValue = '';
   private lastRevision = 0;
@@ -307,6 +293,7 @@ export class DictationControl implements OnChanges, OnDestroy {
       changes['revision'] && !changes['revision'].firstChange;
     if (ownerChanged) {
       this.recovery.set(undefined);
+      this.insertionSelection = undefined;
       this.service.dismiss(this.lastOwner || this.ownerKey);
     } else if (this.lastOwner && (valueChanged || revisionChanged)) {
       const selfWrite =
@@ -320,6 +307,7 @@ export class DictationControl implements OnChanges, OnDestroy {
         this.revision === expected.insertedRevision;
       if (!selfWrite && !stillInserted) {
         this.recovery.set(undefined);
+        this.insertionSelection = undefined;
         this.service.dismiss(this.lastOwner || this.ownerKey);
       }
     }
@@ -335,6 +323,7 @@ export class DictationControl implements OnChanges, OnDestroy {
 
   start(): void {
     this.recovery.set(undefined);
+    this.insertionSelection = this.captureSelection();
     this.service.start(this.ownerKey, this.config());
   }
 
@@ -344,6 +333,7 @@ export class DictationControl implements OnChanges, OnDestroy {
 
   cancel(): void {
     this.recovery.set(undefined);
+    this.insertionSelection = undefined;
     this.service.cancel(this.ownerKey);
   }
 
@@ -369,6 +359,7 @@ export class DictationControl implements OnChanges, OnDestroy {
 
   discard(): void {
     this.recovery.set(undefined);
+    this.insertionSelection = undefined;
     this.service.dismiss(this.ownerKey);
   }
 
@@ -427,14 +418,27 @@ export class DictationControl implements OnChanges, OnDestroy {
       });
       return;
     }
-    const separator = this.value && !/\s$/.test(this.value) ? '\n' : '';
-    const insertedValue = `${this.value}${separator}${trimmed}`;
+    const selection = this.insertionSelection;
+    const hasCurrentSelection =
+      selection?.value === this.value && selection.revision === this.revision;
+    const separator =
+      hasCurrentSelection &&
+      selection.start === selection.end &&
+      selection.end === this.value.length &&
+      this.value &&
+      !/\s$/.test(this.value)
+        ? '\n'
+        : '';
+    const insertedValue = hasCurrentSelection
+      ? `${this.value.slice(0, selection.start)}${separator}${trimmed}${this.value.slice(selection.end)}`
+      : `${this.value}${this.value && !/\s$/.test(this.value) ? '\n' : ''}${trimmed}`;
     if (this.maxChars !== undefined && insertedValue.length > this.maxChars) {
       this.recovery.set({kind: 'overflow', transcript: trimmed});
       return;
     }
     const beforeValue = this.value;
     const beforeRevision = this.revision;
+    this.insertionSelection = undefined;
     this.expectedFieldChange = {
       value: insertedValue,
       revision: beforeRevision + 1,
@@ -447,6 +451,21 @@ export class DictationControl implements OnChanges, OnDestroy {
       insertedValue,
       insertedRevision: beforeRevision + 1,
     });
+  }
+
+  private captureSelection():
+    | {value: string; revision: number; start: number; end: number}
+    | undefined {
+    const textarea = this.textarea;
+    if (!textarea) return undefined;
+    const start = textarea.selectionStart ?? this.value.length;
+    const end = textarea.selectionEnd ?? start;
+    return {
+      value: this.value,
+      revision: this.revision,
+      start: Math.max(0, Math.min(start, this.value.length)),
+      end: Math.max(0, Math.min(end, this.value.length)),
+    };
   }
 
   private formatTime(seconds: number): string {

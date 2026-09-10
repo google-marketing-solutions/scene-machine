@@ -60,8 +60,9 @@ import {DictationConfig} from '../shared/dictation/dictation';
           appearance="outline"
           [class.dictation-enabled]="dictationEnabled"
         >
-          <mat-label>What should change?</mat-label>
+          <mat-label>Describe your edit</mat-label>
           <textarea
+            #editPromptInput
             matInput
             rows="3"
             style="resize: none"
@@ -76,6 +77,7 @@ import {DictationConfig} from '../shared/dictation/dictation';
             [value]="editPrompt()"
             [revision]="editPromptRevision()"
             [ownerKey]="ownerKey"
+            [textarea]="editPromptInput"
             (valueChange)="updateEditPrompt($event)"
           ></app-dictation-control>
         </mat-form-field>
@@ -110,6 +112,7 @@ import {DictationConfig} from '../shared/dictation/dictation';
 
         &.dictation-enabled textarea {
           padding-bottom: 56px !important;
+          scrollbar-gutter: stable;
         }
       }
 

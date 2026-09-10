@@ -36,6 +36,7 @@ class DictationControlStub {
   @Input() enabled = false;
   @Input() audioConfig: unknown;
   @Input() value = '';
+  @Input() textarea: HTMLTextAreaElement | undefined;
   @Input() revision = 0;
   @Input() ownerKey = '';
   @Input() maxDurationSeconds = 120;
@@ -149,6 +150,9 @@ describe('Setup dictation parent binding', () => {
       .queryAll(By.directive(DictationControlStub))
       .map(node => node.componentInstance as DictationControlStub);
     const ownerKeys = controls.map(control => control.ownerKey);
+    expect(
+      controls.every(control => control.textarea?.tagName === 'TEXTAREA'),
+    ).toBe(true);
     expect(ownerKeys).toContain('project-1:audience');
     expect(ownerKeys).toContain('project-1:style');
     expect(ownerKeys).toContain('project-1:composition');

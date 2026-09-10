@@ -478,6 +478,20 @@ export class Storyboard {
     return this.trimEnd() - this.trimStart();
   });
 
+  /** Whether a trim removes a meaningful amount from the source duration. */
+  isTrimmedRange(
+    trim: {start?: number; end?: number} | undefined,
+    duration: number,
+  ): boolean {
+    if (!trim || !Number.isFinite(duration) || duration <= 0) {
+      return false;
+    }
+    const startMilliseconds = Math.round((trim.start ?? 0) * 1000);
+    const endMilliseconds = Math.round((trim.end ?? duration) * 1000);
+    const durationMilliseconds = Math.round(duration * 1000);
+    return startMilliseconds > 0 || endMilliseconds < durationMilliseconds;
+  }
+
   // Computed for trim bars
   trimStartPercent = computed(() => {
     const duration = this.videoDuration();
@@ -522,6 +536,10 @@ export class Storyboard {
     const video = this.videoElement()?.nativeElement;
     if (video && !video.paused) {
       this.toggleVideoPlay();
+    }
+    this.isVideoPlaying.set(false);
+    if (video) {
+      video.loop = false;
     }
     document.addEventListener('mousemove', this.boundHandleDrag);
     document.addEventListener('mouseup', this.boundStopDragging);
@@ -620,10 +638,12 @@ export class Storyboard {
     if (!video) return;
 
     if (video.paused) {
+      video.loop = true;
       void video.play();
       this.isVideoPlaying.set(true);
     } else {
       video.pause();
+      video.loop = false;
       this.isVideoPlaying.set(false);
     }
   }

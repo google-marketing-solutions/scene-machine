@@ -55,6 +55,7 @@ class DictationControlStub {
   @Input() enabled = false;
   @Input() audioConfig: unknown;
   @Input() value = '';
+  @Input() textarea: HTMLTextAreaElement | undefined;
   @Input() revision = 0;
   @Input() ownerKey = '';
   @Output() valueChange = new EventEmitter<string>();
@@ -196,6 +197,7 @@ describe('Storyboard dictation parent binding', () => {
       By.directive(DictationControlStub),
     ).componentInstance as DictationControlStub;
     expect(control.ownerKey).toBe('project-1:scene:scene-1');
+    expect(control.textarea?.tagName).toBe('TEXTAREA');
     control.valueChange.emit('spoken prompt');
     expect(project().storyboard[0]).toMatchObject({prompt: 'spoken prompt'});
   });
@@ -206,6 +208,7 @@ describe('Storyboard dictation parent binding', () => {
     const control = fixture.debugElement.query(
       By.directive(DictationControlStub),
     ).componentInstance as DictationControlStub;
+    expect(control.textarea?.tagName).toBe('TEXTAREA');
     expect(scene.prompt).toBe('old prompt');
     expect(control.ownerKey).toBe('project-1:scene:scene-1');
     component.selectCandidate(scene, 1);
@@ -612,6 +615,7 @@ describe('EditCandidateDialog dictation binding', () => {
     const control = fixture.debugElement.query(
       By.directive(DictationControlStub),
     ).componentInstance as DictationControlStub;
+    expect(control.textarea?.tagName).toBe('TEXTAREA');
     control.valueChange.emit('make the sky purple');
     expect(fixture.componentInstance.editPrompt()).toBe('make the sky purple');
     expect(close).not.toHaveBeenCalled();
