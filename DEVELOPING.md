@@ -11,7 +11,8 @@ This repository currently comes with a single user interface, Scene Machine, whi
 [Known Issues](#known-issues) •
 [Applications Architecture](#applications-architecture) •
 [Remix Engine Architecture](#remix-engine-architecture) •
-[Testing](#testing)
+[Testing](#testing) • [Contributor UI testing](docs/testing.md) •
+[Documentation](docs/documentation.md)
 
 ## Local dependencies
 
@@ -29,6 +30,23 @@ To install Python dependencies (incl. formatter):
 Scene Machine runs as Cloud Run services in production, and `deploy.sh` is the right tool to ship a release. But you should not run a full deploy every time you tweak an Angular component: a deploy renders config, builds the UI, uploads to Cloud Build, builds an image, and rolls out Cloud Run. The local loop below lets you edit the UI and see it reload in seconds while still calling the same `/api` endpoints the deployed app uses.
 
 This local path is for people **building** Scene Machine. People **using** it should use a deployed instance.
+
+### Contributor UI testing and documentation
+
+When changing the Angular UI, use the concise [Contributor UI testing guide](docs/testing.md)
+for repeatable phone, tablet, and desktop browser checks. It covers real
+interactions, relevant asynchronous states, safe evidence, and the boundary
+between controlled local data and provider-backed generation. For the
+documentation workflow, see the repository's [Documentation guide](docs/documentation.md).
+The focused workflows are [test-ui-change](docs/skills/test-ui-change/SKILL.md),
+[document-user-facing-change](docs/skills/document-user-facing-change/SKILL.md),
+and [prepare-user-release](docs/skills/prepare-user-release/SKILL.md).
+These skills are usable when an agent is asked to read the linked skill; they
+require no installation or automatic discovery.
+
+Documentation checklist:
+
+- [ ] Updated the relevant user-facing docs, or explained why no change is needed.
 
 ### One-time dev setup
 
