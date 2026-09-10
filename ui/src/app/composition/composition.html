@@ -54,7 +54,7 @@
                 #mainVideo
                 class="preview-video"
                 [src]="heldVideoSrc()"
-                [muted]="isMuted()"
+                [muted]="isMuted() || !currentClipIncludesAudio() || !currentClipSourceReady()"
                 [volume]="videoVolume()"
                 (timeupdate)="onTimeUpdate()"
                 (loadedmetadata)="onVideoLoadedMetadata()"
@@ -97,13 +97,25 @@
                 <div class="time-display total">{{ formatTime(totalDuration()) }}</div>
 
                 <div class="volume-controls">
-                  <button mat-icon-button (click)="isMuted.set(!isMuted())">
+                  <button
+                    mat-icon-button
+                    [disabled]="!currentClipIncludesAudio()"
+                    (click)="isMuted.set(!isMuted())"
+                  >
                     <mat-icon>{{
-                      isMuted() || videoVolume() == 0 ? 'volume_off' : 'volume_up'
+                      isMuted() || !currentClipIncludesAudio() || videoVolume() == 0
+                        ? 'volume_off'
+                        : 'volume_up'
                     }}</mat-icon>
                   </button>
                   <div class="slider-popup">
-                    <mat-slider class="volume-slider" min="0" max="1" step="0.05">
+                    <mat-slider
+                      class="volume-slider"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      [disabled]="!currentClipIncludesAudio()"
+                    >
                       <input
                         matSliderThumb
                         [value]="isMuted() ? 0 : videoVolume()"

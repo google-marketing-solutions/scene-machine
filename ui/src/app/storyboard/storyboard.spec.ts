@@ -15,9 +15,15 @@
  */
 
 import {CdkDragDrop} from '@angular/cdk/drag-drop';
+import {HarnessLoader} from '@angular/cdk/testing';
+import {TestbedHarnessEnvironment} from '@angular/cdk/testing/testbed';
 import {signal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {MatDialog} from '@angular/material/dialog';
+import {MatSelectHarness} from '@angular/material/select/testing';
+import {MatSlideToggle} from '@angular/material/slide-toggle';
+import {MatSlider} from '@angular/material/slider';
+import {By} from '@angular/platform-browser';
 import {of} from 'rxjs';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
@@ -29,11 +35,13 @@ import {
   resolveSceneRenderClip,
 } from '../services/config/config';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
+import {EditCandidateDialog} from './edit-candidate-dialog';
 import {Storyboard} from './storyboard';
 
 describe('Storyboard', () => {
   let component: Storyboard;
   let fixture: ComponentFixture<Storyboard>;
+  let loader: HarnessLoader;
   const sceneIdCounterSignal = signal(0);
   const projectConfigSignal = signal<ProjectConfig>({
     id: 'test-id',
@@ -49,6 +57,8 @@ describe('Storyboard', () => {
     audioTracks: [],
     visualOverlays: [],
   });
+  const canEditCandidatesSignal = signal(false);
+  const durationSliderSignal = signal({min: 4, max: 8, step: 2});
   let mockConfigService = {
     projectConfig: {
       value: projectConfigSignal,
@@ -67,6 +77,10 @@ describe('Storyboard', () => {
       projectConfigSignal.update(config => ({...config, ...partial}));
     },
     videoModels: () => [],
+    canEditCandidates: canEditCandidatesSignal,
+    audioLocked: () => false,
+    durationSlider: durationSliderSignal,
+    selectVideoModel: vi.fn(),
     sceneIdCounter: sceneIdCounterSignal,
     primaryColor: signal('theme-green'),
     isGeneratedScene: (
@@ -78,6 +92,7 @@ describe('Storyboard', () => {
   };
   let mockRemixEngineService = {
     uploadMedia: vi.fn(),
+    editCandidate: vi.fn(),
     generatingSceneIds: signal(new Set()),
   };
   let mockMatDialog = {
@@ -88,6 +103,8 @@ describe('Storyboard', () => {
 
   beforeEach(async () => {
     sceneIdCounterSignal.set(0);
+    canEditCandidatesSignal.set(false);
+    durationSliderSignal.set({min: 4, max: 8, step: 2});
     mockConfigService = {
       projectConfig: {
         value: projectConfigSignal,
@@ -106,6 +123,10 @@ describe('Storyboard', () => {
         projectConfigSignal.update(config => ({...config, ...partial}));
       },
       videoModels: () => [],
+      canEditCandidates: canEditCandidatesSignal,
+      audioLocked: () => false,
+      durationSlider: durationSliderSignal,
+      selectVideoModel: vi.fn(),
       sceneIdCounter: sceneIdCounterSignal,
       primaryColor: signal('theme-green'),
       isGeneratedScene: (
@@ -118,6 +139,7 @@ describe('Storyboard', () => {
 
     mockRemixEngineService = {
       uploadMedia: vi.fn(),
+      editCandidate: vi.fn(),
       generatingSceneIds: signal(new Set()),
     };
 
@@ -143,6 +165,7 @@ describe('Storyboard', () => {
 
     fixture = TestBed.createComponent(Storyboard);
     component = fixture.componentInstance;
+    loader = TestbedHarnessEnvironment.loader(fixture);
     projectConfigSignal.set({
       id: 'test-id',
       name: 'Test Project',
@@ -175,6 +198,130 @@ describe('Storyboard', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('drives the candidate-duration slider from durationSlider()', () => {
+    durationSliderSignal.set({min: 3, max: 10, step: 1});
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [
+        {id: '1', type: 'generated', name: 'Scene 1', prompt: 'test'},
+      ],
+    }));
+    component.selectScene('1');
+    fixture.detectChanges();
+
+    const sliders = fixture.debugElement.queryAll(
+      By.css('.setting-group mat-slider'),
+    );
+    const durationSlider = sliders[1].componentInstance as MatSlider;
+
+    expect(durationSlider.min).toBe(3);
+    expect(durationSlider.max).toBe(10);
+    expect(durationSlider.step).toBe(1);
+  });
+
+  it('keeps the audio toggle enabled so always-audio models can be muted in previews', async () => {
+    mockConfigService.audioLocked = () => true;
+    projectConfigSignal.update(config => ({
+      ...config,
+      generateAudio: false,
+      storyboard: [
+        {id: '1', type: 'generated', name: 'Scene 1', prompt: 'test'},
+      ],
+    }));
+    component.selectScene('1');
+    fixture.detectChanges();
+    // NgModel writes to its ControlValueAccessor (MatSlideToggle.checked) in
+    // a microtask, so let that settle before reading it back.
+    await fixture.whenStable();
+
+    const toggle = fixture.debugElement.query(By.directive(MatSlideToggle))
+      .componentInstance as MatSlideToggle;
+
+    expect(toggle.checked).toBe(false);
+    expect(toggle.disabled).toBe(false);
+  });
+
+  it('leaves the audio toggle enabled and following generateAudio when the model does not always generate audio', async () => {
+    mockConfigService.audioLocked = () => false;
+    projectConfigSignal.update(config => ({
+      ...config,
+      generateAudio: true,
+      storyboard: [
+        {id: '1', type: 'generated', name: 'Scene 1', prompt: 'test'},
+      ],
+    }));
+    component.selectScene('1');
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const toggle = fixture.debugElement.query(By.directive(MatSlideToggle))
+      .componentInstance as MatSlideToggle;
+
+    expect(toggle.checked).toBe(true);
+    expect(toggle.disabled).toBe(false);
+  });
+
+  it('mutes an audio-off selected candidate and disables its preview volume controls', () => {
+    const scene: GeneratedScene = {
+      id: 'audio-scene',
+      type: 'generated',
+      name: 'Audio scene',
+      prompt: 'test',
+      selectedCandidateIndex: 0,
+      candidates: [
+        {
+          runNumber: 1,
+          durationSeconds: 4,
+          model: 'veo-1',
+          prompt: 'test',
+          generateAudio: false,
+          resolution: '1080p',
+          video: {url: 'https://video/off.mp4', path: 'video/off.mp4'},
+        },
+      ],
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    component.selectScene(scene.id);
+    fixture.detectChanges();
+
+    const video = fixture.nativeElement.querySelector(
+      '.preview-video',
+    ) as HTMLVideoElement;
+    const volumeButton = fixture.nativeElement.querySelector(
+      '.volume-controls button',
+    ) as HTMLButtonElement;
+    expect(video.muted).toBe(true);
+    expect(volumeButton.disabled).toBe(true);
+    expect(volumeButton.textContent).toContain('volume_off');
+
+    scene.candidates![0].generateAudio = true;
+    projectConfigSignal.set({...projectConfigSignal()});
+    fixture.detectChanges();
+    expect(video.muted).toBe(false);
+    expect(volumeButton.disabled).toBe(false);
+  });
+
+  it('calls selectVideoModel when a model is chosen for the selected scene', async () => {
+    (mockConfigService as {videoModels: () => string[]}).videoModels = () => [
+      'veo-default',
+      'omni-1',
+    ];
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [
+        {id: '1', type: 'generated', name: 'Scene 1', prompt: 'test'},
+      ],
+    }));
+    component.selectScene('1');
+    fixture.detectChanges();
+
+    const select = await loader.getHarness(MatSelectHarness);
+    await select.open();
+    await select.clickOptions({text: 'omni-1'});
+
+    expect(mockConfigService.selectVideoModel).toHaveBeenCalledWith('omni-1');
   });
 
   it('should automatically select a newly added scene', () => {
@@ -683,5 +830,172 @@ describe('Storyboard', () => {
       fixture.detectChanges();
       expect(component.getPlaceholdersArray().length).toBe(6);
     });
+  });
+
+  describe('Edit button', () => {
+    const makeCandidate = (overrides: Partial<Candidate> = {}): Candidate => ({
+      video: {url: 'r1.mp4', path: 'path/r1.mp4'},
+      runNumber: 1,
+      durationSeconds: 4,
+      prompt: 'test prompt',
+      model: 'test-model',
+      generateAudio: false,
+      resolution: '1080p',
+      ...overrides,
+    });
+
+    const selectSceneWithOneCandidate = () => {
+      const scene: GeneratedScene = {
+        id: '1',
+        type: 'generated',
+        name: 'Scene 1',
+        prompt: 'test',
+        candidates: [makeCandidate()],
+      };
+      projectConfigSignal.update(config => ({
+        ...config,
+        storyboard: [scene],
+      }));
+      component.selectScene('1');
+      fixture.detectChanges();
+    };
+
+    const selectSceneWithActiveAndArchivedCandidates = () => {
+      const scene: GeneratedScene = {
+        id: '1',
+        type: 'generated',
+        name: 'Scene 1',
+        prompt: 'test',
+        candidates: [
+          makeCandidate(),
+          makeCandidate({
+            isArchived: true,
+            video: {url: 'r1-archived.mp4', path: 'path/r1-archived.mp4'},
+          }),
+        ],
+      };
+      projectConfigSignal.update(config => ({
+        ...config,
+        storyboard: [scene],
+      }));
+      component.selectScene('1');
+      fixture.detectChanges();
+      (
+        fixture.nativeElement.querySelector(
+          '.archived-panel mat-expansion-panel-header',
+        ) as HTMLElement
+      ).click();
+      fixture.detectChanges();
+    };
+
+    it('does not render the Edit button when canEditCandidates() is false', () => {
+      canEditCandidatesSignal.set(false);
+      selectSceneWithOneCandidate();
+
+      expect(
+        fixture.nativeElement.querySelector('.candidate-list .edit-btn'),
+      ).toBeNull();
+    });
+
+    it('renders the Edit button when canEditCandidates() is true', () => {
+      canEditCandidatesSignal.set(true);
+      selectSceneWithOneCandidate();
+
+      expect(
+        fixture.nativeElement.querySelector('.candidate-list .edit-btn'),
+      ).not.toBeNull();
+    });
+
+    it('labels active and archived edit buttons and disables both during generation', () => {
+      canEditCandidatesSignal.set(true);
+      selectSceneWithActiveAndArchivedCandidates();
+
+      let buttons = Array.from(
+        fixture.nativeElement.querySelectorAll('.edit-btn'),
+      ) as HTMLButtonElement[];
+      expect(buttons).toHaveLength(2);
+      expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual([
+        'Edit candidate with prompt',
+        'Edit candidate with prompt',
+      ]);
+      expect(buttons.every(button => !button.disabled)).toBe(true);
+
+      mockRemixEngineService.generatingSceneIds.set(new Set(['1']));
+      fixture.detectChanges();
+      buttons = Array.from(
+        fixture.nativeElement.querySelectorAll('.edit-btn'),
+      ) as HTMLButtonElement[];
+      expect(buttons.every(button => button.disabled)).toBe(true);
+
+      mockRemixEngineService.generatingSceneIds.set(new Set());
+      fixture.detectChanges();
+      buttons = Array.from(
+        fixture.nativeElement.querySelectorAll('.edit-btn'),
+      ) as HTMLButtonElement[];
+      expect(buttons.every(button => !button.disabled)).toBe(true);
+    });
+
+    it('does not open the edit dialog when a candidate is generating', () => {
+      canEditCandidatesSignal.set(true);
+      selectSceneWithActiveAndArchivedCandidates();
+      mockRemixEngineService.generatingSceneIds.set(new Set(['1']));
+      fixture.detectChanges();
+
+      const buttons = Array.from(
+        fixture.nativeElement.querySelectorAll('.edit-btn'),
+      ) as HTMLButtonElement[];
+      for (const button of buttons) {
+        button.click();
+      }
+      expect(mockMatDialog.open).not.toHaveBeenCalled();
+      expect(mockRemixEngineService.editCandidate).not.toHaveBeenCalled();
+    });
+
+    it('opens the dialog and calls editCandidate with a non-empty result, without selecting the candidate', () => {
+      canEditCandidatesSignal.set(true);
+      selectSceneWithOneCandidate();
+      mockMatDialog.open = vi.fn().mockReturnValue({
+        afterClosed: () => of('make the sky purple'),
+      });
+
+      const scene = component.config.projectConfig.value()
+        .storyboard[0] as GeneratedScene;
+      const btn = fixture.nativeElement.querySelector(
+        '.candidate-list .edit-btn',
+      );
+      btn.click();
+      fixture.detectChanges();
+
+      expect(mockMatDialog.open).toHaveBeenCalledWith(EditCandidateDialog);
+      expect(mockRemixEngineService.editCandidate).toHaveBeenCalledWith(
+        scene,
+        0,
+        'make the sky purple',
+      );
+      // The click on the edit button must not also select the candidate
+      // (stopPropagation keeps it from bubbling to the video-item's click).
+      expect(
+        (component.config.projectConfig.value().storyboard[0] as GeneratedScene)
+          .selectedCandidateIndex,
+      ).toBeUndefined();
+    });
+
+    for (const emptyResult of [undefined, '']) {
+      it(`calls nothing when the dialog closes with ${JSON.stringify(emptyResult)}`, () => {
+        canEditCandidatesSignal.set(true);
+        selectSceneWithOneCandidate();
+        mockMatDialog.open = vi.fn().mockReturnValue({
+          afterClosed: () => of(emptyResult),
+        });
+
+        const btn = fixture.nativeElement.querySelector(
+          '.candidate-list .edit-btn',
+        );
+        btn.click();
+        fixture.detectChanges();
+
+        expect(mockRemixEngineService.editCandidate).not.toHaveBeenCalled();
+      });
+    }
   });
 });

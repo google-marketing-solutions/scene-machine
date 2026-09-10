@@ -76,9 +76,7 @@
                         >movie</mat-icon
                       >
                     } @else {
-                      <mat-icon color="warn" matTooltip="Render failed"
-                        >error_outline</mat-icon
-                      >
+                      <mat-icon color="warn" matTooltip="Render failed">error_outline</mat-icon>
                     }
                     <div class="render-run-text">
                       <span class="render-run-name"
@@ -158,7 +156,13 @@
         <span>{{ downloading() ? 'Downloading...' : 'Download Video' }}</span>
       </button>
 
-      <button mat-flat-button color="primary" [matMenuTriggerFor]="scenesMenu">
+      <button
+        mat-flat-button
+        color="primary"
+        [matMenuTriggerFor]="scenesMenu"
+        [disabled]="!videoFile()"
+        matTooltip="Selected clip with current trim and audio; excludes music, transitions, and overlays"
+      >
         <mat-icon>download</mat-icon>
         <span>Download Scenes</span>
       </button>

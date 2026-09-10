@@ -38,9 +38,12 @@ import {
   GeneratedScene,
   ProvidedVideoScene,
   RenderRun,
+  resolveSceneRenderClip,
 } from '../services/config/config';
 import {MediaSrcPipe} from '../services/media/media-src.pipe';
 import {MediaService} from '../services/media/media';
+import {RemixEngineService} from '../services/remix-engine/remix-engine';
+import {MatSnackBar} from '@angular/material/snack-bar';
 import {EditableProjectTitle} from '../shared/editable-project-title/editable-project-title';
 
 /**
@@ -69,6 +72,8 @@ export class OutputVideo {
   configService = inject(ConfigService);
   private httpClient = inject(HttpClient);
   private mediaService = inject(MediaService);
+  private remixEngineService = inject(RemixEngineService);
+  private matSnackBar = inject(MatSnackBar);
 
   selectedRenderRun = linkedSignal<
     {projectId: string; renderRuns: RenderRun[]},
@@ -142,17 +147,19 @@ export class OutputVideo {
   getSceneVideoFile(
     scene: GeneratedScene | ProvidedVideoScene,
   ): GcsFile | undefined {
-    if (this.configService.isGeneratedScene(scene)) {
-      return scene.candidates?.[scene.selectedCandidateIndex ?? 0]?.video;
-    }
-    return scene.video;
+    const resolved = resolveSceneRenderClip(scene);
+    return resolved.state === 'ready' ? resolved.clip.video : undefined;
   }
 
   downloadScene(scene: GeneratedScene | ProvidedVideoScene) {
-    const file = this.getSceneVideoFile(scene);
-    if (!file || this.downloadingScenes().has(scene.id)) {
+    if (!this.videoFile()) {
       return;
     }
+    if (this.downloadingScenes().has(scene.id)) {
+      return;
+    }
+    const file = this.getSceneVideoFile(scene);
+    if (!file) return;
 
     this.downloadingScenes.update(set => {
       const newSet = new Set(set);
@@ -167,17 +174,24 @@ export class OutputVideo {
       });
     };
 
+    const projectId = this.configService.projectConfig.value().id;
     const filename = `${this.configService.projectConfig.value().name}_${scene.name}.mp4`;
-    this.mediaService
-      .resolve(file)
+    this.remixEngineService
+      .exportScene(scene)
+      .then(exported => this.mediaService.resolve(exported))
       .then(url => {
         if (!url) {
-          throw new Error('No URL for scene video');
+          throw new Error('No URL for exported scene video');
+        }
+        if (this.configService.projectConfig.value().id !== projectId) {
+          removeFromDownloading();
+          return;
         }
         downloadBlob(this.httpClient, url, filename, removeFromDownloading);
       })
       .catch(error => {
-        console.error(`Download failed for ${filename}`, error);
+        console.error(`Scene export/download failed for ${filename}`, error);
+        this.matSnackBar.open('Could not download this scene.', 'Dismiss');
         removeFromDownloading();
       });
   }

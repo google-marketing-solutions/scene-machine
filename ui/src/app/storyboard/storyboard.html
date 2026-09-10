@@ -235,6 +235,18 @@
                                 <div class="resolution">
                                   {{ candidate.resolution === '4k' ? '4K' : candidate.resolution }}
                                 </div>
+                                @if (config.canEditCandidates()) {
+                                  <button
+                                    mat-icon-button
+                                    class="edit-btn"
+                                    [disabled]="areCandidatesGenerating(scene.id)"
+                                    aria-label="Edit candidate with prompt"
+                                    (click)="editCandidate($event, scene, $index)"
+                                    matTooltip="Edit with a prompt"
+                                  >
+                                    <mat-icon>auto_fix_high</mat-icon>
+                                  </button>
+                                }
                                 <button
                                   mat-icon-button
                                   class="archive-btn"
@@ -356,6 +368,18 @@
                                   #thumbContainer
                                   [style.aspect-ratio]="previewAspectRatio()"
                                 >
+                                  @if (config.canEditCandidates()) {
+                                    <button
+                                      mat-icon-button
+                                      class="edit-btn"
+                                      [disabled]="areCandidatesGenerating(scene.id)"
+                                      aria-label="Edit candidate with prompt"
+                                      (click)="editCandidate($event, scene, $index)"
+                                      matTooltip="Edit with a prompt"
+                                    >
+                                      <mat-icon>auto_fix_high</mat-icon>
+                                    </button>
+                                  }
                                   <button
                                     mat-icon-button
                                     class="archive-btn"
@@ -480,7 +504,7 @@
                       (loadedmetadata)="onVideoLoadedMetadata()"
                       (ended)="onVideoEnded()"
                       class="preview-video"
-                      [muted]="isMuted()"
+                      [muted]="isMuted() || candidate.generateAudio === false"
                       [volume]="videoVolume()"
                       loop
                     ></video>
@@ -534,13 +558,25 @@
                           </div>
 
                           <div class="volume-controls">
-                            <button mat-icon-button (click)="isMuted.set(!isMuted())">
+                            <button
+                              mat-icon-button
+                              [disabled]="candidate.generateAudio === false"
+                              (click)="isMuted.set(!isMuted())"
+                            >
                               <mat-icon>{{
-                                isMuted() || videoVolume() == 0 ? 'volume_off' : 'volume_up'
+                                isMuted() || candidate.generateAudio === false || videoVolume() == 0
+                                  ? 'volume_off'
+                                  : 'volume_up'
                               }}</mat-icon>
                             </button>
                             <div class="slider-popup">
-                              <mat-slider class="volume-slider" min="0" max="1" step="0.05">
+                              <mat-slider
+                                class="volume-slider"
+                                min="0"
+                                max="1"
+                                step="0.05"
+                                [disabled]="candidate.generateAudio === false"
+                              >
                                 <input
                                   matSliderThumb
                                   [value]="isMuted() ? 0 : videoVolume()"
@@ -798,7 +834,7 @@
                   >
                     <mat-select
                       [ngModel]="config.projectConfig.value().model"
-                      (ngModelChange)="config.updateProjectConfig({model: $event})"
+                      (ngModelChange)="config.selectVideoModel($event)"
                     >
                       @for (model of config.videoModels(); track model) {
                         <mat-option [value]="model">{{ model }}</mat-option>
@@ -832,7 +868,13 @@
                       >{{ config.projectConfig.value().candidateDurationSeconds }}s</span
                     >
                   </div>
-                  <mat-slider min="4" max="8" step="2" discrete showTickMarks>
+                  <mat-slider
+                    [min]="config.durationSlider().min"
+                    [max]="config.durationSlider().max"
+                    [step]="config.durationSlider().step"
+                    discrete
+                    showTickMarks
+                  >
                     <input
                       matSliderThumb
                       [ngModel]="config.projectConfig.value().candidateDurationSeconds"
@@ -848,12 +890,17 @@
                   <div class="audio-toggle">
                     <div>
                       <mat-icon class="setting-icon">music_note</mat-icon>
-                      <span class="subtitle">Generate audio</span>
+                      <span class="subtitle">Use clip audio</span>
                     </div>
                     <mat-slide-toggle
                       color="primary"
                       [ngModel]="config.projectConfig.value().generateAudio"
                       (ngModelChange)="config.updateProjectConfig({generateAudio: $event})"
+                      [matTooltip]="
+                        config.audioLocked()
+                          ? 'This model always generates audio. Turn off to mute new candidates in previews and the final video.'
+                          : ''
+                      "
                     ></mat-slide-toggle>
                   </div>
                 </div>

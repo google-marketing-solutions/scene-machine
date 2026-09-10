@@ -104,6 +104,19 @@ export interface VideoGenerationWorkflowParameters extends CommonWorkflowParamet
 }
 
 /**
+ * Parameters for the edit_video workflow: takes a source candidate's video
+ * and a text prompt, run through the catalog's edit-capable model.
+ */
+export interface VideoEditWorkflowParameters extends CommonWorkflowParameters {
+  model: string;
+  location: string;
+  videoPath: string;
+  promptPath: string;
+  // Optional because candidates saved by older versions may lack it.
+  resolution?: Resolution;
+}
+
+/**
  * Parameters for combining scenes workflow.
  */
 export interface CombineScenesWorkflowParameters extends CommonWorkflowParameters {
@@ -129,6 +142,8 @@ export interface CombineVideoArrangement {
   scenes?: number[]; // (for images) list of videos in which to show this
   transition?: string;
   transition_overlap?: number;
+  /** Defaults to true for arrangements produced by older clients. */
+  include_audio?: boolean;
 }
 
 /**

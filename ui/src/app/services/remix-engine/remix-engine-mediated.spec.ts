@@ -19,12 +19,17 @@ import {HttpClient} from '@angular/common/http';
 import {signal, type WritableSignal} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import {MatSnackBar} from '@angular/material/snack-bar';
-import {of} from 'rxjs';
+import {from, of} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ClientMediaService} from '../client-media/client-media';
-import {ConfigService} from '../config/config';
+import {
+  ConfigService,
+  type GeneratedScene,
+  type ProvidedVideoScene,
+} from '../config/config';
 import {MediaService} from '../media/media';
 import {RemixEngineService} from './remix-engine';
+import type {NodeItem, WorkflowStatusResponse} from './remix-engine.interface';
 
 describe('RemixEngineService (mediated)', () => {
   let service: RemixEngineService;
@@ -138,6 +143,10 @@ describe('RemixEngineService (mediated)', () => {
       addRenderRun: vi.fn(),
       setPendingRender: vi.fn(),
       flushPendingSave: vi.fn(),
+      videoEditModels: vi.fn().mockReturnValue([]),
+      canEditCandidates: vi.fn().mockReturnValue(false),
+      audioLocked: vi.fn().mockReturnValue(false),
+      resolveVideoLocation: vi.fn().mockReturnValue('mock-veo-loc'),
     };
 
     clientMediaServiceMock = {
@@ -573,6 +582,661 @@ describe('RemixEngineService (mediated)', () => {
     });
   });
 
+  describe('editCandidate', () => {
+    const editCatalog = {
+      defaults: {omni: 'omni-1'},
+      actions: {
+        edit_video: {location_param: 'gcp_location', default_key: 'veoModel'},
+      },
+      models: {
+        'omni-1': {
+          family: 'omni',
+          actions: ['generate_video', 'edit_video'],
+          locations: ['mock-veo-loc'],
+          capabilities: {audio_always_on: true},
+        },
+      },
+    };
+
+    function mockSceneWithCandidate(candidateOverrides: any = {}) {
+      const sourceCandidate = {
+        runNumber: 1,
+        durationSeconds: 5,
+        model: 'mock-veo',
+        prompt: 'prompt 1',
+        generateAudio: false,
+        resolution: '720p',
+        video: {
+          url: 'https://signed.example/p/source.mp4',
+          path: 'p/source.mp4',
+        },
+        ...candidateOverrides,
+      };
+      const mockScene = {
+        id: 'scene-1',
+        type: 'generated',
+        prompt: 'prompt 1',
+        candidates: [sourceCandidate],
+      };
+      const mockProject = {
+        id: 'project-1',
+        numberOfCandidates: 2,
+        storyboard: [mockScene],
+      };
+      projectConfigSignal.set(mockProject);
+      return {mockScene, sourceCandidate};
+    }
+
+    /** Configures configServiceMock as if one Omni-like model can edit. */
+    function enableEditing() {
+      configServiceMock.videoEditModels.mockReturnValue(['omni-1']);
+      configServiceMock.canEditCandidates.mockReturnValue(true);
+      globalConfigSignal.set({
+        ...globalConfigSignal(),
+        modelCatalog: editCatalog,
+      });
+    }
+
+    it('posts the edit_video workflow body built from the source candidate', async () => {
+      const {mockScene} = mockSceneWithCandidate();
+      enableEditing();
+      vi.spyOn(service, 'uploadText').mockResolvedValue(
+        'remix-input/edit-prompt-abc123.txt',
+      );
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockReturnValue(new Promise(() => {}));
+
+      void service.editCandidate(mockScene as any, 0, 'make the sky purple');
+      await settle();
+
+      expect(httpClientMock.post).toHaveBeenCalledWith('/api/supplyNode', {
+        workflowDefinition: {
+          root: {
+            action: 'pass',
+            input: {video: null, prompt: null},
+            types: {video: 'video', prompt: 'string'},
+          },
+          n_0: {
+            action: 'edit_video',
+            input: {
+              video: {node: 'root', output: 'video'},
+              prompt: {node: 'root', output: 'prompt'},
+            },
+            parameters: {
+              model: 'omni-1',
+              gcp_location: 'mock-veo-loc',
+              resolution: '720p',
+            },
+          },
+          sink: {
+            action: 'pass',
+            input: {video: {node: 'n_0', output: 'edited_video'}},
+          },
+        },
+        nodeId: 'root',
+        workflowId: expect.any(String),
+        forceExecution: false,
+        workflowParams: {
+          gcpProject: 'mock-project',
+          gcpLocation: 'mock-location',
+          gcsBucket: 'mock-bucket',
+          tasksQueuePrefix: 'mock-queue',
+        },
+        inputFiles: {
+          video: [{file: 'p/source.mp4'}],
+          prompt: [{file: 'remix-input/edit-prompt-abc123.txt'}],
+        },
+      });
+    });
+
+    it('posts the global fallback location when the edit model does not list the configured Veo location', async () => {
+      const {mockScene} = mockSceneWithCandidate();
+      const globalOnlyEditCatalog = {
+        ...editCatalog,
+        models: {
+          ...editCatalog.models,
+          'omni-1': {...editCatalog.models['omni-1'], locations: ['global']},
+        },
+      };
+      configServiceMock.videoEditModels.mockReturnValue(['omni-1']);
+      configServiceMock.canEditCandidates.mockReturnValue(true);
+      globalConfigSignal.set({
+        ...globalConfigSignal(),
+        modelCatalog: globalOnlyEditCatalog,
+      });
+      configServiceMock.resolveVideoLocation.mockReturnValue('global');
+      vi.spyOn(service, 'uploadText').mockResolvedValue(
+        'remix-input/edit-prompt-abc123.txt',
+      );
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockReturnValue(new Promise(() => {}));
+
+      void service.editCandidate(mockScene as any, 0, 'make the sky purple');
+      await settle();
+
+      expect(httpClientMock.post).toHaveBeenCalledWith(
+        '/api/supplyNode',
+        expect.objectContaining({
+          workflowDefinition: expect.objectContaining({
+            n_0: expect.objectContaining({
+              parameters: expect.objectContaining({gcp_location: 'global'}),
+            }),
+          }),
+        }),
+      );
+      expect(configServiceMock.resolveVideoLocation).toHaveBeenCalledWith(
+        'omni-1',
+      );
+    });
+
+    it.each([['1080p'], ['4k']] as const)(
+      'posts the source candidate resolution (%s) in n_0.parameters and on the attached candidate',
+      async resolution => {
+        const {mockScene} = mockSceneWithCandidate({resolution});
+        enableEditing();
+        setupHappyMedia();
+        vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+        httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+        vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+          sink: {output: {'0': {video: [{file: 'p/edited.mp4'}]}}},
+        } as any);
+
+        await service.editCandidate(mockScene as any, 0, 'make the sky purple');
+
+        const [, body] = httpClientMock.post.mock.calls[0];
+        expect((body as any).workflowDefinition.n_0.parameters.resolution).toBe(
+          resolution,
+        );
+        const finalScene = lastUpdatedScene();
+        expect(finalScene.candidates[1]).toEqual(
+          expect.objectContaining({resolution}),
+        );
+      },
+    );
+
+    it('posts no resolution when the source candidate has none', async () => {
+      const {mockScene, sourceCandidate} = mockSceneWithCandidate();
+      delete sourceCandidate.resolution;
+      enableEditing();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockReturnValue(new Promise(() => {}));
+
+      void service.editCandidate(mockScene as any, 0, 'make the sky purple');
+      await settle();
+
+      const [, body] = httpClientMock.post.mock.calls[0];
+      const parameters = (body as any).workflowDefinition.n_0.parameters;
+      expect(parameters.resolution).toBeUndefined();
+      // The key is dropped once serialised to JSON, so an older backend
+      // (or a candidate with no resolution) never sees the field at all.
+      expect(JSON.parse(JSON.stringify(parameters))).not.toHaveProperty(
+        'resolution',
+      );
+    });
+
+    it('keeps the trim the edit was started with when the storyboard mutates the live candidate mid-run', async () => {
+      // storyboard.ts mutates candidate.trim in place while an edit is
+      // running; the attached edited candidate must carry the trim from the
+      // moment the run was submitted, not whatever trim the storyboard has
+      // moved on to by completion.
+      const {mockScene, sourceCandidate} = mockSceneWithCandidate({
+        trim: {start: 1, end: 4},
+      });
+      enableEditing();
+      setupHappyMedia();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      let resolvePoll!: (value: any) => void;
+      vi.spyOn(service, 'pollWorkflow').mockReturnValue(
+        new Promise(resolve => (resolvePoll = resolve)),
+      );
+
+      const editPromise = service.editCandidate(
+        mockScene as any,
+        0,
+        'make the sky purple',
+      );
+      await settle(); // reach the poll await; the source has been captured
+
+      // The storyboard mutates the live candidate's trim while the edit runs.
+      sourceCandidate.trim.end = 9;
+
+      resolvePoll({
+        sink: {output: {'0': {video: [{file: 'p/edited.mp4'}]}}},
+      });
+      await editPromise;
+
+      const finalScene = lastUpdatedScene();
+      expect(finalScene.candidates[1]).toEqual(
+        expect.objectContaining({trim: {start: 1, end: 4}}),
+      );
+    });
+
+    it('chooses the edit model from the catalog default, never the project model', async () => {
+      const {mockScene} = mockSceneWithCandidate();
+      enableEditing();
+      // The project's own model is a Veo id, not the Omni edit model.
+      projectConfigSignal.set({...projectConfigSignal(), model: 'mock-veo'});
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockReturnValue(new Promise(() => {}));
+
+      void service.editCandidate(mockScene as any, 0, 'make the sky purple');
+      await settle();
+
+      expect(httpClientMock.post).toHaveBeenCalledWith(
+        '/api/supplyNode',
+        expect.objectContaining({
+          workflowDefinition: expect.objectContaining({
+            n_0: expect.objectContaining({
+              parameters: {
+                model: 'omni-1',
+                gcp_location: 'mock-veo-loc',
+                resolution: '720p',
+              },
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('falls back to videoEditModels()[0] when the catalog has no omni default', async () => {
+      const {mockScene} = mockSceneWithCandidate();
+      enableEditing();
+      // No 'omni' key in defaults at all — production models.json today has
+      // no such default, so selectEditModel must take the editModels[0]
+      // fallback branch, not throw or post an undefined model.
+      globalConfigSignal.set({
+        ...globalConfigSignal(),
+        modelCatalog: {...editCatalog, defaults: {}},
+      });
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockReturnValue(new Promise(() => {}));
+
+      void service.editCandidate(mockScene as any, 0, 'make the sky purple');
+      await settle();
+
+      const [, body] = httpClientMock.post.mock.calls[0];
+      expect((body as any).workflowDefinition.n_0.parameters).toEqual({
+        model: 'omni-1',
+        gcp_location: 'mock-veo-loc',
+        resolution: '720p',
+      });
+    });
+
+    it('falls back to the sorted first edit model when there is no catalog default at all', async () => {
+      const {mockScene} = mockSceneWithCandidate();
+      configServiceMock.videoEditModels.mockReturnValue(['a-model', 'omni-1']);
+      configServiceMock.canEditCandidates.mockReturnValue(true);
+      globalConfigSignal.set({
+        ...globalConfigSignal(),
+        modelCatalog: {...editCatalog, defaults: {}},
+      });
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockReturnValue(new Promise(() => {}));
+
+      void service.editCandidate(mockScene as any, 0, 'make the sky purple');
+      await settle();
+
+      const [, body] = httpClientMock.post.mock.calls[0];
+      expect((body as any).workflowDefinition.n_0.parameters).toEqual({
+        model: 'a-model',
+        gcp_location: 'mock-veo-loc',
+        resolution: '720p',
+      });
+    });
+
+    it('refuses without posting when no model can edit at this location', async () => {
+      const {mockScene} = mockSceneWithCandidate();
+      // canEditCandidates()/videoEditModels() default to false/[] in this
+      // file's beforeEach — no enableEditing() call.
+
+      await service.editCandidate(mockScene as any, 0, 'make the sky purple');
+
+      expect(httpClientMock.post).not.toHaveBeenCalled();
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'No model can edit video at this location.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('does not show an edit-model error or upload when the source has no video', async () => {
+      const {mockScene} = mockSceneWithCandidate({video: undefined});
+
+      await service.editCandidate(mockScene as any, 0, 'make the sky purple');
+
+      expect(configServiceMock.videoEditModels).not.toHaveBeenCalled();
+      expect(matSnackBarMock.open).not.toHaveBeenCalled();
+      expect(mediaServiceMock.upload).not.toHaveBeenCalled();
+      expect(httpClientMock.post).not.toHaveBeenCalled();
+    });
+
+    it('produces byte-identical bodies for two identical edits except workflowId', async () => {
+      const {mockScene} = mockSceneWithCandidate();
+      enableEditing();
+      setupHappyMedia();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/edited.mp4'}]}}},
+      } as any);
+
+      // First edit runs to completion (clearing the generating flag) before
+      // the second starts, so both are free to run and post independently.
+      await service.editCandidate(mockScene as any, 0, 'make the sky purple');
+      const [firstBody] = httpClientMock.post.mock.calls[0].slice(1);
+
+      await service.editCandidate(mockScene as any, 0, 'make the sky purple');
+      const [secondBody] = httpClientMock.post.mock.calls[1].slice(1);
+
+      const stripId = (body: any) => {
+        const clone = {...body};
+        delete clone.workflowId;
+        return JSON.stringify(clone);
+      };
+      expect(stripId(firstBody)).toBe(stripId(secondBody));
+      expect(firstBody.workflowId).not.toBe(secondBody.workflowId);
+    });
+
+    it('marks the scene generating and persists a PendingGeneration immediately', async () => {
+      const {mockScene, sourceCandidate} = mockSceneWithCandidate({
+        trim: {start: 1, end: 4},
+        referenceImage: {
+          path: 'ref/p.png',
+          url: 'https://signed.example/ref/p.png',
+        },
+      });
+      enableEditing();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockReturnValue(new Promise(() => {}));
+
+      void service.editCandidate(mockScene as any, 0, 'make the sky purple');
+      await settle();
+
+      expect(service.generatingSceneIds().has('scene-1')).toBe(true);
+      expect(configServiceMock.updateProjectConfig).toHaveBeenCalledTimes(1);
+      const persistedScene = lastUpdatedScene();
+      expect(persistedScene.pendingGeneration).toEqual({
+        executionId: 'edit-exec-id',
+        requestedCount: 1,
+        startedAt: expect.any(String),
+        durationSeconds: sourceCandidate.durationSeconds,
+        trim: {start: 1, end: 4},
+        model: 'omni-1',
+        generateAudio: false,
+        resolution: sourceCandidate.resolution,
+        prompt: sourceCandidate.prompt,
+        editPrompt: 'make the sky purple',
+        editedFromRun: sourceCandidate.runNumber,
+        referenceImage: sourceCandidate.referenceImage,
+      });
+      expect(configServiceMock.flushPendingSave).toHaveBeenCalledTimes(1);
+    });
+
+    it('attaches an edited candidate carrying the source fields and the edit metadata', async () => {
+      const {mockScene, sourceCandidate} = mockSceneWithCandidate({
+        trim: {start: 1, end: 4},
+        referenceImage: {
+          path: 'ref/p.png',
+          url: 'https://signed.example/ref/p.png',
+        },
+      });
+      enableEditing();
+      setupHappyMedia();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/edited.mp4'}]}}},
+      } as any);
+
+      await service.editCandidate(mockScene as any, 0, 'make the sky purple');
+
+      const finalScene = lastUpdatedScene();
+      expect(finalScene).not.toHaveProperty('pendingGeneration');
+      expect(finalScene.candidates).toEqual([
+        sourceCandidate,
+        expect.objectContaining({
+          runNumber: sourceCandidate.runNumber + 1,
+          durationSeconds: sourceCandidate.durationSeconds,
+          resolution: sourceCandidate.resolution,
+          prompt: sourceCandidate.prompt,
+          model: 'omni-1',
+          generateAudio: false,
+          editPrompt: 'make the sky purple',
+          editedFromRun: sourceCandidate.runNumber,
+          trim: {start: 1, end: 4},
+          referenceImage: sourceCandidate.referenceImage,
+          video: {
+            url: 'https://signed.example/p/edited.mp4',
+            path: 'p/edited.mp4',
+          },
+        }),
+      ]);
+    });
+
+    it('does not attach a duplicate when the edit is a cache hit, and tells the user', async () => {
+      const {mockScene} = mockSceneWithCandidate();
+      // The scene already has a candidate at the path the worker will return
+      // (an identical prior edit already landed).
+      mockScene.candidates.push({
+        runNumber: 2,
+        durationSeconds: 5,
+        model: 'omni-1',
+        prompt: 'prompt 1',
+        generateAudio: true,
+        resolution: '720p',
+        video: {
+          url: 'https://signed.example/p/edited.mp4',
+          path: 'p/edited.mp4',
+        },
+        editPrompt: 'make the sky purple',
+        editedFromRun: 1,
+      } as any);
+      enableEditing();
+      setupHappyMedia();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/edited.mp4'}]}}},
+      } as any);
+
+      await service.editCandidate(mockScene as any, 0, 'make the sky purple');
+
+      const finalScene = lastUpdatedScene();
+      expect(finalScene.candidates).toHaveLength(2);
+      expect(finalScene).not.toHaveProperty('pendingGeneration');
+      // Informational, not an error — no error-snackbar panel class.
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'This edit already exists as a candidate',
+        'Dismiss',
+      );
+    });
+
+    it('sets the scene generation error the way generateCandidates does on a definitive failure', async () => {
+      const {mockScene} = mockSceneWithCandidate();
+      enableEditing();
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{_error: 'Mock edit error'}]}}},
+      } as any);
+
+      await service.editCandidate(mockScene as any, 0, 'make the sky purple');
+
+      expect(errSpy).toHaveBeenCalled();
+      const finalScene = lastUpdatedScene();
+      expect(finalScene).not.toHaveProperty('pendingGeneration');
+      expect(finalScene).toHaveProperty('generationError', 'Mock edit error');
+      expect(service.generatingSceneIds().has('scene-1')).toBe(false);
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'failed to generate — open the marked scene to see why.',
+        ),
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    it('sets the scene generation error when the poll itself rejects', async () => {
+      const {mockScene} = mockSceneWithCandidate();
+      enableEditing();
+      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockRejectedValue(
+        new Error('poll failed'),
+      );
+
+      await service.editCandidate(mockScene as any, 0, 'make the sky purple');
+
+      expect(errSpy).toHaveBeenCalled();
+      const finalScene = lastUpdatedScene();
+      expect(finalScene).not.toHaveProperty('pendingGeneration');
+      expect(finalScene).toHaveProperty('generationError', 'poll failed');
+      expect(service.generatingSceneIds().has('scene-1')).toBe(false);
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'failed to generate — open the marked scene to see why.',
+        ),
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    });
+
+    describe('project guards (never write into the wrong project)', () => {
+      it('does not post the workflow when the project changes while the prompt is uploading, and leaves project B untouched', async () => {
+        const {mockScene} = mockSceneWithCandidate();
+        enableEditing();
+        let resolveUpload!: (path: string) => void;
+        vi.spyOn(service, 'uploadText').mockReturnValue(
+          new Promise<string>(resolve => (resolveUpload = resolve)),
+        );
+
+        const editPromise = service.editCandidate(
+          mockScene as any,
+          0,
+          'make the sky purple',
+        );
+        await settle(); // reach the upload await
+
+        // User leaves project-1 for another project before the upload
+        // finishes.
+        projectConfigSignal.set({id: 'project-B', storyboard: []});
+        resolveUpload('p/edit-prompt.txt');
+        await editPromise;
+
+        // Nothing is paid yet: the workflow is never posted, and nothing was
+        // written into the now-loaded project-B.
+        expect(httpClientMock.post).not.toHaveBeenCalled();
+        expect(configServiceMock.updateProjectConfig).not.toHaveBeenCalled();
+      });
+
+      it('does not write an error into project B when the project changes while the prompt is uploading and the upload rejects', async () => {
+        const {mockScene} = mockSceneWithCandidate();
+        enableEditing();
+        // The orphaned-run log is expected; spy to keep it out of the test
+        // output.
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        let rejectUpload!: (err: Error) => void;
+        vi.spyOn(service, 'uploadText').mockReturnValue(
+          new Promise<string>((_, reject) => (rejectUpload = reject)),
+        );
+
+        const editPromise = service.editCandidate(
+          mockScene as any,
+          0,
+          'make the sky purple',
+        );
+        await settle();
+
+        projectConfigSignal.set({id: 'project-B', storyboard: []});
+        rejectUpload(new Error('upload failed'));
+        await editPromise;
+
+        // The failure must not be stamped onto whatever project is loaded
+        // now (project-B), and no failure snackbar is shown for it.
+        expect(configServiceMock.updateProjectConfig).not.toHaveBeenCalled();
+        expect(matSnackBarMock.open).not.toHaveBeenCalled();
+      });
+
+      it('does not write the pending marker or poll when the project changes while the workflow POST is pending', async () => {
+        const {mockScene} = mockSceneWithCandidate();
+        enableEditing();
+        vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+        let resolvePost!: (value: {executionId: string}) => void;
+        httpClientMock.post.mockReturnValue(
+          from(
+            new Promise<{executionId: string}>(
+              resolve => (resolvePost = resolve),
+            ),
+          ),
+        );
+        const pollSpy = vi.spyOn(service, 'pollWorkflow');
+
+        const editPromise = service.editCandidate(
+          mockScene as any,
+          0,
+          'make the sky purple',
+        );
+        await settle(); // reach the POST await
+
+        // User leaves project-1 for another project before the POST
+        // resolves.
+        projectConfigSignal.set({id: 'project-B', storyboard: []});
+        resolvePost({executionId: 'edit-exec-id'});
+        await editPromise;
+
+        // The run is paid for and started, but the marker is never written
+        // and it is never polled: it would otherwise leak into project-B.
+        expect(pollSpy).not.toHaveBeenCalled();
+        expect(configServiceMock.updateProjectConfig).not.toHaveBeenCalled();
+      });
+
+      it('logs the orphaned run instead of writing an error into project B when the poll rejects with a generic error after the project changed', async () => {
+        const {mockScene} = mockSceneWithCandidate();
+        enableEditing();
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+        httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+        let rejectPoll!: (err: Error) => void;
+        vi.spyOn(service, 'pollWorkflow').mockReturnValue(
+          new Promise((_, reject) => (rejectPoll = reject)),
+        );
+
+        const editPromise = service.editCandidate(
+          mockScene as any,
+          0,
+          'make the sky purple',
+        );
+        await settle(); // the marker is persisted into project-1, now polling
+
+        projectConfigSignal.set({id: 'project-B', storyboard: []});
+        rejectPoll(new Error('poll failed'));
+        await editPromise;
+
+        // Only the original in-flight marker (written into project-1 before
+        // the switch) was ever persisted: the failure is not written into
+        // project-B, and no failure snackbar is shown for it.
+        expect(configServiceMock.updateProjectConfig).toHaveBeenCalledTimes(1);
+        expect(matSnackBarMock.open).not.toHaveBeenCalled();
+        expect(errSpy).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({
+            sceneId: 'scene-1',
+            projectId: 'project-1',
+            executionId: 'edit-exec-id',
+          }),
+        );
+      });
+    });
+  });
+
   describe('resume of persisted in-flight generations', () => {
     const persistedPending = {
       executionId: 'persisted-exec-id',
@@ -636,6 +1300,24 @@ describe('RemixEngineService (mediated)', () => {
         }),
       ]);
       expect(configServiceMock.flushPendingSave).toHaveBeenCalled();
+    });
+
+    it('resumes a persisted audio-off choice without re-enabling candidate audio', async () => {
+      const project = mockProjectWithPending();
+      project.storyboard[0].pendingGeneration.generateAudio = false;
+      setupHappyMedia();
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/v1.mp4'}]}}},
+      } as any);
+
+      runResumeScan();
+      await vi.waitFor(() =>
+        expect(configServiceMock.updateProjectConfig).toHaveBeenCalled(),
+      );
+
+      expect(lastUpdatedScene().candidates).toEqual([
+        expect.objectContaining({generateAudio: false}),
+      ]);
     });
 
     it('should not double-poll when the scan triggers repeatedly', async () => {
@@ -753,6 +1435,68 @@ describe('RemixEngineService (mediated)', () => {
         }),
       ]);
       expect(finalScene).not.toHaveProperty('pendingGeneration');
+    });
+
+    it('resumes an edit pending record, passing trim/editPrompt/editedFromRun through to the candidate', async () => {
+      const scene = {
+        id: 'scene-1',
+        type: 'generated',
+        prompt: 'live prompt',
+        candidates: [
+          {
+            runNumber: 1,
+            durationSeconds: 5,
+            model: 'mock-veo',
+            prompt: 'live prompt',
+            generateAudio: false,
+            resolution: '720p',
+            video: {
+              url: 'https://old.example/p/source.mp4',
+              path: 'p/source.mp4',
+            },
+          },
+        ],
+        pendingGeneration: {
+          executionId: 'edit-exec-id',
+          requestedCount: 1,
+          startedAt: '2026-06-12T00:00:00.000Z',
+          durationSeconds: 5,
+          trim: {start: 1, end: 4},
+          model: 'omni-1',
+          generateAudio: true,
+          resolution: '720p',
+          prompt: 'live prompt',
+          editPrompt: 'make the sky purple',
+          editedFromRun: 1,
+        },
+      };
+      projectConfigSignal.set({id: 'project-1', storyboard: [scene]});
+      setupHappyMedia();
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/edited.mp4'}]}}},
+      } as any);
+
+      runResumeScan();
+      await vi.waitFor(() =>
+        expect(service.generatingSceneIds().has('scene-1')).toBe(false),
+      );
+
+      const finalScene = lastUpdatedScene();
+      expect(finalScene.candidates).toEqual([
+        scene.candidates[0],
+        expect.objectContaining({
+          runNumber: 2,
+          trim: {start: 1, end: 4},
+          model: 'omni-1',
+          generateAudio: true,
+          editPrompt: 'make the sky purple',
+          editedFromRun: 1,
+          video: {
+            url: 'https://signed.example/p/edited.mp4',
+            path: 'p/edited.mp4',
+          },
+        }),
+      ]);
     });
 
     it('should not resume scenes that are already generating in this session', () => {
@@ -1101,6 +1845,261 @@ describe('RemixEngineService (mediated)', () => {
     });
   });
 
+  describe('audio lock in generation', () => {
+    function mockSceneAndProject() {
+      const mockScene = {
+        id: 'scene-1',
+        type: 'generated',
+        prompt: 'prompt 1',
+        candidates: [],
+      };
+      const mockProject = {
+        id: 'project-1',
+        numberOfCandidates: 2,
+        storyboard: [mockScene],
+      };
+      projectConfigSignal.set(mockProject);
+      return mockScene;
+    }
+
+    it('posts generate_audio: true but preserves the user audio choice when the model always generates audio', async () => {
+      configServiceMock.audioLocked.mockReturnValue(true);
+      const mockScene = mockSceneAndProject();
+      setupHappyMedia();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/video-prompt.txt');
+      httpClientMock.post.mockReturnValue(
+        of({executionId: 'mock-execution-id'}),
+      );
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/v1.mp4'}]}}},
+      } as any);
+
+      // The project itself asked for no audio; the model's lock overrides it.
+      await service.generateCandidates(mockScene as any, {
+        ...generationParams,
+        generateAudio: false,
+      });
+
+      expect(httpClientMock.post).toHaveBeenCalledWith(
+        '/api/supplyNode',
+        expect.objectContaining({
+          workflowDefinition: expect.objectContaining({
+            n_0: expect.objectContaining({
+              parameters: expect.objectContaining({generate_audio: true}),
+            }),
+          }),
+        }),
+      );
+      const finalScene = lastUpdatedScene();
+      expect(finalScene.candidates).toEqual([
+        expect.objectContaining({generateAudio: false}),
+      ]);
+      // The persisted in-flight marker carries the caller's choice, so a
+      // resumed run keeps the user's audio intent.
+      const pendingScene =
+        configServiceMock.updateProjectConfig.mock.calls[0][0].storyboard[0];
+      expect(pendingScene.pendingGeneration).toEqual(
+        expect.objectContaining({generateAudio: false}),
+      );
+    });
+  });
+
+  describe('video location resolution in generation', () => {
+    function mockSceneAndProject(model: string) {
+      const mockScene = {
+        id: 'scene-1',
+        type: 'generated',
+        prompt: 'prompt 1',
+        candidates: [],
+      };
+      const mockProject = {
+        id: 'project-1',
+        numberOfCandidates: 2,
+        model,
+        storyboard: [mockScene],
+      };
+      projectConfigSignal.set(mockProject);
+      return mockScene;
+    }
+
+    it('posts the resolved location for a regional Veo model', async () => {
+      globalConfigSignal.set({
+        ...globalConfigSignal(),
+        veoLocation: 'us-central1',
+      });
+      configServiceMock.resolveVideoLocation.mockReturnValue('us-central1');
+      const mockScene = mockSceneAndProject('veo-default');
+      setupHappyMedia();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/video-prompt.txt');
+      httpClientMock.post.mockReturnValue(
+        of({executionId: 'mock-execution-id'}),
+      );
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/v1.mp4'}]}}},
+      } as any);
+
+      await service.generateCandidates(mockScene as any, generationParams);
+
+      expect(httpClientMock.post).toHaveBeenCalledWith(
+        '/api/supplyNode',
+        expect.objectContaining({
+          workflowDefinition: expect.objectContaining({
+            n_0: expect.objectContaining({
+              parameters: expect.objectContaining({
+                gcp_location: 'us-central1',
+              }),
+            }),
+          }),
+        }),
+      );
+      expect(configServiceMock.resolveVideoLocation).toHaveBeenCalledWith(
+        'veo-default',
+      );
+    });
+
+    it('shows an unavailable-model message without starting or flagging the scene', async () => {
+      configServiceMock.resolveVideoLocation.mockReturnValue(undefined);
+      const mockScene = mockSceneAndProject('unavailable-model');
+
+      await service.generateCandidates(mockScene as any, generationParams);
+
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'The selected video model is not available at this deployment.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+      expect(httpClientMock.post).not.toHaveBeenCalled();
+      expect(mediaServiceMock.upload).not.toHaveBeenCalled();
+      expect(configServiceMock.updateProjectConfig).not.toHaveBeenCalled();
+      expect(service.generatingSceneIds().has(mockScene.id)).toBe(false);
+      expect(mockScene).not.toHaveProperty('generationError');
+    });
+
+    it('returns undefined from direct workflow start when the model has no location', async () => {
+      configServiceMock.resolveVideoLocation.mockReturnValue(undefined);
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        model: 'unavailable-model',
+      });
+      const scene: GeneratedScene = {
+        id: 'scene-1',
+        name: 'Scene 1',
+        type: 'generated',
+        prompt: 'prompt',
+      };
+
+      await expect(
+        service.startVideoGenerationWorkflow(scene, true),
+      ).resolves.toBeUndefined();
+      expect(mediaServiceMock.upload).not.toHaveBeenCalled();
+      expect(httpClientMock.post).not.toHaveBeenCalled();
+    });
+
+    it('uses the location captured before a delayed prompt upload resolves', async () => {
+      const mockScene = mockSceneAndProject('model-before-upload');
+      let resolveUpload!: (path: string) => void;
+      vi.spyOn(service, 'uploadText').mockReturnValue(
+        new Promise(resolve => (resolveUpload = resolve)),
+      );
+      configServiceMock.resolveVideoLocation.mockReturnValue('location-before');
+      httpClientMock.post.mockReturnValue(of({executionId: 'execution-id'}));
+
+      const workflowPromise = service.startVideoGenerationWorkflow(
+        mockScene as any,
+        true,
+      );
+      await settle();
+      configServiceMock.resolveVideoLocation.mockReturnValue('location-after');
+      resolveUpload('p/video-prompt.txt');
+      await workflowPromise;
+
+      expect(httpClientMock.post).toHaveBeenCalledWith(
+        '/api/supplyNode',
+        expect.objectContaining({
+          workflowDefinition: expect.objectContaining({
+            n_0: expect.objectContaining({
+              parameters: expect.objectContaining({
+                gcp_location: 'location-before',
+              }),
+            }),
+          }),
+        }),
+      );
+    });
+
+    it('posts the global fallback for a global-only Omni model at a regional deployment', async () => {
+      globalConfigSignal.set({
+        ...globalConfigSignal(),
+        veoLocation: 'us-central1',
+      });
+      configServiceMock.resolveVideoLocation.mockReturnValue('global');
+      const mockScene = mockSceneAndProject('omni-1');
+      setupHappyMedia();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/video-prompt.txt');
+      httpClientMock.post.mockReturnValue(
+        of({executionId: 'mock-execution-id'}),
+      );
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/v1.mp4'}]}}},
+      } as any);
+
+      await service.generateCandidates(mockScene as any, generationParams);
+
+      expect(httpClientMock.post).toHaveBeenCalledWith(
+        '/api/supplyNode',
+        expect.objectContaining({
+          workflowDefinition: expect.objectContaining({
+            n_0: expect.objectContaining({
+              parameters: expect.objectContaining({gcp_location: 'global'}),
+            }),
+          }),
+        }),
+      );
+      expect(configServiceMock.resolveVideoLocation).toHaveBeenCalledWith(
+        'omni-1',
+      );
+    });
+  });
+
+  describe('startCombineScenesWorkflow: resolution mapping', () => {
+    beforeEach(() => {
+      mediaServiceMock.upload.mockResolvedValue({
+        path: 'remix-input/arrangement.txt',
+        url: 'https://signed.example/arrangement',
+      });
+    });
+
+    it('maps 360p 16:9 to 640:360', async () => {
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        resolution: '360p',
+        aspectRatio: '16:9',
+      });
+
+      await service.startCombineScenesWorkflow([]);
+
+      const postedBody = httpClientMock.post.mock.calls[0][1];
+      expect(postedBody.workflowDefinition.n_0.parameters.resolution).toBe(
+        '640:360',
+      );
+    });
+
+    it('maps 360p 9:16 to 360:640', async () => {
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        resolution: '360p',
+        aspectRatio: '9:16',
+      });
+
+      await service.startCombineScenesWorkflow([]);
+
+      const postedBody = httpClientMock.post.mock.calls[0][1];
+      expect(postedBody.workflowDefinition.n_0.parameters.resolution).toBe(
+        '360:640',
+      );
+    });
+  });
+
   describe('combineScenes: render contract', () => {
     it('does not submit a workflow with no renderable video', async () => {
       setRenderStoryboard([]);
@@ -1365,10 +2364,308 @@ describe('RemixEngineService (mediated)', () => {
             start_time: 0,
             skip_time: 2,
             duration: 6,
+            include_audio: true,
           },
         ],
         false,
       );
+    });
+
+    it('includes candidate audio intent and preserves audio for legacy candidates', async () => {
+      setRenderStoryboard([
+        {
+          id: 'audio-off',
+          type: 'generated',
+          name: 'Audio off',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {
+              video: {path: 'videos/off.mp4', url: ''},
+              durationSeconds: 5,
+              generateAudio: false,
+            },
+          ],
+        },
+        {
+          id: 'legacy',
+          type: 'generated',
+          name: 'Legacy',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {video: {path: 'videos/legacy.mp4', url: ''}, durationSeconds: 5},
+          ],
+        },
+      ]);
+      const startSpy = vi
+        .spyOn(service, 'startCombineScenesWorkflow')
+        .mockResolvedValue(of({executionId: 'render-exec-id'}) as any);
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'renders/output.mp4'}]}}},
+      } as any);
+      mediaServiceMock.signUrl.mockResolvedValue(
+        'https://signed.example/renders/output.mp4',
+      );
+
+      await service.combineScenes();
+
+      expect(startSpy.mock.calls[0][0]).toEqual([
+        expect.objectContaining({
+          file_path: 'videos/off.mp4',
+          include_audio: false,
+        }),
+        expect.objectContaining({
+          file_path: 'videos/legacy.mp4',
+          include_audio: true,
+        }),
+      ]);
+    });
+
+    describe('exportScene', () => {
+      const completedExport = (video: NodeItem[]): WorkflowStatusResponse => ({
+        sink: {
+          actualCounts: {},
+          inputFiles: {},
+          inputGroups: {},
+          lastUpdated: '',
+          output: {'0': {video}},
+          targetCounts: {},
+        },
+      });
+
+      it('exports one selected scene with its trim and audio intent', async () => {
+        const scene: GeneratedScene = {
+          id: 'export-scene',
+          name: 'Export scene',
+          type: 'generated',
+          prompt: 'prompt',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {
+              runNumber: 1,
+              durationSeconds: 10,
+              model: 'model',
+              prompt: 'prompt',
+              generateAudio: false,
+              resolution: '720p',
+              trim: {start: 2, end: 8},
+              video: {path: 'videos/source.mp4', url: ''},
+            },
+          ],
+        };
+        const startSpy = vi
+          .spyOn(service, 'startCombineScenesWorkflow')
+          .mockResolvedValue(of({executionId: 'export-exec'}));
+        vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+          completedExport([{file: 'exports/scene.mp4'}]),
+        );
+
+        await expect(service.exportScene(scene)).resolves.toEqual({
+          path: 'exports/scene.mp4',
+          url: '',
+        });
+        expect(startSpy).toHaveBeenCalledWith(
+          [
+            expect.objectContaining({
+              file_type: 'video',
+              file_path: 'videos/source.mp4',
+              start_time: 0,
+              skip_time: 2,
+              duration: 6,
+              include_audio: false,
+            }),
+          ],
+          false,
+        );
+        expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+        expect(configServiceMock.setPendingRender).not.toHaveBeenCalled();
+        expect(scene.candidates?.[0].trim).toEqual({start: 2, end: 8});
+      });
+
+      it.each([
+        [
+          'generated audio-on',
+          {
+            id: 'generated',
+            name: 'Generated',
+            type: 'generated',
+            prompt: 'p',
+            selectedCandidateIndex: 0,
+            candidates: [
+              {
+                runNumber: 1,
+                durationSeconds: 5,
+                model: 'm',
+                prompt: 'p',
+                generateAudio: true,
+                resolution: '720p',
+                video: {path: 'generated.mp4', url: ''},
+              },
+            ],
+          } as GeneratedScene,
+        ],
+        [
+          'generated legacy',
+          {
+            id: 'legacy',
+            name: 'Legacy',
+            type: 'generated',
+            prompt: 'p',
+            selectedCandidateIndex: 0,
+            candidates: [
+              {
+                runNumber: 1,
+                durationSeconds: 5,
+                model: 'm',
+                prompt: 'p',
+                resolution: '720p',
+                video: {path: 'legacy.mp4', url: ''},
+              },
+            ],
+          } as GeneratedScene,
+        ],
+        [
+          'provided video',
+          {
+            id: 'provided',
+            name: 'Provided',
+            type: 'video',
+            durationSeconds: 5,
+            video: {path: 'provided.mp4', url: ''},
+          } as ProvidedVideoScene,
+        ],
+      ])('exports %s with source audio enabled', async (_label, scene) => {
+        const startSpy = vi
+          .spyOn(service, 'startCombineScenesWorkflow')
+          .mockResolvedValue(of({executionId: 'export-exec'}));
+        vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+          completedExport([{file: 'exports/scene.mp4'}]),
+        );
+
+        await service.exportScene(scene);
+
+        expect(startSpy).toHaveBeenCalledWith(
+          [
+            {
+              file_type: 'video',
+              file_path: `${scene.id === 'generated' ? 'generated' : scene.id}.mp4`,
+              start_time: 0,
+              skip_time: 0,
+              duration: 5,
+              include_audio: true,
+            },
+          ],
+          false,
+        );
+      });
+
+      it('rejects an unselected or invalid scene before starting a workflow', async () => {
+        const scene: GeneratedScene = {
+          id: 'unselected',
+          name: 'Unselected',
+          type: 'generated',
+          prompt: 'prompt',
+        };
+
+        await expect(service.exportScene(scene)).rejects.toThrow(
+          'Select a valid scene video to export.',
+        );
+        expect(httpClientMock.post).not.toHaveBeenCalled();
+        expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+      });
+
+      it('rejects a workflow output without a video path', async () => {
+        const scene: ProvidedVideoScene = {
+          id: 'export-scene',
+          name: 'Export scene',
+          type: 'video',
+          durationSeconds: 5,
+          video: {path: 'videos/source.mp4', url: ''},
+        };
+        vi.spyOn(service, 'startCombineScenesWorkflow').mockResolvedValue(
+          of({executionId: 'export-exec'}),
+        );
+        vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+          completedExport([{}]),
+        );
+
+        await expect(service.exportScene(scene)).rejects.toThrow(
+          'Workflow completed without a video output.',
+        );
+      });
+
+      it('rejects a failed workflow output without mutating render history', async () => {
+        const scene: ProvidedVideoScene = {
+          id: 'export-scene',
+          name: 'Export scene',
+          type: 'video',
+          durationSeconds: 5,
+          video: {path: 'videos/source.mp4', url: ''},
+        };
+        vi.spyOn(service, 'startCombineScenesWorkflow').mockResolvedValue(
+          of({executionId: 'export-exec'}),
+        );
+        vi.spyOn(service, 'pollWorkflow').mockResolvedValue(
+          completedExport([{_error: 'export failed'}]),
+        );
+
+        await expect(service.exportScene(scene)).rejects.toThrow(
+          'export failed',
+        );
+        expect(configServiceMock.addRenderRun).not.toHaveBeenCalled();
+        expect(configServiceMock.setPendingRender).not.toHaveBeenCalled();
+      });
+
+      it('rejects before starting when global configuration is unavailable', async () => {
+        globalConfigSignal.set(undefined);
+        const scene: ProvidedVideoScene = {
+          id: 'export-scene',
+          name: 'Export scene',
+          type: 'video',
+          durationSeconds: 5,
+          video: {path: 'videos/source.mp4', url: ''},
+        };
+
+        await expect(service.exportScene(scene)).rejects.toThrow(
+          'Configuration is not loaded yet',
+        );
+        expect(httpClientMock.post).not.toHaveBeenCalled();
+      });
+
+      it('rejects when the project changes before export returns', async () => {
+        const scene: ProvidedVideoScene = {
+          id: 'export-scene',
+          name: 'Export scene',
+          type: 'video',
+          durationSeconds: 5,
+          video: {path: 'videos/source.mp4', url: ''},
+        };
+        vi.spyOn(service, 'startCombineScenesWorkflow').mockResolvedValue(
+          of({executionId: 'export-exec'}),
+        );
+        let resolvePoll!: (status: WorkflowStatusResponse) => void;
+        vi.spyOn(service, 'pollWorkflow').mockReturnValue(
+          new Promise<WorkflowStatusResponse>(
+            resolve => (resolvePoll = resolve),
+          ),
+        );
+        const exportPromise = service.exportScene(scene);
+        await settle();
+        projectConfigSignal.set({...projectConfigSignal(), id: 'project-B'});
+        resolvePoll({
+          sink: {
+            actualCounts: {},
+            inputFiles: {},
+            inputGroups: {},
+            lastUpdated: '',
+            output: {'0': {video: [{file: 'exports/scene.mp4'}]}},
+            targetCounts: {},
+          },
+        });
+
+        await expect(exportPromise).rejects.toThrow(
+          'Project changed, cancelling workflow polling',
+        );
+      });
     });
   });
 

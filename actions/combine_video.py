@@ -69,6 +69,8 @@ def execute(
           - duration (float): Duration in the final video (in seconds).
           - transition (str): FFmpeg xfade transition name.
           - transition_overlap (float): Duration of the transition (in seconds).
+          - include_audio (bool): Whether to retain the video's source audio;
+            defaults to true for legacy arrangements.
           - offset_x (int): For images, distance from the left in pixels.
           - offset_y (int): For images, distance from the top in pixels.
           - width (int): For images, target width in pixels.
@@ -113,6 +115,7 @@ def execute(
       if 'video' == arr['file_type']:
         transition = arr.get('transition')
         transition_overlap = arr.get('transition_overlap')
+        include_audio = arr.get('include_audio', True)
         # Only an absent overlap defaults. An explicit 0 means a hard cut and
         # is falsy, so a truthiness check would silently turn it into a
         # half-second crossfade.
@@ -125,6 +128,7 @@ def execute(
             duration=duration,
             transition=transition,
             transition_overlap=transition_overlap,
+            include_audio=include_audio,
         )
       elif 'audio' == arr['file_type']:
         ffmpeg.add_audio(local_path, arr['start_time'], skip_time, duration)

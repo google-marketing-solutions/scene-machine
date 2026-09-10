@@ -128,6 +128,7 @@ export class Composition {
           start,
           end: start + duration,
           duration,
+          includeAudio: resolution.clip.includeAudio,
           transitionOverlap: scene.transitionOverlap,
           type: scene.type,
         },
@@ -219,6 +220,18 @@ export class Composition {
       return playlist[index].video;
     }
     return '';
+  });
+
+  currentClipIncludesAudio = computed(
+    () => this.playlist()[this.currentPlaylistIndex()]?.includeAudio ?? true,
+  );
+
+  currentClipSourceReady = computed(() => {
+    const ref = this.currentVideoSrc();
+    if (!ref) return false;
+    const resolved = this.syncVideoSrc(ref);
+    const heldSrc = this.heldVideoSrc();
+    return resolved !== undefined && heldSrc === resolved;
   });
 
   // The URL string bound to the player's [src]. Computed synchronously

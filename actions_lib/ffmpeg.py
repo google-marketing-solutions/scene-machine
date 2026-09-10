@@ -140,6 +140,7 @@ class FFMPEG:
       duration: float,
       transition: str,
       transition_overlap: float,
+      include_audio: bool = True,
   ) -> 'FFMPEG':
     """Adds a video to the list of videos to be concatenated together.
 
@@ -150,6 +151,7 @@ class FFMPEG:
         of the clip.
       transition: the FFmpeg xfade transition to use
       transition_overlap: the time that the transition should take
+      include_audio: whether to retain the video's source audio
 
     Returns:
       the instance of FFMPEG so that calls can be chained.
@@ -169,7 +171,7 @@ class FFMPEG:
         'path': path,
         'skip': skip_time,
         'duration': clean_duration,
-        'has_audio': properties['has_audio'],
+        'has_audio': properties['has_audio'] and include_audio,
         'transition': transition,
         'transition_overlap': transition_overlap,
     })

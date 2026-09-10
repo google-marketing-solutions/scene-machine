@@ -15,19 +15,30 @@
  */
 
 import {provideHttpClient} from '@angular/common/http';
-import {provideHttpClientTesting} from '@angular/common/http/testing';
+import {
+  HttpTestingController,
+  provideHttpClientTesting,
+} from '@angular/common/http/testing';
 import {signal, WritableSignal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {MatSnackBar} from '@angular/material/snack-bar';
 import {vi} from 'vitest';
-import {ConfigService, RenderRun} from '../services/config/config';
+import {
+  ConfigService,
+  GeneratedScene,
+  RenderRun,
+} from '../services/config/config';
 import {MediaService} from '../services/media/media';
 import {OutputVideo} from './output-video';
+import {RemixEngineService} from '../services/remix-engine/remix-engine';
 
 describe('OutputVideo', () => {
   let component: OutputVideo;
   let fixture: ComponentFixture<OutputVideo>;
   let projectConfig: WritableSignal<TestProject>;
   let updateProjectConfig: ReturnType<typeof vi.fn>;
+  let exportScene: ReturnType<typeof vi.fn>;
+  let httpTesting: HttpTestingController;
 
   interface TestProject {
     id: string;
@@ -66,6 +77,7 @@ describe('OutputVideo', () => {
       updateProjectConfig,
       isGeneratedScene: () => false,
     };
+    exportScene = vi.fn();
 
     // The output template binds the video src through the (impure) mediaSrc
     // pipe, which calls MediaService.getCachedUrl(); returning a URL keeps the
@@ -83,11 +95,14 @@ describe('OutputVideo', () => {
         provideHttpClientTesting(),
         {provide: ConfigService, useValue: configServiceMock},
         {provide: MediaService, useValue: mediaServiceMock},
+        {provide: RemixEngineService, useValue: {exportScene}},
+        {provide: MatSnackBar, useValue: {open: vi.fn()}},
       ],
     }).compileComponents();
 
     fixture = TestBed.createComponent(OutputVideo);
     component = fixture.componentInstance;
+    httpTesting = TestBed.inject(HttpTestingController);
     fixture.detectChanges();
   });
 
@@ -107,6 +122,129 @@ describe('OutputVideo', () => {
     // playsinline must stay.
     expect(video!.hasAttribute('controls')).toBe(true);
     expect(video!.hasAttribute('playsinline')).toBe(true);
+  });
+
+  it('downloads the exported scene file rather than the candidate source', async () => {
+    const scene: GeneratedScene = {
+      id: 'scene-1',
+      type: 'generated',
+      name: 'Scene 1',
+      prompt: 'prompt',
+      candidates: [
+        {
+          runNumber: 1,
+          durationSeconds: 5,
+          model: 'veo',
+          prompt: 'prompt',
+          generateAudio: true,
+          resolution: '1080p',
+          video: {path: 'source.mp4', url: 'source-url'},
+        },
+      ],
+      selectedCandidateIndex: 0,
+    };
+    const exported = {path: 'exports/scene-1.mp4', url: ''};
+    exportScene.mockResolvedValue(exported);
+    const resolve = TestBed.inject(MediaService).resolve as ReturnType<
+      typeof vi.fn
+    >;
+    resolve.mockResolvedValue('http://test.com/exported.mp4');
+
+    component.downloadScene(scene);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(exportScene).toHaveBeenCalledWith(scene);
+    expect(resolve).toHaveBeenCalledWith(exported);
+    const request = httpTesting.expectOne('http://test.com/exported.mp4');
+    request.flush(new Blob());
+    expect(component.downloadingScenes().has(scene.id)).toBe(false);
+  });
+
+  const generatedScene = (): GeneratedScene => ({
+    id: 'scene-1',
+    type: 'generated',
+    name: 'Scene 1',
+    prompt: 'prompt',
+    candidates: [
+      {
+        runNumber: 1,
+        durationSeconds: 5,
+        model: 'veo',
+        prompt: 'prompt',
+        generateAudio: true,
+        resolution: '1080p',
+        video: {path: 'source.mp4', url: 'source-url'},
+      },
+    ],
+    selectedCandidateIndex: 0,
+  });
+
+  it('suppresses duplicate scene download clicks while export is pending', () => {
+    exportScene.mockReturnValue(new Promise(() => {}));
+    const scene = generatedScene();
+    component.downloadScene(scene);
+    component.downloadScene(scene);
+    expect(exportScene).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears scene busy state and notifies when export fails', async () => {
+    exportScene.mockRejectedValue(new Error('export failed'));
+    const scene = generatedScene();
+    component.downloadScene(scene);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(component.downloadingScenes().has(scene.id)).toBe(false);
+    expect(TestBed.inject(MatSnackBar).open).toHaveBeenCalledWith(
+      'Could not download this scene.',
+      'Dismiss',
+    );
+  });
+
+  it('clears scene busy state when signing fails', async () => {
+    exportScene.mockResolvedValue({path: 'export.mp4', url: ''});
+    const resolve = TestBed.inject(MediaService).resolve as ReturnType<
+      typeof vi.fn
+    >;
+    resolve.mockRejectedValue(new Error('sign failed'));
+    const scene = generatedScene();
+    component.downloadScene(scene);
+    await new Promise(done => setTimeout(done, 0));
+    expect(component.downloadingScenes().has(scene.id)).toBe(false);
+  });
+
+  it('clears scene busy state when the blob download fails', async () => {
+    exportScene.mockResolvedValue({path: 'export.mp4', url: ''});
+    const scene = generatedScene();
+    component.downloadScene(scene);
+    await new Promise(done => setTimeout(done, 0));
+    const request = httpTesting.expectOne('http://test.com/video.mp4');
+    request.error(new ProgressEvent('network error'));
+    expect(component.downloadingScenes().has(scene.id)).toBe(false);
+  });
+
+  it('blocks export when a generated scene has no selected candidate', () => {
+    const scene = generatedScene();
+    scene.selectedCandidateIndex = undefined;
+    component.downloadScene(scene);
+    expect(exportScene).not.toHaveBeenCalled();
+  });
+
+  it('blocks scene downloads when there is no rendered output video', () => {
+    projectConfig.set(project('project-2', []));
+    const scene = generatedScene();
+    component.downloadScene(scene);
+    expect(exportScene).not.toHaveBeenCalled();
+  });
+
+  it('does not download an export after navigating to another project', async () => {
+    let finish!: (file: {path: string; url: string}) => void;
+    exportScene.mockReturnValue(new Promise(resolve => (finish = resolve)));
+    const scene = generatedScene();
+    component.downloadScene(scene);
+    projectConfig.set(project('project-2', []));
+    finish({path: 'export.mp4', url: ''});
+    await new Promise(done => setTimeout(done, 0));
+    httpTesting.verify();
+    expect(component.downloadingScenes().has(scene.id)).toBe(false);
   });
 
   it('selects the first active render when project data arrives later', () => {
