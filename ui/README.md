@@ -12,6 +12,21 @@ ng serve
 
 Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
 
+## Microphone dictation
+
+The standard Scene Machine deployment includes dictation, enabled by default.
+The UI reads this capability from the backend; there is no separate frontend
+feature flag. Recording starts only after the user clicks the microphone and
+grants browser permission. Transcribed text remains editable before submission.
+
+To opt out, set `export DICTATION_ENABLED=0` in the repository's `config.txt`
+and deploy or redeploy. For local development, set `DICTATION_ENABLED=0` in
+the backend process environment. Existing explicit `0` settings remain disabled;
+omitting the setting enables dictation. See the
+[deployment guide](../README.md#microphone-dictation-enabled-by-default) for
+model access, usage costs and recording limits, and the
+[developer guide](../DEVELOPING.md#dictation-feature-flag) for local setup.
+
 ## Code scaffolding
 
 Angular CLI includes powerful code scaffolding tools. To generate a new component, run:

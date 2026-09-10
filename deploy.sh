@@ -303,7 +303,7 @@ if ! [[ "$APP_MIN_INSTANCES" =~ ^[0-9]+$ ]]; then
   echo "Validation failed. Please fix config.txt and try again." >&2
   exit 1
 fi
-DICTATION_ENABLED="${DICTATION_ENABLED:-0}"
+DICTATION_ENABLED="${DICTATION_ENABLED:-1}"
 if [[ "$DICTATION_ENABLED" != "0" && "$DICTATION_ENABLED" != "1" ]]; then
   echo "ERROR: DICTATION_ENABLED must be 0 or 1 (got '$DICTATION_ENABLED')." >&2
   echo "Validation failed. Please fix config.txt and try again." >&2
