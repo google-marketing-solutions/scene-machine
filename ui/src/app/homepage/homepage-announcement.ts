@@ -50,8 +50,11 @@ const emojiCluster =
   /(?:\p{Extended_Pictographic}|\p{Regional_Indicator}|[0-9#*]\uFE0F?\u20E3)/u;
 
 function displayAnnouncementEmoji(value: unknown): string {
-  if (typeof value !== 'string' || value.length === 0) {
+  if (typeof value !== 'string') {
     return DEFAULT_ANNOUNCEMENT_EMOJI;
+  }
+  if (value.trim().length === 0) {
+    return '';
   }
   const clusters: string[] = [];
   for (const part of announcementEmojiSegmenter.segment(value)) {

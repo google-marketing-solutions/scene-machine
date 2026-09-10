@@ -16,7 +16,9 @@
 
 @if (visible()) {
   <section class="announcement" role="region" aria-label="Announcement">
-    <span class="announcement-emoji" aria-hidden="true">{{ displayedEmoji() }}</span>
+    @if (displayedEmoji()) {
+      <span class="announcement-emoji" aria-hidden="true">{{ displayedEmoji() }}</span>
+    }
     <div class="announcement-content" [innerHTML]="renderedMarkdown()"></div>
     <button
       mat-icon-button
