@@ -193,9 +193,10 @@ describe('RemixEngineService (mediated)', () => {
 
   describe('generateCandidates: immediate persistence', () => {
     function mockSceneAndProject() {
-      const mockScene = {
+      const mockScene: GeneratedScene = {
         id: 'scene-1',
         type: 'generated',
+        name: 'Scene 1',
         prompt: 'prompt 1',
         candidates: [],
       };
@@ -274,6 +275,65 @@ describe('RemixEngineService (mediated)', () => {
       ]);
       // One flush for the start persist, one for the completion.
       expect(configServiceMock.flushPendingSave).toHaveBeenCalledTimes(2);
+    });
+
+    it('preserves live candidate edits made while generation is pending', async () => {
+      const mockScene = mockSceneAndProject();
+      mockScene.candidates = [
+        {
+          runNumber: 1,
+          durationSeconds: 5,
+          model: 'model-1',
+          prompt: 'prompt 1',
+          generateAudio: false,
+          resolution: '720p',
+          video: {
+            path: 'p/existing.mp4',
+            url: 'https://signed.example/p/existing.mp4',
+          },
+        },
+      ];
+      setupHappyMedia();
+      vi.spyOn(service, 'startVideoGenerationWorkflow').mockResolvedValue(
+        of({executionId: 'mock-execution-id'}) as any,
+      );
+      let resolvePoll!: (value: any) => void;
+      vi.spyOn(service, 'pollWorkflow').mockReturnValue(
+        new Promise(resolve => (resolvePoll = resolve)),
+      );
+
+      const generatePromise = service.generateCandidates(
+        mockScene as any,
+        generationParams,
+      );
+      await settle();
+
+      const liveScene = {
+        ...mockScene,
+        candidates: [
+          {
+            ...mockScene.candidates[0],
+            isArchived: true,
+            trim: {start: 1, end: 4},
+          },
+        ],
+        selectedCandidateIndex: 0,
+      };
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        storyboard: [liveScene],
+      });
+      resolvePoll({sink: {output: {'0': {video: [{file: 'p/new.mp4'}]}}}});
+      await generatePromise;
+
+      const attached = lastUpdatedScene();
+      expect(attached.candidates[0]).toMatchObject({
+        video: {path: 'p/existing.mp4'},
+        isArchived: true,
+        trim: {start: 1, end: 4},
+      });
+      expect(attached.candidates).toHaveLength(2);
+      expect(attached.selectedCandidateIndex).toBe(0);
     });
 
     it('should clear pendingGeneration on a definitive workflow error', async () => {
@@ -813,6 +873,53 @@ describe('RemixEngineService (mediated)', () => {
       );
     });
 
+    it('appends an edited candidate to live state after delayed collection', async () => {
+      const {mockScene} = mockSceneWithCandidate();
+      enableEditing();
+      setupHappyMedia();
+      vi.spyOn(service, 'uploadText').mockResolvedValue('p/edit-prompt.txt');
+      httpClientMock.post.mockReturnValue(of({executionId: 'edit-exec-id'}));
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/edited.mp4'}]}}},
+      } as any);
+      let resolveSign!: (url: string) => void;
+      mediaServiceMock.signUrl.mockReturnValue(
+        new Promise(resolve => (resolveSign = resolve)),
+      );
+
+      const editPromise = service.editCandidate(
+        mockScene as any,
+        0,
+        'make the sky purple',
+      );
+      await settle();
+      const liveScene = {
+        ...mockScene,
+        candidates: [
+          {
+            ...mockScene.candidates![0],
+            isArchived: true,
+            trim: {start: 1, end: 4},
+          },
+        ],
+        selectedCandidateIndex: 0,
+      };
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        storyboard: [liveScene],
+      });
+      resolveSign('https://signed.example/p/edited.mp4');
+      await editPromise;
+
+      const finalScene = lastUpdatedScene();
+      expect(finalScene.candidates[0]).toMatchObject({
+        isArchived: true,
+        trim: {start: 1, end: 4},
+      });
+      expect(finalScene.candidates).toHaveLength(2);
+      expect(finalScene.selectedCandidateIndex).toBe(0);
+    });
+
     it('chooses the edit model from the catalog default, never the project model', async () => {
       const {mockScene} = mockSceneWithCandidate();
       enableEditing();
@@ -1300,6 +1407,58 @@ describe('RemixEngineService (mediated)', () => {
         }),
       ]);
       expect(configServiceMock.flushPendingSave).toHaveBeenCalled();
+    });
+
+    it('appends resumed results to live state after delayed collection', async () => {
+      const project = mockProjectWithPending([
+        {
+          runNumber: 1,
+          durationSeconds: 5,
+          model: 'persisted-model',
+          prompt: 'live prompt',
+          generateAudio: true,
+          resolution: '1080p',
+          video: {
+            path: 'p/existing.mp4',
+            url: 'https://signed.example/p/existing.mp4',
+          },
+        },
+      ]);
+      setupHappyMedia();
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {output: {'0': {video: [{file: 'p/resumed.mp4'}]}}},
+      } as any);
+      let resolveSign!: (url: string) => void;
+      mediaServiceMock.signUrl.mockReturnValue(
+        new Promise(resolve => (resolveSign = resolve)),
+      );
+
+      runResumeScan();
+      await settle();
+      const liveScene = {
+        ...project.storyboard[0],
+        candidates: [
+          {
+            ...project.storyboard[0].candidates[0],
+            isArchived: true,
+            trim: {start: 1, end: 4},
+          },
+        ],
+        selectedCandidateIndex: 0,
+      };
+      projectConfigSignal.set({...project, storyboard: [liveScene]});
+      resolveSign('https://signed.example/p/resumed.mp4');
+      await vi.waitFor(() =>
+        expect(lastUpdatedScene().candidates).toHaveLength(2),
+      );
+
+      const finalScene = lastUpdatedScene();
+      expect(finalScene.candidates[0]).toMatchObject({
+        isArchived: true,
+        trim: {start: 1, end: 4},
+      });
+      expect(finalScene.selectedCandidateIndex).toBe(0);
+      expect(finalScene).not.toHaveProperty('pendingGeneration');
     });
 
     it('resumes a persisted audio-off choice without re-enabling candidate audio', async () => {

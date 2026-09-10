@@ -21,12 +21,13 @@ import {TestbedHarnessEnvironment} from '@angular/cdk/testing/testbed';
 import {signal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {MatDialog} from '@angular/material/dialog';
+import {MatMenuHarness} from '@angular/material/menu/testing';
 import {MatSelectHarness} from '@angular/material/select/testing';
 import {MatSlideToggle} from '@angular/material/slide-toggle';
 import {MatSlider} from '@angular/material/slider';
-import {provideRouter} from '@angular/router';
+import {NavigationStart, Router} from '@angular/router';
 import {By} from '@angular/platform-browser';
-import {of} from 'rxjs';
+import {of, Subject} from 'rxjs';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {
   Candidate,
@@ -45,6 +46,7 @@ describe('Storyboard', () => {
   let component: Storyboard;
   let fixture: ComponentFixture<Storyboard>;
   let loader: HarnessLoader;
+  let navigationEvents: Subject<unknown>;
   const sceneIdCounterSignal = signal(0);
   const projectConfigSignal = signal<ProjectConfig>({
     id: 'test-id',
@@ -80,6 +82,7 @@ describe('Storyboard', () => {
     updateProjectConfig: (partial: Partial<ProjectConfig>) => {
       projectConfigSignal.update(config => ({...config, ...partial}));
     },
+    saveNow: vi.fn(),
     videoModels: () => [],
     canEditCandidates: canEditCandidatesSignal,
     audioLocked: () => false,
@@ -111,6 +114,7 @@ describe('Storyboard', () => {
   const mockHttpClient = {get: vi.fn()};
 
   beforeEach(async () => {
+    navigationEvents = new Subject<unknown>();
     sceneIdCounterSignal.set(0);
     canEditCandidatesSignal.set(false);
     durationSliderSignal.set({min: 4, max: 8, step: 2});
@@ -131,6 +135,7 @@ describe('Storyboard', () => {
       updateProjectConfig: (partial: Partial<ProjectConfig>) => {
         projectConfigSignal.update(config => ({...config, ...partial}));
       },
+      saveNow: vi.fn(),
       videoModels: () => [],
       canEditCandidates: canEditCandidatesSignal,
       audioLocked: () => false,
@@ -170,7 +175,7 @@ describe('Storyboard', () => {
         {provide: RemixEngineService, useValue: mockRemixEngineService},
         {provide: MediaService, useValue: mockMediaService},
         {provide: HttpClient, useValue: mockHttpClient},
-        provideRouter([]),
+        {provide: Router, useValue: {events: navigationEvents}},
       ],
     })
       .overrideComponent(Storyboard, {
@@ -215,6 +220,338 @@ describe('Storyboard', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('moves a candidate and focuses the destination without reselecting it', () => {
+    const candidate: Candidate = {
+      runNumber: 2,
+      durationSeconds: 4,
+      model: 'veo-1',
+      prompt: 'candidate prompt',
+      generateAudio: true,
+      resolution: '1080p',
+      video: {path: 'candidate-path', url: 'candidate-url'},
+    };
+    const source: GeneratedScene = {
+      id: '1',
+      type: 'generated',
+      name: 'Scene 1',
+      prompt: 'source prompt',
+      candidates: [candidate],
+      selectedCandidateIndex: 0,
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [source]}));
+    fixture.detectChanges();
+    component.prepareMoveCandidate(source, 0);
+    component.movePreparedCandidate(new Event('click'), {
+      kind: 'new-after-source',
+      id: '2',
+    });
+    expect(projectConfigSignal().storyboard[1].id).toBe('2');
+    expect(component.selectedSceneId()).toBe('2');
+    expect(mockConfigService.saveNow).toHaveBeenCalledTimes(1);
+  });
+
+  it('moves the requested full-array candidate and preserves archived indexes', () => {
+    const candidates: Candidate[] = [
+      {
+        runNumber: 1,
+        durationSeconds: 4,
+        model: 'veo-1',
+        prompt: 'a',
+        generateAudio: true,
+        resolution: '1080p',
+        video: {path: 'a', url: 'a'},
+      },
+      {
+        runNumber: 2,
+        durationSeconds: 4,
+        model: 'veo-1',
+        prompt: 'archived',
+        generateAudio: true,
+        resolution: '1080p',
+        isArchived: true,
+        video: {path: 'archived', url: 'archived'},
+      },
+      {
+        runNumber: 2,
+        durationSeconds: 4,
+        model: 'veo-1',
+        prompt: 'target',
+        generateAudio: true,
+        resolution: '1080p',
+        video: {path: 'target', url: 'target'},
+      },
+    ];
+    const source: GeneratedScene = {
+      id: 'source',
+      type: 'generated',
+      name: 'Source',
+      prompt: 'source',
+      candidates,
+    };
+    const destination: GeneratedScene = {
+      id: 'destination',
+      type: 'generated',
+      name: 'Destination',
+      prompt: 'destination',
+      candidates: [],
+    };
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [source, destination],
+    }));
+    fixture.detectChanges();
+    component.prepareMoveCandidate(source, 2);
+    component.movePreparedCandidate(new Event('click'), {
+      kind: 'existing',
+      sceneId: 'destination',
+    });
+    const moved = (projectConfigSignal().storyboard[1] as GeneratedScene)
+      .candidates![0];
+    expect(moved.video?.path).toBe('target');
+    expect(
+      (projectConfigSignal().storyboard[0] as GeneratedScene).candidates,
+    ).toHaveLength(2);
+  });
+
+  it('clears a valid prepare when a later invalid prepare is attempted', () => {
+    const candidate: Candidate = {
+      runNumber: 1,
+      durationSeconds: 4,
+      model: 'veo-1',
+      prompt: 'target',
+      generateAudio: true,
+      resolution: '1080p',
+      video: {path: 'target', url: 'target'},
+    };
+    const source: GeneratedScene = {
+      id: 'source',
+      type: 'generated',
+      name: 'Source',
+      prompt: 'source',
+      candidates: [candidate],
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [source]}));
+    fixture.detectChanges();
+    component.prepareMoveCandidate(source, 0);
+    component.prepareMoveCandidate(source, 99);
+    component.movePreparedCandidate(new Event('click'), {
+      kind: 'new-after-source',
+      id: 'new',
+    });
+    expect(projectConfigSignal().storyboard).toHaveLength(1);
+    expect(projectConfigSignal().storyboard[0].id).toBe('source');
+    expect(mockConfigService.saveNow).not.toHaveBeenCalled();
+  });
+
+  it('consumes a valid prepared move so a repeated action cannot move twice', () => {
+    const candidate: Candidate = {
+      runNumber: 1,
+      durationSeconds: 4,
+      model: 'veo-1',
+      prompt: 'target',
+      generateAudio: true,
+      resolution: '1080p',
+      video: {path: 'target', url: 'target'},
+    };
+    const source: GeneratedScene = {
+      id: 'source',
+      type: 'generated',
+      name: 'Source',
+      prompt: 'source',
+      candidates: [candidate],
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [source]}));
+    fixture.detectChanges();
+    component.prepareMoveCandidate(source, 0);
+    component.movePreparedCandidate(new Event('click'), {
+      kind: 'new-after-source',
+      id: 'new',
+    });
+    component.movePreparedCandidate(new Event('click'), {
+      kind: 'new-after-source',
+      id: 'newer',
+    });
+    expect(projectConfigSignal().storyboard).toHaveLength(2);
+    expect(projectConfigSignal().storyboard[1].id).toBe('new');
+    expect(mockConfigService.saveNow).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a prepared move after navigating away and back to project A', () => {
+    const candidate: Candidate = {
+      runNumber: 1,
+      durationSeconds: 4,
+      model: 'veo-1',
+      prompt: 'target',
+      generateAudio: true,
+      resolution: '1080p',
+      video: {path: 'target', url: 'target'},
+    };
+    const source: GeneratedScene = {
+      id: 'source',
+      type: 'generated',
+      name: 'Source',
+      prompt: 'source',
+      candidates: [candidate],
+    };
+    projectConfigSignal.update(config => ({
+      ...config,
+      id: 'project-a',
+      storyboard: [source],
+    }));
+    fixture.detectChanges();
+    component.prepareMoveCandidate(source, 0);
+    navigationEvents.next(new NavigationStart(1, '/projects/project-b'));
+    projectConfigSignal.update(config => ({...config, id: 'project-b'}));
+    fixture.detectChanges();
+    navigationEvents.next(new NavigationStart(2, '/projects/project-a'));
+    projectConfigSignal.update(config => ({...config, id: 'project-a'}));
+    fixture.detectChanges();
+    component.movePreparedCandidate(new Event('click'), {
+      kind: 'new-after-source',
+      id: 'newer',
+    });
+    expect(projectConfigSignal().storyboard).toHaveLength(1);
+    expect(projectConfigSignal().id).toBe('project-a');
+    expect(mockConfigService.saveNow).not.toHaveBeenCalled();
+  });
+
+  it('moves the active candidate from the real menu using its full candidate index', async () => {
+    const archived: Candidate = {
+      runNumber: 1,
+      durationSeconds: 4,
+      model: 'veo-1',
+      prompt: 'archived',
+      generateAudio: true,
+      resolution: '1080p',
+      isArchived: true,
+      video: {path: 'archived', url: 'archived'},
+    };
+    const candidate: Candidate = {
+      runNumber: 1,
+      durationSeconds: 4,
+      model: 'veo-1',
+      prompt: 'target',
+      generateAudio: true,
+      resolution: '1080p',
+      video: {path: 'target', url: 'target'},
+    };
+    const kept: Candidate = {
+      runNumber: 1,
+      durationSeconds: 4,
+      model: 'veo-1',
+      prompt: 'kept',
+      generateAudio: true,
+      resolution: '1080p',
+      video: {path: 'kept', url: 'kept'},
+    };
+    const source: GeneratedScene = {
+      id: 'source',
+      type: 'generated',
+      name: 'Source',
+      prompt: 'source',
+      candidates: [archived, kept, candidate],
+      selectedCandidateIndex: 2,
+    };
+    const destination: GeneratedScene = {
+      id: 'destination',
+      type: 'generated',
+      name: 'Destination',
+      prompt: 'destination',
+      candidates: [],
+    };
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [source, destination],
+    }));
+    component.selectScene('source');
+    fixture.detectChanges();
+    const moveButtons = fixture.nativeElement.querySelectorAll('.move-btn');
+    const moveButton = moveButtons[1] as HTMLButtonElement;
+    moveButton.click();
+    fixture.detectChanges();
+    const menus = await loader.getAllHarnesses(MatMenuHarness);
+    let menu = menus[0];
+    for (const candidateMenu of menus) {
+      if (await candidateMenu.isOpen()) {
+        menu = candidateMenu;
+        break;
+      }
+    }
+    await menu.clickItem({text: 'Move to Destination'});
+    fixture.detectChanges();
+
+    const movedSource = projectConfigSignal().storyboard[0] as GeneratedScene;
+    const movedDestination = projectConfigSignal()
+      .storyboard[1] as GeneratedScene;
+    expect(movedSource.candidates).toHaveLength(2);
+    expect(movedSource.candidates?.[0].video?.path).toBe('archived');
+    expect(movedSource.candidates?.[1].video?.path).toBe('kept');
+    expect(movedDestination.candidates).toHaveLength(1);
+    expect(movedDestination.candidates?.[0].video?.path).toBe('target');
+  });
+
+  it('shows a busy destination as disabled with an explanatory tooltip', async () => {
+    const candidate: Candidate = {
+      runNumber: 1,
+      durationSeconds: 4,
+      model: 'veo-1',
+      prompt: 'target',
+      generateAudio: true,
+      resolution: '1080p',
+      origin: {
+        sceneId: 'source',
+        sceneName: 'Source',
+        runNumber: 2,
+        candidateLabel: '2C',
+      },
+      video: {path: 'target', url: 'target'},
+    };
+    const source: GeneratedScene = {
+      id: 'source',
+      type: 'generated',
+      name: 'Source',
+      prompt: 'source',
+      candidates: [candidate],
+    };
+    const destination: GeneratedScene = {
+      id: 'destination',
+      type: 'generated',
+      name: 'Destination',
+      prompt: 'destination',
+      candidates: [],
+    };
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [source, destination],
+    }));
+    component.selectScene('source');
+    fixture.detectChanges();
+    expect(component.runTooltip(candidate)).toContain('Originally 2C');
+    mockRemixEngineService.generatingSceneIds.set(new Set(['destination']));
+    fixture.detectChanges();
+
+    const moveButton = fixture.nativeElement.querySelector(
+      '.move-btn',
+    ) as HTMLButtonElement;
+    moveButton.click();
+    fixture.detectChanges();
+    const menu = await loader.getHarness(MatMenuHarness);
+    const destinationItem = (
+      await menu.getItems({text: 'Move to Destination'})
+    )[0];
+    expect(destinationItem).toBeDefined();
+    expect(await destinationItem.isDisabled()).toBe(true);
+    const describedBy = await (
+      await destinationItem.host()
+    ).getAttribute('aria-describedby');
+    expect(describedBy).toBeTruthy();
+    const helpText = describedBy
+      ?.split(' ')
+      .map(id => document.getElementById(id)?.textContent?.trim())
+      .filter((text): text is string => !!text);
+    expect(helpText).toContain('Cannot move while this scene is generating');
   });
 
   it('drives the candidate-duration slider from durationSlider()', () => {
