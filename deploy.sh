@@ -309,6 +309,12 @@ if [[ "$DICTATION_ENABLED" != "0" && "$DICTATION_ENABLED" != "1" ]]; then
   echo "Validation failed. Please fix config.txt and try again." >&2
   exit 1
 fi
+DICTATION_MODE="${DICTATION_MODE-SMART}"
+if [[ "$DICTATION_MODE" != "SMART" && "$DICTATION_MODE" != "VERBATIM" ]]; then
+  echo "ERROR: DICTATION_MODE must be SMART or VERBATIM." >&2
+  echo "Validation failed. Please fix config.txt and try again." >&2
+  exit 1
+fi
 # Data plane: the backend brokers all project data and media through the app
 # service's /api endpoints (signed URLs). The browser holds no Firestore or
 # Storage credentials and ships no client SDK, so there is no client data-plane
@@ -846,7 +852,7 @@ if [ "$IAP_FLAG_AVAILABLE" = "true" ]; then
   gcloud run deploy app --image "$IMAGE" --region $REGION --project $PROJECT \
     --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated --iap \
     --service-account="$RUNTIME_SA" \
-    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI},DICTATION_ENABLED=${DICTATION_ENABLED}
+    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI},DICTATION_ENABLED=${DICTATION_ENABLED},DICTATION_MODE=${DICTATION_MODE}
 else
   # 'gcloud run deploy' on this CLI has no --iap flag, but a slightly older CLI
   # can still enable IAP via 'gcloud run services update --iap'. Deploy private,
@@ -858,7 +864,7 @@ else
   gcloud run deploy app --image "$IMAGE" --region $REGION --project $PROJECT \
     --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated \
     --service-account="$RUNTIME_SA" \
-    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI},DICTATION_ENABLED=${DICTATION_ENABLED}
+    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI},DICTATION_ENABLED=${DICTATION_ENABLED},DICTATION_MODE=${DICTATION_MODE}
   echo "Enabling IAP on 'app' (gcloud run services update --iap)..."
   if gcloud run services update app --iap --region=$REGION --project=$PROJECT; then
     echo "✓ IAP enabled on 'app'."

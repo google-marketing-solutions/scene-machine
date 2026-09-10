@@ -54,6 +54,10 @@ export APP_MIN_INSTANCES=0
 # controls and reject transcription requests without calling the provider.
 export DICTATION_ENABLED=1
 
+# Gemini transcription mode. SMART is the default; VERBATIM preserves literal
+# speech. Only SMART and VERBATIM are valid values.
+export DICTATION_MODE=SMART
+
 # Optional: Custom domain for the application UI.
 # If you use a custom domain for the Scene Machine UI, uncomment the following
 # variable and update the value with your custom domain.

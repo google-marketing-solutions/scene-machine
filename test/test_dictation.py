@@ -83,6 +83,7 @@ def test_route_normalizes_real_wav_and_sends_audio_only_to_gemini(
     monkeypatch, orchestrator_module
 ):
   del orchestrator_module
+  monkeypatch.delenv('DICTATION_MODE', raising=False)
   orch = _load_enabled(monkeypatch)
   fake_client = _FakeClient(_response(_part(text='hello world')))
   monkeypatch.setattr(orch.transcription.genai, 'Client', lambda **_: fake_client)
@@ -98,9 +99,52 @@ def test_route_normalizes_real_wav_and_sends_audio_only_to_gemini(
   assert call['model'] == 'gemini-3.5-transcribe-preview'
   assert len(call['contents']) == 1
   assert call['contents'][0].inline_data.mime_type == 'audio/wav'
-  assert call['config'].audio_transcription_config.mode.value == 'VERBATIM'
+  assert call['config'].audio_transcription_config.mode.value == 'SMART'
   assert call['config'].system_instruction is None
   assert fake_client.closed
+
+
+def test_explicit_verbatim_mode_is_sent_to_gemini(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  monkeypatch.setenv('DICTATION_MODE', 'VERBATIM')
+  orch = _load_enabled(monkeypatch)
+  fake_client = _FakeClient(_response(_part(text='verbatim mode')))
+  monkeypatch.setattr(orch.transcription.genai, 'Client', lambda **_: fake_client)
+  response = orch.app.test_client().post(
+      '/api/transcribe',
+      data={'audio': (io.BytesIO(_wav()), 'voice.wav')},
+      content_type='multipart/form-data',
+  )
+  assert response.status_code == 200
+  assert fake_client.calls[0]['config'].audio_transcription_config.mode.value == 'VERBATIM'
+  assert fake_client.closed
+
+
+@pytest.mark.parametrize('value', ['', 'smart', 'OTHER'])
+def test_invalid_dictation_mode_rejects_before_provider(
+    monkeypatch, orchestrator_module, value
+):
+  del orchestrator_module
+  monkeypatch.setenv('DICTATION_MODE', value)
+  orch = _load_enabled(monkeypatch)
+  monkeypatch.setattr(
+      orch.transcription.genai,
+      'Client',
+      lambda **_: pytest.fail('provider client must not be constructed'),
+  )
+  response = orch.app.test_client().post(
+      '/api/transcribe',
+      data={'audio': (io.BytesIO(_wav()), 'voice.wav')},
+      content_type='multipart/form-data',
+  )
+  assert response.status_code == 503
+  assert response.get_json() == {
+      'error': 'Transcription mode is not configured',
+      'code': 'invalid_dictation_mode',
+  }
+  assert response.headers['Cache-Control'] == 'no-store'
 
 
 def test_provider_parser_deduplicates_nonthought_parts_and_allows_empty(

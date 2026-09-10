@@ -331,12 +331,17 @@ def test_dictation_flag_is_optional_validated_and_app_only():
   assert 'export DICTATION_ENABLED=1' in template
   assert 'DICTATION_ENABLED="${DICTATION_ENABLED:-1}"' in text
   assert 'DICTATION_ENABLED must be 0 or 1' in text
+  assert 'export DICTATION_MODE=SMART' in template
+  assert 'DICTATION_MODE="${DICTATION_MODE-SMART}"' in text
+  assert 'DICTATION_MODE must be SMART or VERBATIM' in text
   worker_block = text.split('gcloud run deploy worker', 1)[1].split(
       'gcloud run deploy app', 1
   )[0]
   assert 'DICTATION_ENABLED=' not in worker_block
+  assert 'DICTATION_MODE=' not in worker_block
   app_blocks = text.split('--set-env-vars=ROLE=app')[1:]
   assert app_blocks and all('DICTATION_ENABLED=${DICTATION_ENABLED}' in block for block in app_blocks)
+  assert all('DICTATION_MODE=${DICTATION_MODE}' in block for block in app_blocks)
 
 
 @pytest.mark.parametrize('value, selected, expected, error', [
@@ -362,6 +367,41 @@ def test_dictation_deploy_validation_executes_default_and_opt_out(
   environment.pop('DICTATION_ENABLED', None)
   if value is not None:
     environment['DICTATION_ENABLED'] = value
+  result = subprocess.run(
+      ['bash', '-c', block], env=environment, capture_output=True, text=True,
+      check=False,
+  )
+  assert result.returncode == expected
+  if selected is not None:
+    assert result.stdout.strip() == selected
+  else:
+    assert error in result.stderr
+
+
+@pytest.mark.parametrize('value, selected, expected, error', [
+    (None, 'SMART', 0, ''),
+    ('SMART', 'SMART', 0, ''),
+    ('VERBATIM', 'VERBATIM', 0, ''),
+    ('', None, 1, 'DICTATION_MODE must be SMART or VERBATIM'),
+    ('smart', None, 1, 'DICTATION_MODE must be SMART or VERBATIM'),
+    ('OTHER', None, 1, 'DICTATION_MODE must be SMART or VERBATIM'),
+])
+def test_dictation_mode_deploy_validation_executes_exact_allowlist(
+    value, selected, expected, error
+):
+  """Execute the deploy.sh mode block without running the deploy."""
+  text = _deploy_sh()
+  match = re.search(
+      r'(?ms)^(DICTATION_MODE="\$\{DICTATION_MODE-SMART\}"\n'
+      r'if \[\[.*?^fi)$',
+      text,
+  )
+  assert match
+  block = match.group(1) + '\nprintf "%s\n" "$DICTATION_MODE"\n'
+  environment = os.environ.copy()
+  environment.pop('DICTATION_MODE', None)
+  if value is not None:
+    environment['DICTATION_MODE'] = value
   result = subprocess.run(
       ['bash', '-c', block], env=environment, capture_output=True, text=True,
       check=False,
