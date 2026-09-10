@@ -38,10 +38,12 @@ schemes are not navigable. Only an invalid document shape, enablement value, or
 length makes the whole banner unavailable; the homepage continues to load.
 
 The optional `emoji` field is a decorative string. The default is `⚠️` when the
-field is missing, empty, not a string, or contains no emoji. The browser keeps up to three whole
+field is missing or not a string. Set it to an empty or
+whitespace-only string to show no emoji. The browser keeps up to three whole
 emoji grapheme clusters, including flags, skin-tone combinations, ZWJ families,
 and keycaps, and ignores surrounding non-emoji text. Emoji changes do not alter
 the announcement identity because identity is based only on raw Markdown.
+A non-blank string with no recognized emoji falls back to `⚠️`.
 
 Examples of valid administrator-authored Markdown:
 
@@ -74,6 +76,7 @@ The document uses these fields:
 - `enabled` is required and must be boolean. Set it to `false` to hide the
   current announcement without deleting it.
 - `emoji` is optional. Use a short decorative string; omit it to use `⚠️`.
+  Set it to `""` when the banner should have no emoji.
 - A legacy stored `id` is ignored. Do not add or maintain a manual ID.
 - Other fields may remain for operator metadata, but are not returned to the
   browser.

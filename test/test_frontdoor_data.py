@@ -1169,7 +1169,7 @@ def test_announcement_storage_failure_degrades_to_empty(
   assert response.headers['Cache-Control'] == 'no-store'
 
 
-def test_announcement_emoji_passthrough_and_default_fallback(
+def test_announcement_emoji_passthrough_empty_and_default_fallback(
     monkeypatch, orchestrator_module
 ):
   del orchestrator_module
@@ -1182,9 +1182,15 @@ def test_announcement_emoji_passthrough_and_default_fallback(
   response = client.get('/api/announcement')
   assert response.get_json()['announcement']['emoji'] == document['emoji']
 
-  for value in (None, '', 7):
+  document['emoji'] = ''
+  assert client.get('/api/announcement').get_json()['announcement']['emoji'] == ''
+
+  for value in (None, 7):
     document['emoji'] = value
     assert client.get('/api/announcement').get_json()['announcement']['emoji'] == '⚠️'
+
+  del document['emoji']
+  assert client.get('/api/announcement').get_json()['announcement']['emoji'] == '⚠️'
 
 
 def test_announcement_enforces_255_unicode_code_points(
@@ -1230,6 +1236,7 @@ def test_announcement_id_is_hash_of_exact_markdown_and_ignores_legacy_id(
   assert read(original, legacy_id=None)['id'] == original_id
   assert read(original, legacy_id='legacy-v1', extra='changed')['id'] == original_id
   assert read(original, emoji='🚀')['id'] == original_id
+  assert read(original, emoji='')['id'] == original_id
   assert read(original + ' ', legacy_id='legacy-v1')['id'] != original_id
   assert read('Welcome **here**.', legacy_id='legacy-v1')['id'] != original_id
   assert read('Welcome [here](https://new.example).', legacy_id='legacy-v1')['id'] != original_id

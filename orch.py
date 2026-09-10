@@ -90,7 +90,7 @@ _DEFAULT_ANNOUNCEMENT_EMOJI = '⚠️'
 
 
 def _announcement_emoji(raw: object) -> str:
-  return raw if isinstance(raw, str) and raw else _DEFAULT_ANNOUNCEMENT_EMOJI
+  return raw if isinstance(raw, str) else _DEFAULT_ANNOUNCEMENT_EMOJI
 
 # DEV-ONLY: run backend actions in-process via the threaded execution path
 # instead of scheduling Cloud Tasks (orchestrator.supply_node(data, None)).

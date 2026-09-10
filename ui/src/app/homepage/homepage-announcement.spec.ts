@@ -117,8 +117,8 @@ describe('HomepageAnnouncement', () => {
     ).toBe('⚠️');
   });
 
-  it.each([undefined, '', 42])(
-    'falls back for invalid emoji values: %s',
+  it.each([undefined, null, 42])(
+    'falls back for missing or non-string emoji values: %s',
     emoji => {
       http.expectOne('/api/announcement').flush({
         announcement: {id: 'emoji-fallback', markdown: 'Welcome', emoji},
@@ -127,6 +127,21 @@ describe('HomepageAnnouncement', () => {
       expect(
         fixture.nativeElement.querySelector('.announcement-emoji')?.textContent,
       ).toBe('⚠️');
+    },
+  );
+
+  it.each(['', '   '])(
+    'hides an empty emoji while preserving the banner: %j',
+    emoji => {
+      http.expectOne('/api/announcement').flush({
+        announcement: {id: 'emoji-empty', markdown: 'Welcome', emoji},
+      });
+      fixture.detectChanges();
+
+      const region = fixture.nativeElement.querySelector('[role="region"]');
+      expect(region.querySelector('.announcement-emoji')).toBeNull();
+      expect(region.textContent).toContain('Welcome');
+      expect(region.querySelector('button')).not.toBeNull();
     },
   );
 
