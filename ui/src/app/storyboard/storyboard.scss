@@ -699,6 +699,26 @@
             }
           }
 
+          .move-btn {
+            position: absolute;
+            top: 4px;
+            right: 76px;
+            z-index: 2;
+            background: rgba(0, 0, 0, 0.6);
+            color: white;
+            transform: scale(0.8);
+            backdrop-filter: blur(4px);
+
+            &:hover:not(:disabled) {
+              background: var(--mat-sys-primary-container);
+              color: var(--mat-sys-on-primary-container);
+            }
+
+            &:disabled {
+              opacity: 0.38;
+            }
+          }
+
           .reference-image-bg {
             position: absolute;
             top: 0;

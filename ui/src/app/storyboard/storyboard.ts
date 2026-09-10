@@ -46,6 +46,7 @@ import {MatIconModule} from '@angular/material/icon';
 import {MatInputModule} from '@angular/material/input';
 import {MatProgressSpinnerModule} from '@angular/material/progress-spinner';
 import {MatSelectModule} from '@angular/material/select';
+import {MatMenuModule} from '@angular/material/menu';
 import {MatSlideToggleModule} from '@angular/material/slide-toggle';
 import {MatSliderModule} from '@angular/material/slider';
 import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
@@ -70,6 +71,11 @@ import {
 } from './add-scene-dialog/add-scene-dialog';
 import {ConfirmDialog} from './confirm-dialog';
 import {EditCandidateDialog} from './edit-candidate-dialog';
+import {
+  candidateLabel,
+  MoveDestination,
+  moveCandidate as transformMoveCandidate,
+} from './move-candidate';
 
 /**
  * Component for the storyboard view.
@@ -90,6 +96,7 @@ import {EditCandidateDialog} from './edit-candidate-dialog';
     MatInputModule,
     MatSlideToggleModule,
     MatSelectModule,
+    MatMenuModule,
     MatChipsModule,
     MatTooltipModule,
     MatSnackBarModule,
@@ -120,7 +127,18 @@ export class Storyboard {
   >();
   private downloadEpoch = 0;
   private lastProjectId: string | undefined;
+  private moveVisitEpoch = 0;
   readonly downloadInProgress = signal(false);
+  private preparedMove:
+    | {
+        sceneId: string;
+        index: number;
+        path: string;
+        label: string;
+        projectId: string;
+        visitEpoch: number;
+      }
+    | undefined;
 
   constructor() {
     this.destroyRef.onDestroy(() => {
@@ -131,11 +149,15 @@ export class Storyboard {
         URL.revokeObjectURL(objectUrl);
       }
       this.pendingObjectUrlCleanups.clear();
+      this.moveVisitEpoch++;
+      this.preparedMove = undefined;
     });
     this.router.events
       .pipe(filter(event => event instanceof NavigationStart))
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
+        this.moveVisitEpoch++;
+        this.preparedMove = undefined;
         this.downloadEpoch++;
         this.cancelDownload();
         this.downloadInProgress.set(false);
@@ -146,6 +168,8 @@ export class Storyboard {
         this.lastProjectId !== undefined &&
         projectId !== this.lastProjectId
       ) {
+        this.moveVisitEpoch++;
+        this.preparedMove = undefined;
         this.downloadEpoch++;
         this.cancelDownload();
         this.downloadInProgress.set(false);
@@ -272,6 +296,15 @@ export class Storyboard {
     const label = this.runLabels().get(candidate) ?? '';
     const letter = label.slice(String(candidate.runNumber).length);
     const base = `Run: ${candidate.runNumber}, Candidate: ${letter}`;
+    if (candidate.origin) {
+      const original = `originally ${candidate.origin.candidateLabel} in ${candidate.origin.sceneName}`;
+      if (this.selectedScene()?.id === candidate.origin.sceneId) {
+        return `${base} (Originally ${candidate.origin.candidateLabel})`;
+      }
+      return candidate.origin.editedFromRun !== undefined
+        ? `${base} (edit of run ${candidate.origin.editedFromRun} in ${candidate.origin.sceneName}; ${original})`
+        : `${base} (${original})`;
+    }
     return candidate.editedFromRun !== undefined
       ? `${base} (edit of run ${candidate.editedFromRun})`
       : base;
@@ -1034,6 +1067,59 @@ export class Storyboard {
         void this.remixEngineService.editCandidate(scene, index, result);
       }
     });
+  }
+
+  prepareMoveCandidate(scene: GeneratedScene, index: number) {
+    this.preparedMove = undefined;
+    const current = this.config.projectConfig.value();
+    const currentScene = current.storyboard.find(s => s.id === scene.id);
+    const candidate =
+      currentScene && this.config.isGeneratedScene(currentScene)
+        ? currentScene.candidates?.[index]
+        : undefined;
+    const label =
+      currentScene && this.config.isGeneratedScene(currentScene)
+        ? candidateLabel(currentScene.candidates ?? [], index)
+        : undefined;
+    if (candidate?.video?.path && label) {
+      this.preparedMove = {
+        sceneId: scene.id,
+        index,
+        path: candidate.video.path,
+        label,
+        projectId: current.id,
+        visitEpoch: this.moveVisitEpoch,
+      };
+    }
+  }
+
+  movePreparedCandidate(event: Event, destination: MoveDestination) {
+    event.stopPropagation();
+    const prepared = this.preparedMove;
+    this.preparedMove = undefined;
+    if (!prepared) return;
+    const current = this.config.projectConfig.value();
+    if (
+      current.id !== prepared.projectId ||
+      this.moveVisitEpoch !== prepared.visitEpoch
+    ) {
+      return;
+    }
+    const result = transformMoveCandidate({
+      storyboard: current.storyboard,
+      sourceSceneId: prepared.sceneId,
+      candidateIndex: prepared.index,
+      expectedVideoPath: prepared.path,
+      expectedLabel: prepared.label,
+      destination,
+      busySceneIds: this.remixEngineService.generatingSceneIds(),
+    });
+    if (result.ok) {
+      this.config.updateProjectConfig({storyboard: result.storyboard});
+      this.config.saveNow();
+      this.userSelectedSceneId.set(result.destinationSceneId);
+      this.isVideoPlaying.set(false);
+    }
   }
 
   deleteScene(id: string) {
