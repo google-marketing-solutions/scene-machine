@@ -70,6 +70,15 @@
   color: #fff;
 }
 
+.announcement-more {
+  margin-left: auto;
+}
+
+.announcement-dialog-content {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 :host .announcement button:focus-visible {
   outline: 2px solid #fff;
   outline-offset: -2px;

@@ -1185,6 +1185,19 @@ def test_announcement_emoji_passthrough_empty_and_default_fallback(
   document['emoji'] = ''
   assert client.get('/api/announcement').get_json()['announcement']['emoji'] == ''
 
+  document['emoji'] = '😀' * 200_000
+  assert client.get('/api/announcement').get_json()['announcement']['emoji'] == '⚠️'
+
+  document['emoji'] = ' ' * 128
+  assert client.get('/api/announcement').get_json()['announcement']['emoji'] == ''
+
+  boundary = '😀' * 128
+  document['emoji'] = boundary
+  assert client.get('/api/announcement').get_json()['announcement']['emoji'] == boundary
+
+  document['emoji'] = '😀' * 129
+  assert client.get('/api/announcement').get_json()['announcement']['emoji'] == '⚠️'
+
   for value in (None, 7):
     document['emoji'] = value
     assert client.get('/api/announcement').get_json()['announcement']['emoji'] == '⚠️'

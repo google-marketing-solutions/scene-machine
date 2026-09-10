@@ -22,9 +22,12 @@ import {
   DestroyRef,
   inject,
   signal,
+  TemplateRef,
+  ViewChild,
 } from '@angular/core';
 import {takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {MatButtonModule} from '@angular/material/button';
+import {MatDialog, MatDialogModule} from '@angular/material/dialog';
 import {MatIconModule} from '@angular/material/icon';
 import MarkdownIt from 'markdown-it';
 
@@ -117,7 +120,7 @@ markdown.renderer.rules['link_open'] = (tokens, index, options, env, self) => {
 /** Displays the optional administrator-authored homepage announcement. */
 @Component({
   selector: 'app-homepage-announcement',
-  imports: [MatButtonModule, MatIconModule],
+  imports: [MatButtonModule, MatDialogModule, MatIconModule],
   templateUrl: './homepage-announcement.html',
   styleUrl: './homepage-announcement.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -125,6 +128,8 @@ markdown.renderer.rules['link_open'] = (tokens, index, options, env, self) => {
 export class HomepageAnnouncement {
   private readonly http = inject(HttpClient);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly dialog = inject(MatDialog);
+  @ViewChild('announcementDialog') announcementDialog!: TemplateRef<unknown>;
   private readonly dismissedId = signal(this.readDismissedId());
   readonly announcement = signal<Announcement | null>(null);
   readonly visible = computed(() => {
@@ -156,6 +161,13 @@ export class HomepageAnnouncement {
         },
         error: () => this.announcement.set(null),
       });
+  }
+
+  openFullAnnouncement() {
+    this.dialog.open(this.announcementDialog, {
+      ariaLabel: 'Full announcement',
+      maxWidth: 'min(560px, calc(100vw - 32px))',
+    });
   }
 
   dismiss() {
