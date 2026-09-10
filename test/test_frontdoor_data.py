@@ -25,6 +25,7 @@ stubbed so no test performs network I/O.
 
 import copy
 import datetime
+import hashlib
 import importlib
 import pathlib
 import sys
@@ -51,9 +52,10 @@ _ENV_VARS = (
 _IAP_AUDIENCE = '/projects/123456/locations/us-central1/services/app'
 
 _DATA_ROUTES = (
-    '/api/uploadUrl',
-    '/api/signUrl',
-    '/api/config',
+  '/api/uploadUrl',
+  '/api/signUrl',
+  '/api/config',
+  '/api/announcement',
     '/api/projects',
     '/api/projects/<project_id>',
     '/api/templates',
@@ -1110,6 +1112,152 @@ def test_templates_crud_and_read_only_guard(monkeypatch, orchestrator_module):
 # ---------------------------------------------------------------------------
 # /api/config
 # ---------------------------------------------------------------------------
+def test_announcement_returns_only_valid_enabled_document_and_no_store(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  fake_db.collection('config').docs['announcement'] = {
+      'id': 'welcome-v1',
+      'markdown': 'Welcome to **Scene Machine**.',
+      'enabled': True,
+      'emoji': '🛠️',
+      'operatorNote': 'never expose this',
+  }
+  response = client.get('/api/announcement')
+  assert response.status_code == 200
+  assert response.get_json() == {
+      'announcement': {
+          'id': hashlib.sha256(
+              'Welcome to **Scene Machine**.'.encode('utf-8')
+          ).hexdigest(),
+          'markdown': 'Welcome to **Scene Machine**.',
+          'emoji': '🛠️',
+      }
+  }
+  assert response.headers['Cache-Control'] == 'no-store'
+
+  for invalid in (
+      {'id': 'welcome-v1', 'markdown': 'x', 'enabled': False},
+      {'id': 'welcome-v1', 'markdown': '', 'enabled': True},
+      {'id': 'welcome-v1', 'markdown': 'x', 'enabled': 1},
+      {'id': 'welcome-v1', 'markdown': 'x' * 256, 'enabled': True},
+  ):
+    fake_db.collection('config').docs['announcement'] = invalid
+    response = client.get('/api/announcement')
+    assert response.status_code == 200
+    assert response.get_json() == {'announcement': None}
+    assert response.headers['Cache-Control'] == 'no-store'
+
+
+def test_announcement_storage_failure_degrades_to_empty(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, _, _ = _load_app(monkeypatch)
+
+  class BrokenDb:
+    def collection(self, _name):
+      raise RuntimeError('storage unavailable')
+
+  monkeypatch.setattr(orch, '_ui_db', BrokenDb())
+  response = orch.app.test_client().get('/api/announcement')
+  assert response.status_code == 200
+  assert response.get_json() == {'announcement': None}
+  assert response.headers['Cache-Control'] == 'no-store'
+
+
+def test_announcement_emoji_passthrough_and_default_fallback(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  document = fake_db.collection('config').docs['announcement'] = {
+      'markdown': 'Welcome', 'enabled': True, 'emoji': 'text 👩🏽‍💻🇩🇪1️⃣'
+  }
+
+  response = client.get('/api/announcement')
+  assert response.get_json()['announcement']['emoji'] == document['emoji']
+
+  for value in (None, '', 7):
+    document['emoji'] = value
+    assert client.get('/api/announcement').get_json()['announcement']['emoji'] == '⚠️'
+
+
+def test_announcement_enforces_255_unicode_code_points(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  fake_db.collection('config').docs['announcement'] = {
+      'id': 'unicode-v1', 'markdown': '😀' * 255, 'enabled': True
+  }
+  response = client.get('/api/announcement')
+  assert response.get_json()['announcement']['markdown'] == '😀' * 255
+
+  fake_db.collection('config').docs['announcement']['markdown'] = '😀' * 256
+  response = client.get('/api/announcement')
+  assert response.get_json() == {'announcement': None}
+
+
+def test_announcement_id_is_hash_of_exact_markdown_and_ignores_legacy_id(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  docs = fake_db.collection('config').docs
+
+  def read(markdown, legacy_id='bad id', enabled=True, extra='first', emoji='⚠️'):
+    document = {
+        'markdown': markdown,
+        'enabled': enabled,
+        'operatorNote': extra,
+        'emoji': emoji,
+    }
+    if legacy_id is not None:
+      document['id'] = legacy_id
+    docs['announcement'] = document
+    return client.get('/api/announcement').get_json()['announcement']
+
+  original = 'Welcome [here](https://old.example).'
+  original_id = hashlib.sha256(original.encode('utf-8')).hexdigest()
+  assert read(original, legacy_id=None)['id'] == original_id
+  assert read(original, legacy_id='legacy-v1', extra='changed')['id'] == original_id
+  assert read(original, emoji='🚀')['id'] == original_id
+  assert read(original + ' ', legacy_id='legacy-v1')['id'] != original_id
+  assert read('Welcome **here**.', legacy_id='legacy-v1')['id'] != original_id
+  assert read('Welcome [here](https://new.example).', legacy_id='legacy-v1')['id'] != original_id
+  assert read(original, legacy_id='restored')['id'] == original_id
+  assert read(original, enabled=False) is None
+  assert read(original, enabled=True, extra='another')['id'] == original_id
+
+
+def test_announcement_is_iap_gated_when_app_is_deployed(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(
+      monkeypatch, AUTH_MODE='iap', IAP_AUDIENCE=_IAP_AUDIENCE
+  )
+  _stub_identity(monkeypatch, orch, {'announcement-user': {'email': 'u@x'}})
+  fake_db.collection('config').docs['announcement'] = {
+      'id': 'welcome-v1', 'markdown': 'Welcome', 'enabled': True
+  }
+  client = orch.app.test_client()
+  assert client.get('/api/announcement').status_code == 401
+  response = client.get('/api/announcement', headers=_iap('announcement-user'))
+  assert response.status_code == 200
+  assert response.get_json()['announcement']['id'] == hashlib.sha256(
+      'Welcome'.encode('utf-8')
+  ).hexdigest()
+
+
 def test_config_returns_seeded_doc_plus_model_catalog(
     monkeypatch, orchestrator_module
 ):
