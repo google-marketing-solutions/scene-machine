@@ -30,7 +30,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # The check validates config.txt against what THIS deploy ships, so it
 # reads the repo file explicitly -- never the live Firestore doc, which
 # may hold operator edits the seed is about to replace.
-from util.model_allowlist import load_shipped_allowlist  # noqa: E402
+from util.model_allowlist import (  # noqa: E402
+    load_shipped_allowlist,
+    validate_catalog_shape,
+)
 
 # (model env var, region env var, expected family, human label)
 _CHECKS = (
@@ -72,8 +75,20 @@ def collect_errors(env: Mapping[str, str], models: dict) -> list[str]:
   return errors
 
 
+def catalog_shape_errors(catalog: dict) -> list[str]:
+  """Returns [] or a single-item list with the shipped catalog's shape
+  problem (e.g. an incomplete generate_video capability schema), in the same
+  message style as the checks above."""
+  problem = validate_catalog_shape(catalog, catalog.get('actions', {}))
+  if problem:
+    return [f'Allowlist shape: {problem}.']
+  return []
+
+
 def main() -> None:
-  errors = collect_errors(os.environ, load_shipped_allowlist()['models'])
+  catalog = load_shipped_allowlist()
+  errors = collect_errors(os.environ, catalog['models'])
+  errors += catalog_shape_errors(catalog)
   if errors:
     sys.stderr.write('Model/region config check FAILED:\n')
     for error in errors:

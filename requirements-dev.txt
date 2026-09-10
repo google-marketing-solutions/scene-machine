@@ -366,9 +366,9 @@ google-api-core[grpc]==2.30.3 \
     #   google-cloud-logging
     #   google-cloud-storage
     #   google-cloud-tasks
-google-auth[requests]==2.49.2 \
-    --hash=sha256:c1ae38500e73065dcae57355adb6278cf8b5c8e391994ae9cbadbcb9631ab409 \
-    --hash=sha256:c2720924dfc82dedb962c9f52cabb2ab16714fd0a6a707e40561d217574ed6d5
+google-auth[requests]==2.57.0 \
+    --hash=sha256:180dafe015cfb62193bea26b677500fab5b9fd51a1e825ebf3ad9b182047ae59 \
+    --hash=sha256:9b4f96d6a1feb5f7201231f47cfb3de08d8f176f8a61f9e461555116e95a8789
     # via
     #   -r requirements.txt
     #   google-api-core
@@ -453,9 +453,9 @@ google-crc32c==1.8.0 \
     #   -r requirements.txt
     #   google-cloud-storage
     #   google-resumable-media
-google-genai==2.7.0 \
-    --hash=sha256:21cac381e09a869151706aba797b6a4f96cfe92c484e13204d092caee7ff11cb \
-    --hash=sha256:3c6f32f5ced9877ededd1b384b5e5b7f09c20046ec3390b662b16d8cd1882ac5
+google-genai==2.21.0 \
+    --hash=sha256:0ecc11c6a5b9f5e3cc58e77ae5fead00c6719f8a1b2b654b803f514a9a6b64c0 \
+    --hash=sha256:36b575034be46a03acd603a852e22a6359f2cdd6b26bb1d65d9b7e0cc7ab3648
     # via -r requirements.txt
 google-resumable-media==2.8.2 \
     --hash=sha256:82b6d8ccd11765268cdd2a2123f417ec806b8eef3000a9a38dfe3033da5fb220 \

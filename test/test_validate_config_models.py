@@ -102,3 +102,16 @@ def test_config_template_defaults_pass_real_allowlist():
   env = _parse_shell_env(os.path.join(_REPO, 'config.template.txt'))
   assert validate_config_models.collect_errors(
       env, load_shipped_allowlist()['models']) == []
+
+
+def test_catalog_missing_generate_video_field_flagged():
+  catalog = load_shipped_allowlist()
+  del catalog['models']['veo-3.1-generate-001']['capabilities'][
+      'audio_always_on']
+  errors = validate_config_models.catalog_shape_errors(catalog)
+  assert errors and 'audio_always_on' in errors[0]
+
+
+def test_shipped_catalog_shape_passes():
+  assert validate_config_models.catalog_shape_errors(
+      load_shipped_allowlist()) == []
