@@ -1314,6 +1314,30 @@
   }
 }
 
+@container (max-width: 500px) {
+  .storyboard-columns .main-preview .controls-area {
+    flex-direction: column;
+    gap: 12px;
+    min-height: 300px;
+
+    .trim-controls {
+      flex-direction: row;
+      gap: 8px;
+
+      mat-form-field {
+        flex: 1 1 0;
+        min-width: 0;
+      }
+    }
+
+    .prompt-box {
+      width: 100%;
+      min-height: 180px;
+      flex: 1 1 auto;
+    }
+  }
+}
+
 .button-content {
   display: flex;
   height: 40px;
