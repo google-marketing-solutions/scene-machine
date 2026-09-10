@@ -39,11 +39,13 @@ class FakeTrack {
   imports: [DictationControl],
   template: `
     <form (submit)="onSubmit($event)">
+      <textarea #target [value]="value"></textarea>
       <app-dictation-control
         [enabled]="enabled"
         [value]="value"
         [revision]="revision"
         [ownerKey]="ownerKey"
+        [textarea]="target"
         [maxChars]="maxChars"
         [maxDurationSeconds]="maxDurationSeconds"
         [audioConfig]="audioConfig"
@@ -170,7 +172,12 @@ describe('DictationControl', () => {
     return http.expectOne('/api/transcribe');
   }
 
-  it('appends the returned transcript through valueChange without submitting', async () => {
+  it('inserts the returned transcript at the textarea end without submitting', async () => {
+    const textarea = fixture.nativeElement.querySelector(
+      'textarea',
+    ) as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(host.value.length, host.value.length);
     const request = await record();
 
     expect(request.request.body).toBeInstanceOf(FormData);
@@ -185,10 +192,78 @@ describe('DictationControl', () => {
     expect(host.submitted).toBe(0);
     expect(control.canUndo()).toBe(true);
     expect(fixture.nativeElement.textContent).not.toContain('Retry');
+    expect(
+      fixture.nativeElement.querySelector(
+        '[aria-label="Dismiss dictation message"]',
+      ),
+    ).toBeNull();
 
     control.undo();
     expect(host.value).toBe('Existing');
     expect(control.canUndo()).toBe(false);
+  });
+
+  it('inserts the returned transcript at the textarea caret', async () => {
+    const textarea = fixture.nativeElement.querySelector(
+      'textarea',
+    ) as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(2, 2);
+
+    const request = await record();
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+
+    expect(host.value).toBe('Exspoken wordsisting');
+  });
+
+  it('replaces the selected textarea text', async () => {
+    const textarea = fixture.nativeElement.querySelector(
+      'textarea',
+    ) as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(0, host.value.length);
+
+    const request = await record();
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+
+    expect(host.value).toBe('spoken words');
+    control.undo();
+    expect(host.value).toBe('Existing');
+  });
+
+  it('keeps the caret captured at start when focus moves during transcription', async () => {
+    const textarea = fixture.nativeElement.querySelector(
+      'textarea',
+    ) as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(0, 0);
+
+    const request = await record();
+    textarea.focus();
+    textarea.setSelectionRange(host.value.length, host.value.length);
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+
+    expect(host.value).toBe('spoken wordsExisting');
+  });
+
+  it('allows a replacement that fits the field limit', async () => {
+    host.maxChars = host.value.length;
+    fixture.componentRef.changeDetectorRef.detectChanges();
+    const textarea = fixture.nativeElement.querySelector(
+      'textarea',
+    ) as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(0, host.value.length);
+
+    const request = await record();
+    request.flush({text: 'New'});
+    fixture.detectChanges();
+
+    expect(host.value).toBe('New');
+    expect(control.overflowText()).toBeUndefined();
   });
 
   it('shows the transcription error without exposing a Retry action', async () => {
@@ -201,6 +276,11 @@ describe('DictationControl', () => {
     expect(control.state().status).toBe('error');
     expect(fixture.nativeElement.textContent).toContain('Transcription failed');
     expect(fixture.nativeElement.textContent).not.toContain('Retry');
+    expect(
+      fixture.nativeElement.querySelector(
+        '[aria-label="Dismiss dictation message"]',
+      ),
+    ).toBeNull();
   });
 
   it('keeps an overflowing transcript in review without exposing Retry', async () => {

@@ -1257,6 +1257,7 @@
           }
           &.dictation-enabled textarea {
             padding-bottom: 56px !important;
+            scrollbar-gutter: stable;
           }
         }
       }

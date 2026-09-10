@@ -320,6 +320,7 @@
                       [class.dictation-enabled]="dictationEnabled()"
                     >
                       <textarea
+                        #productDescriptionInput
                         matInput
                         placeholder="Description (USPs, materials, benefits, dimensions, etc.)"
                         [ngModel]="product.description"
@@ -332,6 +333,7 @@
                         [value]="product.description || ''"
                         [revision]="fieldRevision(productFieldKey(product.id))"
                         [ownerKey]="config.projectConfig.value().id + ':product:' + product.id"
+                        [textarea]="productDescriptionInput"
                         [maxDurationSeconds]="30"
                         [maxChars]="MAX_PRODUCT_DESCRIPTION_LENGTH"
                         (valueChange)="updateProductDescriptionText(product.id, $event)"
@@ -370,6 +372,7 @@
             [class.dictation-enabled]="dictationEnabled()"
           >
             <textarea
+              #audienceInput
               matInput
               placeholder="Audience, location, market, demographics, affinity groups, etc..."
               [ngModel]="config.projectConfig.value().inputConfig.audience"
@@ -381,6 +384,7 @@
               [value]="config.projectConfig.value().inputConfig.audience || ''"
               [revision]="fieldRevision('audience')"
               [ownerKey]="config.projectConfig.value().id + ':audience'"
+              [textarea]="audienceInput"
               (valueChange)="updateInputConfig({audience: $event})"
             ></app-dictation-control>
           </mat-form-field>
@@ -399,6 +403,7 @@
             [class.dictation-enabled]="dictationEnabled()"
           >
             <textarea
+              #styleInput
               matInput
               placeholder="Corporate Identity (CI) or brand guidance. Additional visual styles or color palettes can also be described..."
               [ngModel]="config.projectConfig.value().inputConfig.style"
@@ -410,6 +415,7 @@
               [value]="config.projectConfig.value().inputConfig.style || ''"
               [revision]="fieldRevision('style')"
               [ownerKey]="config.projectConfig.value().id + ':style'"
+              [textarea]="styleInput"
               (valueChange)="updateInputConfig({style: $event})"
             ></app-dictation-control>
           </mat-form-field>
@@ -482,6 +488,7 @@
           [class.dictation-enabled]="dictationEnabled()"
         >
           <textarea
+            #compositionInput
             matInput
             placeholder="Describe the style, mood, pacing, or specific elements you want to see in the video..."
             (input)="revertToCustomTemplate()"
@@ -494,6 +501,7 @@
             [value]="config.projectConfig.value().inputConfig.composition || ''"
             [revision]="fieldRevision('composition')"
             [ownerKey]="config.projectConfig.value().id + ':composition'"
+            [textarea]="compositionInput"
             (valueChange)="updateInputConfig({composition: $event})"
           ></app-dictation-control>
         </mat-form-field>
