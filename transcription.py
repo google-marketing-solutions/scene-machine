@@ -79,7 +79,7 @@ def _is_completed_empty(response: Any, candidate: Any) -> bool:
 
 def enabled() -> bool:
   """Returns whether the server-side dictation capability is enabled."""
-  return os.environ.get('DICTATION_ENABLED', '').strip().lower() in (
+  return os.environ.get('DICTATION_ENABLED', '1').strip().lower() in (
       '1', 'true', 'yes'
   )
 

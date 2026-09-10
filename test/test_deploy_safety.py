@@ -8,6 +8,7 @@ as cheap regression gates.
 import pathlib
 import re
 import json
+import os
 import subprocess
 import sys
 
@@ -324,11 +325,11 @@ def test_no_infinite_gunicorn_timeout():
 
 
 def test_dictation_flag_is_optional_validated_and_app_only():
-  """Dictation is opt-in and must never be enabled on the worker service."""
+  """Dictation defaults on, remains opt-out, and is app-only."""
   template = (_REPO / 'config.template.txt').read_text(encoding='utf-8')
   text = _deploy_sh()
-  assert 'export DICTATION_ENABLED=0' in template
-  assert 'DICTATION_ENABLED="${DICTATION_ENABLED:-0}"' in text
+  assert 'export DICTATION_ENABLED=1' in template
+  assert 'DICTATION_ENABLED="${DICTATION_ENABLED:-1}"' in text
   assert 'DICTATION_ENABLED must be 0 or 1' in text
   worker_block = text.split('gcloud run deploy worker', 1)[1].split(
       'gcloud run deploy app', 1
@@ -336,3 +337,37 @@ def test_dictation_flag_is_optional_validated_and_app_only():
   assert 'DICTATION_ENABLED=' not in worker_block
   app_blocks = text.split('--set-env-vars=ROLE=app')[1:]
   assert app_blocks and all('DICTATION_ENABLED=${DICTATION_ENABLED}' in block for block in app_blocks)
+
+
+@pytest.mark.parametrize('value, selected, expected, error', [
+    (None, '1', 0, ''),
+    ('0', '0', 0, ''),
+    ('1', '1', 0, ''),
+    ('invalid', None, 1, 'DICTATION_ENABLED must be 0 or 1'),
+    ('2', None, 1, 'DICTATION_ENABLED must be 0 or 1'),
+])
+def test_dictation_deploy_validation_executes_default_and_opt_out(
+    value, selected, expected, error
+):
+  """Execute the deploy.sh flag block without running the deploy."""
+  text = _deploy_sh()
+  match = re.search(
+      r'(?ms)^(DICTATION_ENABLED="\$\{DICTATION_ENABLED:-1\}"\n'
+      r'if \[\[.*?^fi)$',
+      text,
+  )
+  assert match
+  block = match.group(1) + '\nprintf "%s\\n" "$DICTATION_ENABLED"\n'
+  environment = os.environ.copy()
+  environment.pop('DICTATION_ENABLED', None)
+  if value is not None:
+    environment['DICTATION_ENABLED'] = value
+  result = subprocess.run(
+      ['bash', '-c', block], env=environment, capture_output=True, text=True,
+      check=False,
+  )
+  assert result.returncode == expected
+  if selected is not None:
+    assert result.stdout.strip() == selected
+  else:
+    assert error in result.stderr

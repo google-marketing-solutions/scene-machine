@@ -119,6 +119,32 @@ def test_provider_parser_deduplicates_nonthought_parts_and_allows_empty(
   assert parse_response(_response()) == ''
 
 
+def test_missing_flag_enables_valid_transcription_request(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  monkeypatch.delenv('DICTATION_ENABLED', raising=False)
+  orch = _load_orch(monkeypatch, ROLE='all')
+  orch.config['gcpProject'] = 'dictation-test-project'
+  fake_client = _FakeClient(_response(_part(text='default enabled')))
+  monkeypatch.setattr(orch.transcription.genai, 'Client', lambda **_: fake_client)
+  response = orch.app.test_client().post(
+      '/api/transcribe',
+      data={'audio': (io.BytesIO(_wav()), 'voice.wav')},
+      content_type='multipart/form-data',
+  )
+  assert response.status_code == 200
+  assert response.get_json() == {'text': 'default enabled'}
+  assert fake_client.calls
+
+
+@pytest.mark.parametrize('value', ['', '2', 'unexpected'])
+def test_invalid_flag_fails_closed(monkeypatch, value):
+  import transcription
+  monkeypatch.setenv('DICTATION_ENABLED', value)
+  assert transcription.enabled() is False
+
+
 def test_malformed_provider_response_is_safe_502(monkeypatch, orchestrator_module):
   del orchestrator_module
   orch = _load_enabled(monkeypatch)
@@ -200,11 +226,11 @@ def test_blocked_without_content_remains_distinct_502(
   assert fake_client.closed
 
 
-def test_disabled_route_does_not_parse_or_call_provider(
+def test_explicit_zero_disables_route_before_parse_or_provider(
     monkeypatch, orchestrator_module
 ):
   del orchestrator_module
-  monkeypatch.delenv('DICTATION_ENABLED', raising=False)
+  monkeypatch.setenv('DICTATION_ENABLED', '0')
   orch = _load_orch(monkeypatch, ROLE='all')
   monkeypatch.setattr(
       orch.transcription, 'transcribe_recording',
@@ -213,6 +239,22 @@ def test_disabled_route_does_not_parse_or_call_provider(
   response = orch.app.test_client().post('/api/transcribe', data=b'not multipart')
   assert response.status_code == 503
   assert response.get_json()['code'] == 'dictation_disabled'
+
+
+def test_explicit_zero_advertises_disabled_capability(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  monkeypatch.setenv('DICTATION_ENABLED', '0')
+  orch, fake_db, _ = _load_app(monkeypatch)
+  fake_db.collection('config').docs['global'] = {'gcpProject': 'project'}
+  monkeypatch.setattr(
+      model_allowlist,
+      '_fetch_live_catalog',
+      lambda: model_allowlist.load_shipped_allowlist(),
+  )
+  payload = orch.app.test_client().get('/api/config').get_json()
+  assert payload['dictation']['enabled'] is False
 
 
 def test_worker_has_no_transcription_route(monkeypatch, orchestrator_module):
@@ -526,11 +568,15 @@ def test_real_browser_audio_containers_normalize_without_cloud(
       assert wav_file.getnframes() > 0
 
 
+@pytest.mark.parametrize('flag, expected', [(None, True), ('1', True)])
 def test_config_exposes_only_nonsecret_dictation_capability(
-    monkeypatch, orchestrator_module
+    monkeypatch, orchestrator_module, flag, expected
 ):
   del orchestrator_module
-  monkeypatch.setenv('DICTATION_ENABLED', 'true')
+  if flag is None:
+    monkeypatch.delenv('DICTATION_ENABLED', raising=False)
+  else:
+    monkeypatch.setenv('DICTATION_ENABLED', flag)
   orch, fake_db, _ = _load_app(monkeypatch)
   fake_db.collection('config').docs['global'] = {'gcpProject': 'project'}
   monkeypatch.setattr(
@@ -540,7 +586,7 @@ def test_config_exposes_only_nonsecret_dictation_capability(
   )
   payload = orch.app.test_client().get('/api/config').get_json()
   assert payload['dictation'] == {
-      'enabled': True,
+      'enabled': expected,
       'maxAudioBytes': 4 * 1024 * 1024,
       'maxDurationSeconds': 120,
       'mimeTypes': [

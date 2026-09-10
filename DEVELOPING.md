@@ -123,16 +123,22 @@ A full `./deploy.sh` stays the safe default and is what you should run for a rel
 
 ### Dictation feature flag
 
-Microphone dictation is controlled by the optional `DICTATION_ENABLED` deploy
-variable. It defaults to `0` when omitted and deploy validation accepts only
-`0` or `1`; the flag is passed to the app service only, never to the worker.
+Microphone dictation is included in deployment and enabled by default. The
+optional `DICTATION_ENABLED` variable defaults to `1` when omitted; deploy
+validation accepts only `0` or `1`. Set `export DICTATION_ENABLED=0` in
+`config.txt` before deploying or redeploying to disable it. Existing explicit
+`0` values are preserved. The flag is passed to the app service only, never
+to the worker; the UI reads the capability from `/api/config`.
 The backend uses the fixed `gemini-3.5-transcribe-preview` model in `global`
 with verbatim transcription; there is no runtime model picker or fallback.
 
-Enable it explicitly in a private test deployment for browser/provider checks;
-keep it disabled elsewhere until those checks pass. For local endpoint testing,
-use the existing `DEV` procedure above and set `DICTATION_ENABLED=1` only in
-that local app process. Recordings are
+For local endpoint testing, use the existing `DEV` procedure above. The
+backend also enables dictation when the variable is absent; set
+`DICTATION_ENABLED=0` in that process to opt out. Recording requires a user
+click and browser microphone permission. Transcription uses the configured
+Google Cloud project, requires access to the preview model and can incur
+model charges and consume quota. Verify browser/provider behavior on your
+instance before sharing it with users. Recordings are
 limited to 4 MiB and 120 seconds, become editable transcript text, do not
 submit or auto-generate anything, and have no durable recording storage;
 temporary audio files are removed after processing. The
