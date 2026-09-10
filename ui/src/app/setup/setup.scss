@@ -898,6 +898,53 @@
   }
 }
 
+@media (max-width: 600px) {
+  .setup-container {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 16px;
+    gap: 24px;
+  }
+
+  .section {
+    min-width: 0;
+
+    .section-content {
+      min-width: 0;
+      padding-left: 0;
+
+      .product-accordion {
+        min-width: 0;
+
+        ::ng-deep .mat-expansion-panel-content {
+          .mat-expansion-panel-body {
+            .product-content-split {
+              grid-template-columns: minmax(0, 1fr);
+              gap: 16px;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  .guidance-field {
+    min-width: 0;
+
+    ::ng-deep {
+      .mat-mdc-text-field-wrapper,
+      .mat-mdc-form-field-flex,
+      .mat-mdc-form-field-infix {
+        min-width: 0;
+      }
+    }
+
+    textarea {
+      width: 100%;
+    }
+  }
+}
+
 @keyframes bounce {
   0%,
   100% {
