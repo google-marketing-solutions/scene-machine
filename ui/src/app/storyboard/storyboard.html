@@ -168,7 +168,7 @@
 
       <div
         class="storyboard-columns"
-        [style.grid-template-columns]="sidebarTrackWidth() + 'px 1fr 320px'"
+        [style.--storyboard-left-track]="sidebarTrackWidth() + 'px'"
       >
         @if (selectedScene(); as scene) {
           <!-- Left Column: Scene List -->
@@ -820,14 +820,29 @@
               @if (this.config.isGeneratedScene(scene)) {
                 <!-- Prompt Input -->
                 <div class="prompt-box">
-                  <mat-form-field appearance="outline">
+                  <mat-form-field
+                    appearance="outline"
+                    [class.dictation-enabled]="dictationEnabled()"
+                  >
                     <mat-label>Prompt</mat-label>
                     <textarea
                       matInput
                       placeholder="Describe your video..."
-                      [(ngModel)]="scene.prompt"
-                      (ngModelChange)="updateScenes()"
+                      [ngModel]="scene.prompt"
+                      (ngModelChange)="updateScenePrompt(scene, $event)"
                     ></textarea>
+                    <app-dictation-control
+                      [enabled]="dictationEnabled()"
+                      [audioConfig]="dictationConfig()"
+                      [value]="scene.prompt || ''"
+                      [revision]="scenePromptRevision(scene.id)"
+                      [ownerKey]="
+                        config.projectConfig.value().id +
+                        ':scene:' +
+                        scene.id
+                      "
+                      (valueChange)="updateScenePrompt(scene, $event)"
+                    ></app-dictation-control>
                   </mat-form-field>
                 </div>
               }
@@ -968,7 +983,7 @@
                   <div class="audio-toggle">
                     <div>
                       <mat-icon class="setting-icon">music_note</mat-icon>
-                      <span class="subtitle">Use clip audio</span>
+                      <span class="subtitle">Generate Audio</span>
                     </div>
                     <mat-slide-toggle
                       color="primary"

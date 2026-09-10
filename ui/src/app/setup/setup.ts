@@ -63,6 +63,7 @@ import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialo
 import {TemplateCard} from '../templates/template-card/template-card';
 import {ConfirmTemplateDialog} from './confirm-template-dialog/confirm-template-dialog';
 import {GenerateStoryboardDialog} from './generate-storyboard-dialog/generate-storyboard-dialog';
+import {DictationControl} from '../shared/dictation/dictation-control';
 
 interface FileProcessResult {
   added: number;
@@ -96,6 +97,7 @@ interface FileProcessResult {
     MediaSrcPipe,
     TemplateCard,
     RouterLink,
+    DictationControl,
   ],
   templateUrl: './setup.html',
   styleUrl: './setup.scss',
@@ -139,6 +141,16 @@ export class Setup {
   readonly MAX_FILE_SIZE_BYTES = this.MAX_FILE_SIZE_MB * 1024 * 1024;
 
   readonly MAX_PRODUCT_DESCRIPTION_LENGTH = 500;
+
+  /** Revisions make recovery actions identity-safe even when text repeats. */
+  readonly fieldRevisions = signal<Record<string, number>>({});
+
+  readonly dictationEnabled = computed(
+    () => this.config.globalConfig?.value?.()?.dictation?.enabled === true,
+  );
+  readonly dictationConfig = computed(
+    () => this.config.globalConfig?.value?.()?.dictation,
+  );
 
   hasCandidates = computed(() => {
     const scenes = this.config.projectConfig.value().storyboard;
@@ -630,15 +642,41 @@ export class Setup {
         ),
       },
     });
+    this.bumpFieldRevision(this.productFieldKey(productId));
   }
 
   updateInputConfig(partial: Partial<InputConfig>) {
+    const update =
+      'composition' in partial && !('templateId' in partial)
+        ? {...partial, templateId: 'custom'}
+        : partial;
     this.config.updateProjectConfig({
       inputConfig: {
         ...this.config.projectConfig.value().inputConfig,
-        ...partial,
+        ...update,
       },
     });
+    for (const key of ['audience', 'style', 'composition'] as const) {
+      if (key in partial) this.bumpFieldRevision(key);
+    }
+    if ('templateId' in partial && !('composition' in partial)) {
+      this.bumpFieldRevision('composition');
+    }
+  }
+
+  productFieldKey(productId: number): string {
+    return `product-description:${productId}`;
+  }
+
+  fieldRevision(key: string): number {
+    return this.fieldRevisions()[key] ?? 0;
+  }
+
+  private bumpFieldRevision(key: string): void {
+    this.fieldRevisions.update(revisions => ({
+      ...revisions,
+      [key]: (revisions[key] ?? 0) + 1,
+    }));
   }
 
   getCombinedBriefing(): string {

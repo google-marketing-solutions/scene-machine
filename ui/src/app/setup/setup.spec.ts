@@ -443,6 +443,14 @@ describe('Setup video controls', () => {
     expect(component).toBeTruthy();
   });
 
+  it('labels the audio setting Generate Audio', () => {
+    const labels = Array.from(
+      fixture.nativeElement.querySelectorAll('.setting-label'),
+    ).map(label => (label as HTMLElement).textContent?.trim());
+
+    expect(labels).toContain('Generate Audio');
+  });
+
   it("offers the model's allowed resolutions, labeling 4k as 4K", async () => {
     const select = await loader.getHarness(
       MatSelectHarness.with({ancestor: '.resolution-select'}),

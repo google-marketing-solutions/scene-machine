@@ -138,6 +138,7 @@ def test_default_role_all_routes_and_no_auth(monkeypatch, orchestrator_module):
       '/supplyNode',
       '/triggerAction',
       '/getStatus',
+      '/api/transcribe',
       '/static/<path:filename>',
   }
 

@@ -5,7 +5,7 @@
       "http://localhost:4200",
       "localhost",
       "localhost:4200",
-      "https://${UI_HOST}"
+      ${UI_CORS_ORIGINS}
     ],
     "method": ["GET", "POST", "HEAD", "PUT", "DELETE"],
     "responseHeader": ["Content-Type"],

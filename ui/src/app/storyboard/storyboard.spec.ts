@@ -102,6 +102,7 @@ describe('Storyboard', () => {
     uploadMedia: vi.fn(),
     editCandidate: vi.fn(),
     generatingSceneIds: signal(new Set()),
+    editingSceneIds: signal(new Set()),
   };
   let mockMatDialog = {
     open: vi.fn().mockReturnValue({
@@ -156,6 +157,7 @@ describe('Storyboard', () => {
       uploadMedia: vi.fn(),
       editCandidate: vi.fn(),
       generatingSceneIds: signal(new Set()),
+      editingSceneIds: signal(new Set()),
     };
 
     mockMatDialog = {
@@ -690,6 +692,11 @@ describe('Storyboard', () => {
 
     expect(toggle.checked).toBe(true);
     expect(toggle.disabled).toBe(false);
+    expect(
+      fixture.nativeElement
+        .querySelector('.audio-toggle .subtitle')
+        ?.textContent.trim(),
+    ).toBe('Generate Audio');
   });
 
   it('mutes an audio-off selected candidate and disables its preview volume controls', () => {

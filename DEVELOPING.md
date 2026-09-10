@@ -121,6 +121,23 @@ A full `./deploy.sh` stays the safe default and is what you should run for a rel
 - **`--skip-ui-build` / `--use-existing-ui-dist`** reuses the existing `ui/dist` instead of rebuilding the UI. Good for backend-only changes. It reuses the config already baked into that build, so use it when redeploying the **same** project. The deploy refuses a `ui/dist` that was built for local dev (sign-in disabled).
 - **`--no-build-cache`** forces a clean cold image build, for a release or a dependency refresh.
 
+### Dictation feature flag
+
+Microphone dictation is controlled by the optional `DICTATION_ENABLED` deploy
+variable. It defaults to `0` when omitted and deploy validation accepts only
+`0` or `1`; the flag is passed to the app service only, never to the worker.
+The backend uses the fixed `gemini-3.5-transcribe-preview` model in `global`
+with verbatim transcription; there is no runtime model picker or fallback.
+
+Enable it explicitly in a private test deployment for browser/provider checks;
+keep it disabled elsewhere until those checks pass. For local endpoint testing,
+use the existing `DEV` procedure above and set `DICTATION_ENABLED=1` only in
+that local app process. Recordings are
+limited to 4 MiB and 120 seconds, become editable transcript text, do not
+submit or auto-generate anything, and have no durable recording storage;
+temporary audio files are removed after processing. The
+preview model's transcription quality is still being evaluated.
+
 ### Future considerations: splitting the app and worker images
 
 Today `deploy.sh` builds **one** image and runs it as two Cloud Run services via the `ROLE` env var (`app` serves the UI and `/api`; `worker` runs background jobs). One image keeps deployment simple, but it means the lightweight `app` service still ships inside an image that also carries ffmpeg and the heavier generation dependencies only the `worker` needs, so a UI change rebuilds the large image.

@@ -126,6 +126,14 @@ export interface ModelCatalog {
   models: Record<string, ModelCatalogEntry>;
 }
 
+/** Optional server capability for the bounded dictation interaction. */
+export interface DictationConfig {
+  enabled: boolean;
+  maxAudioBytes: number;
+  maxDurationSeconds: number;
+  mimeTypes: string[];
+}
+
 interface GlobalConfig {
   // GCP
   gcpLocation: string;
@@ -160,6 +168,9 @@ interface GlobalConfig {
   // the live config/models doc was served, 'shipped' on fallback).
   modelCatalog?: ModelCatalog;
   modelCatalogSource?: 'firestore' | 'shipped';
+
+  // Dictation is absent on older servers, which means the UI remains typing-only.
+  dictation?: DictationConfig;
 }
 
 /**

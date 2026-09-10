@@ -1,0 +1,352 @@
+/**
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ */
+
+import {provideHttpClient} from '@angular/common/http';
+import {
+  HttpTestingController,
+  provideHttpClientTesting,
+} from '@angular/common/http/testing';
+import {Component, ViewChild} from '@angular/core';
+import {
+  ComponentFixture,
+  TestBed as AngularTestBed,
+} from '@angular/core/testing';
+import {provideRouter, Router} from '@angular/router';
+import {beforeEach, afterEach, describe, expect, it, vi} from 'vitest';
+import {DictationControl} from './dictation-control';
+import {
+  DictationConfig,
+  DictationService,
+  DICTATION_MIME_TYPES,
+} from './dictation';
+
+class FakeTrack {
+  stopped = false;
+  stop(): void {
+    this.stopped = true;
+  }
+}
+
+@Component({
+  standalone: true,
+  imports: [DictationControl],
+  template: `
+    <form (submit)="onSubmit($event)">
+      <app-dictation-control
+        [enabled]="enabled"
+        [value]="value"
+        [revision]="revision"
+        [ownerKey]="ownerKey"
+        [maxChars]="maxChars"
+        [maxDurationSeconds]="maxDurationSeconds"
+        [audioConfig]="audioConfig"
+        (valueChange)="onValueChange($event)"
+      ></app-dictation-control>
+      <button type="submit">Submit</button>
+    </form>
+  `,
+})
+class DictationHost {
+  @ViewChild(DictationControl) control!: DictationControl;
+  enabled = true;
+  value = 'Existing';
+  revision = 4;
+  ownerKey = 'project-a:field';
+  maxChars: number | undefined;
+  maxDurationSeconds = 120;
+  audioConfig: DictationConfig | undefined;
+  submitted = 0;
+
+  onValueChange(value: string): void {
+    this.value = value;
+    this.revision++;
+  }
+
+  onSubmit(event: Event): void {
+    event.preventDefault();
+    this.submitted++;
+  }
+}
+
+class FakeRecorder {
+  static isTypeSupported = vi.fn(() => true);
+  static holdStop = false;
+  static pendingStops: Array<(() => void) | null> = [];
+  state: 'inactive' | 'recording' = 'inactive';
+  ondataavailable: ((event: {data: Blob}) => void) | null = null;
+  onstop: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+
+  constructor(
+    readonly stream: unknown,
+    readonly options?: {mimeType?: string},
+  ) {}
+
+  start(): void {
+    this.state = 'recording';
+  }
+
+  stop(): void {
+    if (this.state === 'inactive') return;
+    this.state = 'inactive';
+    this.ondataavailable?.({
+      data: new Blob(['spoken words'], {type: 'audio/webm'}),
+    });
+    const onstop = this.onstop;
+    if (FakeRecorder.holdStop) {
+      FakeRecorder.pendingStops.push(onstop);
+    } else {
+      queueMicrotask(() => onstop?.());
+    }
+  }
+
+  static releaseStops(): void {
+    const pending = FakeRecorder.pendingStops.splice(0);
+    for (const callback of pending) callback?.();
+  }
+}
+
+describe('DictationControl', () => {
+  let fixture: ComponentFixture<DictationHost>;
+  let host: DictationHost;
+  let control: DictationControl;
+  let http: HttpTestingController;
+  let track: FakeTrack;
+  let getUserMedia: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    track = new FakeTrack();
+    FakeRecorder.isTypeSupported.mockReturnValue(true);
+    getUserMedia = vi.fn().mockResolvedValue({
+      getTracks: () => [track],
+    });
+    vi.stubGlobal('MediaRecorder', FakeRecorder);
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {getUserMedia},
+    });
+    await AngularTestBed.configureTestingModule({
+      imports: [DictationHost],
+      providers: [
+        DictationService,
+        provideRouter([]),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+      ],
+    }).compileComponents();
+    fixture = AngularTestBed.createComponent(DictationHost);
+    host = fixture.componentInstance;
+    fixture.detectChanges();
+    control = host.control;
+    http = AngularTestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => {
+    FakeRecorder.holdStop = false;
+    FakeRecorder.releaseStops();
+    fixture.destroy();
+    http.verify();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  async function record(): Promise<
+    ReturnType<HttpTestingController['expectOne']>
+  > {
+    control.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(control.isRecording()).toBe(true);
+    control.stop();
+    await Promise.resolve();
+    await Promise.resolve();
+    return http.expectOne('/api/transcribe');
+  }
+
+  it('appends the returned transcript through valueChange without submitting', async () => {
+    const request = await record();
+
+    expect(request.request.body).toBeInstanceOf(FormData);
+    expect((request.request.body as FormData).getAll('audio')).toHaveLength(1);
+    expect(
+      (request.request.body as FormData).getAll('audio')[0],
+    ).toBeInstanceOf(Blob);
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+
+    expect(host.value).toBe('Existing\nspoken words');
+    expect(host.submitted).toBe(0);
+    expect(control.canUndo()).toBe(true);
+    expect(fixture.nativeElement.textContent).not.toContain('Retry');
+
+    control.undo();
+    expect(host.value).toBe('Existing');
+    expect(control.canUndo()).toBe(false);
+  });
+
+  it('shows the transcription error without exposing a Retry action', async () => {
+    const request = await record();
+    request.flush(
+      {error: 'busy', code: 'quota'},
+      {status: 429, statusText: 'Too Many Requests'},
+    );
+    fixture.detectChanges();
+    expect(control.state().status).toBe('error');
+    expect(fixture.nativeElement.textContent).toContain('Transcription failed');
+    expect(fixture.nativeElement.textContent).not.toContain('Retry');
+  });
+
+  it('keeps an overflowing transcript in review without exposing Retry', async () => {
+    host.maxChars = 'Existing'.length;
+    fixture.componentRef.changeDetectorRef.detectChanges();
+    const request = await record();
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+
+    expect(host.value).toBe('Existing');
+    expect(fixture.nativeElement.textContent).toContain('Shorten it');
+    expect(fixture.nativeElement.textContent).not.toContain('Retry');
+  });
+
+  it('cancels the HTTP request and microphone tracks when the control is destroyed', async () => {
+    const request = await record();
+    fixture.destroy();
+
+    expect(request.cancelled).toBe(true);
+    expect(track.stopped).toBe(true);
+  });
+
+  it('cancels a pending POST when the bound field is edited externally', async () => {
+    const request = await record();
+    host.value = 'Changed by typing';
+    host.revision++;
+    fixture.componentRef.changeDetectorRef.detectChanges();
+
+    expect(request.cancelled).toBe(true);
+    expect(host.value).toBe('Changed by typing');
+    http.expectNone('/api/transcribe');
+  });
+
+  it('keeps an inserted transcript when the field changes before Undo', async () => {
+    const request = await record();
+    request.flush({text: 'first transcript'});
+    fixture.detectChanges();
+    expect(host.value).toBe('Existing\nfirst transcript');
+
+    host.value = 'Existing\nfirst transcript plus an edit';
+    host.revision++;
+    fixture.componentRef.changeDetectorRef.detectChanges();
+    control.undo();
+
+    expect(host.value).toBe('Existing\nfirst transcript plus an edit');
+    expect(control.canUndo()).toBe(false);
+    expect(http.match('/api/transcribe')).toHaveLength(0);
+  });
+
+  it('stops a late permission stream after Cancel without posting audio', async () => {
+    let resolvePermission!: (stream: {getTracks: () => FakeTrack[]}) => void;
+    getUserMedia.mockImplementation(
+      () =>
+        new Promise(resolve => {
+          resolvePermission = resolve;
+        }),
+    );
+    control.start();
+    await Promise.resolve();
+    expect(control.state().status).toBe('permission');
+    control.cancel();
+
+    const lateTrack = new FakeTrack();
+    resolvePermission({getTracks: () => [lateTrack]});
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(lateTrack.stopped).toBe(true);
+    http.expectNone('/api/transcribe');
+  });
+
+  it('ignores a stale delayed Stop while a newer recording is live', async () => {
+    const oldTrack = new FakeTrack();
+    const newTrack = new FakeTrack();
+    let permissionCalls = 0;
+    getUserMedia.mockImplementation(() =>
+      Promise.resolve({
+        getTracks: () => [permissionCalls++ === 0 ? oldTrack : newTrack],
+      }),
+    );
+    FakeRecorder.holdStop = true;
+    control.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(control.isRecording()).toBe(true);
+
+    control.stop();
+    control.cancel();
+    control.start();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(control.isRecording()).toBe(true);
+    expect(oldTrack.stopped).toBe(true);
+    FakeRecorder.releaseStops();
+    expect(newTrack.stopped).toBe(false);
+    expect(control.isRecording()).toBe(true);
+    FakeRecorder.holdStop = false;
+    control.cancel();
+    http.expectNone('/api/transcribe');
+  });
+
+  it('reports unsupported formats instead of falling back to an unconfigured recorder', async () => {
+    FakeRecorder.isTypeSupported.mockReturnValue(false);
+    control.start();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(control.state().status).toBe('error');
+    expect(control.state().code).toBe('unsupported_format');
+    expect(track.stopped).toBe(true);
+    http.expectNone('/api/transcribe');
+  });
+
+  it('uses the smaller product field cap when server config allows 120 seconds', async () => {
+    host.maxDurationSeconds = 30;
+    host.audioConfig = {
+      enabled: true,
+      maxAudioBytes: 4 * 1024 * 1024,
+      maxDurationSeconds: 120,
+      mimeTypes: DICTATION_MIME_TYPES,
+    };
+    fixture.componentRef.changeDetectorRef.detectChanges();
+    vi.useFakeTimers();
+    control.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(control.isRecording()).toBe(true);
+
+    vi.advanceTimersByTime(30_001);
+    await Promise.resolve();
+    await Promise.resolve();
+    http.expectOne('/api/transcribe');
+  });
+
+  it('invalidates Undo recovery on navigation, including a later A-to-B-to-A return', async () => {
+    const request = await record();
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+    expect(control.canUndo()).toBe(true);
+
+    const router = AngularTestBed.inject(Router);
+    await router.navigateByUrl('/project-b').catch(() => false);
+    fixture.detectChanges();
+
+    expect(control.canUndo()).toBe(false);
+    expect(host.value).toBe('Existing\nspoken words');
+  });
+});
