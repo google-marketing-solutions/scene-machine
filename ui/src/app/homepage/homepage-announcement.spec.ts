@@ -20,6 +20,8 @@ import {
   provideHttpClientTesting,
 } from '@angular/common/http/testing';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
+import {MatDialog} from '@angular/material/dialog';
+import {firstValueFrom} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it} from 'vitest';
 import {HomepageAnnouncement} from './homepage-announcement';
 
@@ -90,6 +92,49 @@ describe('HomepageAnnouncement', () => {
     expect(region.querySelector('a')?.getAttribute('aria-label')).toContain(
       'help center (opens in new tab)',
     );
+  });
+
+  it('opens the full wrapping announcement dialog from a keyboard-accessible button', async () => {
+    const expectedText = 'A long announcement '.repeat(10).trim();
+    http.expectOne('/api/announcement').flush({
+      announcement: {
+        id: 'long-v1',
+        markdown: `${expectedText} [read more](https://example.com)`,
+        emoji: '',
+      },
+    });
+    fixture.detectChanges();
+
+    const region = fixture.nativeElement.querySelector('[role="region"]');
+    const moreButton = region.querySelector(
+      'button[aria-label="Read full announcement"]',
+    ) as HTMLButtonElement;
+    expect(moreButton).not.toBeNull();
+    expect(moreButton.tabIndex).toBe(0);
+    moreButton.focus();
+    expect(document.activeElement).toBe(moreButton);
+    moreButton.click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(
+      dialog?.querySelector('.announcement-dialog-content')?.textContent,
+    ).toContain(expectedText);
+    expect(
+      dialog
+        ?.querySelector('.announcement-dialog-content a')
+        ?.getAttribute('href'),
+    ).toBe('https://example.com');
+    const closeButton = [...(dialog?.querySelectorAll('button') ?? [])].find(
+      button => button.textContent?.trim() === 'Close',
+    ) as HTMLButtonElement;
+    expect(closeButton).not.toBeUndefined();
+    const dialogRef = TestBed.inject(MatDialog).openDialogs[0];
+    const closed = firstValueFrom(dialogRef.afterClosed());
+    closeButton.click();
+    await closed;
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it('filters emoji clusters, preserves complex clusters, and caps at three', () => {
@@ -238,7 +283,9 @@ describe('HomepageAnnouncement', () => {
       announcement: {id: welcomeId, markdown: 'Welcome'},
     });
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button').click();
+    fixture.nativeElement
+      .querySelector('button[aria-label="Dismiss this announcement"]')
+      .click();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('[role="region"]')).toBeNull();
     expect(storage.getItem('scene-machine:last-dismissed-announcement')).toBe(
@@ -263,7 +310,9 @@ describe('HomepageAnnouncement', () => {
       announcement: {id: welcomeId, markdown: 'Welcome'},
     });
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button').click();
+    fixture.nativeElement
+      .querySelector('button[aria-label="Dismiss this announcement"]')
+      .click();
     fixture.destroy();
 
     fixture = TestBed.createComponent(HomepageAnnouncement);
@@ -283,7 +332,9 @@ describe('HomepageAnnouncement', () => {
       announcement: {id: 'blocked-write', markdown: 'Welcome'},
     });
     fixture.detectChanges();
-    fixture.nativeElement.querySelector('button').click();
+    fixture.nativeElement
+      .querySelector('button[aria-label="Dismiss this announcement"]')
+      .click();
     fixture.detectChanges();
     expect(fixture.nativeElement.querySelector('[role="region"]')).toBeNull();
   });

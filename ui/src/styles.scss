@@ -120,6 +120,12 @@ body {
   font-family: Roboto, 'Helvetica Neue', sans-serif;
 }
 
+.announcement-dialog-content a {
+  color: var(--mat-sys-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .loading-state {
   display: flex;
   flex-direction: column;

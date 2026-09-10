@@ -86,11 +86,14 @@ _WORKER_URL = os.environ.get('WORKER_URL')
 _IAP_AUDIENCE = os.environ.get('IAP_AUDIENCE')
 _FIRESTORE_DB_UI = os.environ.get('FIRESTORE_DB_UI')
 _MAX_ANNOUNCEMENT_MARKDOWN = 255
+_MAX_ANNOUNCEMENT_EMOJI_CODE_POINTS = 128
 _DEFAULT_ANNOUNCEMENT_EMOJI = '⚠️'
 
 
 def _announcement_emoji(raw: object) -> str:
-  return raw if isinstance(raw, str) else _DEFAULT_ANNOUNCEMENT_EMOJI
+  if not isinstance(raw, str) or len(raw) > _MAX_ANNOUNCEMENT_EMOJI_CODE_POINTS:
+    return _DEFAULT_ANNOUNCEMENT_EMOJI
+  return '' if raw.strip() == '' else raw
 
 # DEV-ONLY: run backend actions in-process via the threaded execution path
 # instead of scheduling Cloud Tasks (orchestrator.supply_node(data, None)).

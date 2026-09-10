@@ -21,6 +21,16 @@
     }
     <div class="announcement-content" [innerHTML]="renderedMarkdown()"></div>
     <button
+      class="announcement-more"
+      mat-icon-button
+      type="button"
+      aria-label="Read full announcement"
+      title="Read full announcement"
+      (click)="openFullAnnouncement()"
+    >
+      <mat-icon aria-hidden="true">more_horiz</mat-icon>
+    </button>
+    <button
       mat-icon-button
       type="button"
       aria-label="Dismiss this announcement"
@@ -31,3 +41,13 @@
     </button>
   </section>
 }
+
+<ng-template #announcementDialog>
+  <h2 mat-dialog-title>Announcement</h2>
+  <mat-dialog-content class="announcement-dialog-content">
+    <div [innerHTML]="renderedMarkdown()"></div>
+  </mat-dialog-content>
+  <div mat-dialog-actions align="end">
+    <button mat-button mat-dialog-close>Close</button>
+  </div>
+</ng-template>

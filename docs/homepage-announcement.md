@@ -5,7 +5,8 @@ the homepage. An administrator can publish a short welcome, release note, or
 help link without changing application code. Each browser profile can dismiss
 the current content locally.
 
-This is a single dismissible banner, not an inbox, modal, toast, scheduler,
+This is a single dismissible banner, not an inbox, automatically opening modal,
+toast, scheduler,
 targeting system, or mandatory acknowledgement.
 
 ## What users see
@@ -13,6 +14,9 @@ targeting system, or mandatory acknowledgement.
 - The banner spans the top of the homepage above the hero content.
 - It is one compact, non-wrapping row with the configured decorative emoji,
   inline Markdown, and a close button.
+- On narrow screens, use the `Read full announcement` control to open the
+  complete wrapped announcement and its `Close` button; the compact banner
+  remains a single line.
 - Long rendered content is clipped with an ellipsis; the close control remains
   available. Authored line breaks become spaces for display, but remain part of
   the raw content used for the publication ID.
@@ -44,6 +48,9 @@ emoji grapheme clusters, including flags, skin-tone combinations, ZWJ families,
 and keycaps, and ignores surrounding non-emoji text. Emoji changes do not alter
 the announcement identity because identity is based only on raw Markdown.
 A non-blank string with no recognized emoji falls back to `⚠️`.
+The raw `emoji` field accepts at most 128 Unicode code points on the wire;
+oversized values fall back to `⚠️`. The browser still displays at most three whole emoji
+grapheme clusters from an accepted value.
 
 Examples of valid administrator-authored Markdown:
 
