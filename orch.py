@@ -730,7 +730,7 @@ def _json_error(message: str, status: int) -> flask_response:
   return _json_response({'error': message}, status=status)
 
 
-def _dictation_response(payload, status: int = 200) -> flask_response:
+def _dictation_response(payload: object, status: int = 200) -> flask_response:
   """Builds a non-cacheable response for the transient dictation API."""
   response = _json_response(payload, status)
   response.headers['Cache-Control'] = 'no-store'

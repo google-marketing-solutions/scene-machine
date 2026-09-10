@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 _ANNOTATION = 'run.googleapis.com/urls'
 
 
-def _decode_urls(value):
+def _decode_urls(value: object) -> list[str]:
   if not isinstance(value, str):
     raise ValueError('Cloud Run URL annotation is not a JSON string')
   try:

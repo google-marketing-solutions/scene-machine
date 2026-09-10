@@ -55,7 +55,7 @@ class TranscriptionError(Exception):
     self.message = message
 
 
-def _enum_value(value):
+def _enum_value(value: object) -> str | None:
   """Returns a stable enum value without exposing provider detail."""
   value = getattr(value, 'value', value)
   return value if isinstance(value, str) else None
