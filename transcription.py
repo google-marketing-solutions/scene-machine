@@ -37,6 +37,7 @@ MIME_TYPES = (
     'audio/ogg;codecs=opus',
     'audio/wav',
 )
+DICTATION_MODES = ('SMART', 'VERBATIM')
 
 # Keep normalized output below the request/audio cap. Decoded frames, not this
 # byte bound, are the source of truth for the 120-second duration check.
@@ -82,6 +83,16 @@ def enabled() -> bool:
   return os.environ.get('DICTATION_ENABLED', '1').strip().lower() in (
       '1', 'true', 'yes'
   )
+
+
+def configured_mode() -> str:
+  """Returns the validated provider transcription mode."""
+  value = os.environ.get('DICTATION_MODE', 'SMART')
+  if value not in DICTATION_MODES:
+    raise TranscriptionError(
+        'invalid_dictation_mode', 503, 'Transcription mode is not configured'
+    )
+  return value
 
 
 def _remaining(deadline: float) -> float:
@@ -399,7 +410,8 @@ def parse_response(response: Any) -> str:
 
 
 def transcribe(audio_wav: bytes, project: str) -> str:
-  """Makes exactly one VERBATIM Gemini transcription request."""
+  """Makes exactly one Gemini transcription request in the configured mode."""
+  selected_mode = configured_mode()
   if not project:
     raise TranscriptionError(
         'provider_not_configured', 503, 'Transcription is not configured'
@@ -414,7 +426,7 @@ def transcribe(audio_wav: bytes, project: str) -> str:
           ],
           config=types.GenerateContentConfig(
               audio_transcription_config=types.AudioTranscriptionConfig(
-                  mode='VERBATIM'
+                  mode=selected_mode
               )
           ),
       )

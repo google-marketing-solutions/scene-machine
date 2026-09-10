@@ -19,6 +19,14 @@ The UI reads this capability from the backend; there is no separate frontend
 feature flag. Recording starts only after the user clicks the microphone and
 grants browser permission. Transcribed text remains editable before submission.
 
+The backend defaults to Gemini's `SMART` mode, which removes fillers, formats
+text and applies spoken self-corrections. Review the result before submitting.
+For word-for-word transcription, set `export DICTATION_MODE=VERBATIM` in
+`config.txt` and redeploy, or set it in the local backend process environment.
+The only accepted values are `SMART` and `VERBATIM` (uppercase). An omitted
+mode defaults to `SMART`; empty or invalid values are rejected. There is no
+separate frontend mode setting.
+
 To opt out, set `export DICTATION_ENABLED=0` in the repository's `config.txt`
 and deploy or redeploy. For local development, set `DICTATION_ENABLED=0` in
 the backend process environment. Existing explicit `0` settings remain disabled;

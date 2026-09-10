@@ -130,12 +130,22 @@ validation accepts only `0` or `1`. Set `export DICTATION_ENABLED=0` in
 `0` values are preserved. The flag is passed to the app service only, never
 to the worker; the UI reads the capability from `/api/config`.
 The backend uses the fixed `gemini-3.5-transcribe-preview` model in `global`
-with verbatim transcription; there is no runtime model picker or fallback.
+with `SMART` transcription by default; there is no runtime model picker or
+fallback. Set `export DICTATION_MODE=VERBATIM` in `config.txt` for word-for-word
+transcription, or `SMART` for filler removal, formatting and spoken
+self-corrections. These are the only accepted values (uppercase); omission
+defaults to `SMART`, while empty or invalid values fail validation. Keep
+`VERBATIM` explicit in `config.txt` to retain it on redeploy; deployment
+replaces any previous Cloud Run mode with this value.
+The mode is passed only to the app service,
+and invalid runtime configuration is rejected before a provider call.
 
 For local endpoint testing, use the existing `DEV` procedure above. The
 backend also enables dictation when the variable is absent; set
-`DICTATION_ENABLED=0` in that process to opt out. Recording requires a user
-click and browser microphone permission. Transcription uses the configured
+`DICTATION_ENABLED=0` in that process to opt out. Set `DICTATION_MODE` in the
+same backend process environment to override the default mode locally.
+Recording requires a user click and browser microphone permission.
+Transcription uses the configured
 Google Cloud project, requires access to the preview model and can incur
 model charges and consume quota. Verify browser/provider behavior on your
 instance before sharing it with users. Recordings are
