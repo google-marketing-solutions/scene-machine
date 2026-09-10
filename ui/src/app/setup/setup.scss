@@ -916,11 +916,20 @@
       .product-accordion {
         min-width: 0;
 
-        ::ng-deep .mat-expansion-panel-content {
-          .mat-expansion-panel-body {
-            .product-content-split {
-              grid-template-columns: minmax(0, 1fr);
-              gap: 16px;
+        mat-expansion-panel {
+          min-width: 0;
+
+          ::ng-deep .mat-expansion-panel-content {
+            .mat-expansion-panel-body {
+              .product-content-split {
+                grid-template-columns: minmax(0, 1fr);
+                gap: 16px;
+
+                .left-part,
+                .right-part {
+                  min-width: 0;
+                }
+              }
             }
           }
         }
