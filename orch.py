@@ -1032,6 +1032,7 @@ def announcement_handler() -> flask_response:
     if (
         raw.get('enabled') is not True
         or not isinstance(markdown, str)
+        or not markdown.strip()
         or not 0 < len(markdown) <= _MAX_ANNOUNCEMENT_MARKDOWN
     ):
       return response

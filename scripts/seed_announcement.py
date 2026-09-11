@@ -81,7 +81,7 @@ def seed_document(
     status = error.code
   except urllib.error.URLError as error:
     raise RuntimeError(f'announcement seed request failed: {error.reason}') from error
-  if status not in (200, 409):
+  if status not in (200, 201, 409):
     raise RuntimeError(f'announcement seed request returned HTTP {status}')
   return status
 

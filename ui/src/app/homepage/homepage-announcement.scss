@@ -20,7 +20,7 @@
   align-items: center;
   gap: 12px;
   overflow: hidden;
-  color: #fff;
+  color: var(--mat-sys-on-primary);
   background: var(--mat-sys-primary);
   color-scheme: light;
 }
@@ -53,12 +53,12 @@
 }
 
 :host ::ng-deep .announcement-content a {
-  color: #fff;
+  color: var(--mat-sys-on-primary);
   text-decoration: underline;
   text-underline-offset: 2px;
 
   &:focus-visible {
-    outline: 2px solid #fff;
+    outline: 2px solid var(--mat-sys-on-primary);
     outline-offset: -2px;
   }
 }
@@ -67,7 +67,7 @@
   flex: 0 0 48px;
   width: 48px;
   height: 48px;
-  color: #fff;
+  color: var(--mat-sys-on-primary);
 }
 
 .announcement-more {
@@ -80,6 +80,6 @@
 }
 
 :host .announcement button:focus-visible {
-  outline: 2px solid #fff;
+  outline: 2px solid var(--mat-sys-on-primary);
   outline-offset: -2px;
 }
