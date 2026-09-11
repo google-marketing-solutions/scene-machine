@@ -40,6 +40,7 @@ import {
 } from '../services/config/config';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {MediaService} from '../services/media/media';
+import {CandidateVideoCacheService} from '../services/media/candidate-video-cache';
 import {EditCandidateDialog} from './edit-candidate-dialog';
 import {Storyboard} from './storyboard';
 
@@ -223,6 +224,34 @@ describe('Storyboard', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('invalidates a candidate cache entry when archiving', () => {
+    const candidate: Candidate = {
+      runNumber: 1,
+      durationSeconds: 4,
+      model: 'veo-1',
+      prompt: 'candidate',
+      generateAudio: true,
+      resolution: '1080p',
+      video: {path: 'candidate-path', url: 'candidate-url'},
+    };
+    const scene: GeneratedScene = {
+      id: 'archive-scene',
+      type: 'generated',
+      name: 'Archive scene',
+      prompt: 'scene',
+      candidates: [candidate],
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    fixture.detectChanges();
+    const cache = TestBed.inject(CandidateVideoCacheService);
+    const invalidate = vi.spyOn(cache, 'invalidateCandidate');
+
+    component.toggleArchive(new Event('click'), scene, 0);
+
+    expect(invalidate).toHaveBeenCalledWith('test-id', 'candidate-path');
+    invalidate.mockRestore();
   });
 
   it('moves a candidate and focuses the destination without reselecting it', () => {

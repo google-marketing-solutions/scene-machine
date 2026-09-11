@@ -166,10 +166,7 @@
         </button>
       </div>
 
-      <div
-        class="storyboard-columns"
-        [style.--storyboard-left-track]="sidebarTrackWidth() + 'px'"
-      >
+      <div class="storyboard-columns" [style.--storyboard-left-track]="sidebarTrackWidth() + 'px'">
         @if (selectedScene(); as scene) {
           <!-- Left Column: Scene List -->
           <div class="column left-sidebar" [class.collapsed]="sidebarCollapsed()">
@@ -360,15 +357,15 @@
                                 }
 
                                 <video
-                                  #videoPlayer
-                                  [src]="candidate.video | mediaSrc"
+                                  [appCandidateVideo]="candidate.video"
+                                  [candidateVideoCacheScope]="candidateCacheScope()"
+                                  [candidateVideoPersist]="!candidate.isArchived"
+                                  [candidateVideoHover]="true"
                                   [muted]="true"
                                   alt="Candidate Preview"
                                   loop
                                   matTooltip="Preview: 2x speed"
                                   matTooltipPosition="left"
-                                  (mouseenter)="videoPlayer.playbackRate = 2; videoPlayer.play()"
-                                  (mouseleave)="videoPlayer.pause(); videoPlayer.currentTime = 0"
                                 ></video>
                               </div>
                               <div class="video-info">
@@ -493,21 +490,15 @@
                                   }
 
                                   <video
-                                    #archivedVideoPlayer
-                                    [src]="candidate.video | mediaSrc"
+                                    [appCandidateVideo]="candidate.video"
+                                    [candidateVideoCacheScope]="candidateCacheScope()"
+                                    [candidateVideoPersist]="false"
+                                    [candidateVideoHover]="true"
                                     [muted]="true"
                                     alt="Archived Candidate Preview"
                                     loop
                                     matTooltip="Preview: 2x speed"
                                     matTooltipPosition="left"
-                                    (mouseenter)="
-                                      archivedVideoPlayer.playbackRate = 2;
-                                      archivedVideoPlayer.play()
-                                    "
-                                    (mouseleave)="
-                                      archivedVideoPlayer.pause();
-                                      archivedVideoPlayer.currentTime = 0
-                                    "
                                   ></video>
                                 </div>
                                 <div class="video-info">
@@ -564,7 +555,10 @@
                   <div class="video-container" [style.aspect-ratio]="previewAspectRatio()">
                     <video
                       #mainVideo
-                      [src]="candidate.video | mediaSrc"
+                      #candidateVideo="appCandidateVideo"
+                      [appCandidateVideo]="candidate.video"
+                      [candidateVideoCacheScope]="candidateCacheScope()"
+                      [candidateVideoPersist]="!candidate.isArchived"
                       (timeupdate)="onVideoTimeUpdate()"
                       (loadedmetadata)="onVideoLoadedMetadata()"
                       (ended)="onVideoEnded()"
@@ -573,6 +567,9 @@
                       [volume]="videoVolume()"
                       [loop]="isVideoPlaying()"
                     ></video>
+                    @if (candidateVideo.loading()) {
+                      <mat-spinner class="candidate-video-loading" diameter="24"></mat-spinner>
+                    }
 
                     <div class="video-overlay" (click)="toggleVideoPlay()">
                       <div class="video-controls" (click)="$event.stopPropagation()">
@@ -837,11 +834,7 @@
                       [audioConfig]="dictationConfig()"
                       [value]="scene.prompt || ''"
                       [revision]="scenePromptRevision(scene.id)"
-                      [ownerKey]="
-                        config.projectConfig.value().id +
-                        ':scene:' +
-                        scene.id
-                      "
+                      [ownerKey]="config.projectConfig.value().id + ':scene:' + scene.id"
                       [textarea]="scenePromptInput"
                       (valueChange)="updateScenePrompt(scene, $event)"
                     ></app-dictation-control>

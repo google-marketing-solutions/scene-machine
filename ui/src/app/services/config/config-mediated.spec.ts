@@ -23,11 +23,13 @@ import {Router} from '@angular/router';
 import {of, Subject, throwError} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ConfigService} from './config';
+import {CandidateVideoCacheService} from '../media/candidate-video-cache';
 
 describe('ConfigService (mediated data plane)', () => {
   let service: ConfigService;
   let httpClientMock: any;
   let matSnackBarMock: any;
+  let candidateVideoCacheMock: any;
 
   function saveRequestCount() {
     return (
@@ -52,6 +54,9 @@ describe('ConfigService (mediated data plane)', () => {
     };
     matSnackBarMock = {
       open: vi.fn().mockReturnValue({onAction: () => of()}),
+    };
+    candidateVideoCacheMock = {
+      invalidateProject: vi.fn().mockResolvedValue(undefined),
     };
     const routerMock = {navigate: vi.fn()};
     const documentMock = {
@@ -81,6 +86,10 @@ describe('ConfigService (mediated data plane)', () => {
         {provide: MatSnackBar, useValue: matSnackBarMock},
         {provide: Router, useValue: routerMock},
         {provide: DOCUMENT, useValue: documentMock},
+        {
+          provide: CandidateVideoCacheService,
+          useValue: candidateVideoCacheMock,
+        },
       ],
     });
     service = TestBed.inject(ConfigService);
@@ -790,6 +799,24 @@ describe('ConfigService (mediated data plane)', () => {
       await service.deleteProject('proj-1');
 
       expect((service as any).projectSaveStates.has('proj-1')).toBe(false);
+    });
+
+    it('invalidates the project cache only after a successful deletion', async () => {
+      await service.deleteProject('proj-1');
+      expect(candidateVideoCacheMock.invalidateProject).toHaveBeenCalledWith(
+        'proj-1',
+      );
+
+      candidateVideoCacheMock.invalidateProject.mockClear();
+      httpClientMock.delete.mockReturnValueOnce(
+        throwError(() => new Error('delete failed')),
+      );
+      await expect(service.deleteProject('proj-2')).rejects.toThrow(
+        'delete failed',
+      );
+      expect(
+        candidateVideoCacheMock.invalidateProject,
+      ).not.toHaveBeenCalled();
     });
   });
 
