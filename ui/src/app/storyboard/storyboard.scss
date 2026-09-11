@@ -1039,14 +1039,32 @@
 
             @container (max-width: 320px) {
               .generated-controls-row {
+                display: grid;
+                grid-template-columns: 40px minmax(0, 1fr) 40px 40px;
                 gap: 4px;
+
+                > button:first-child {
+                  grid-column: 1;
+                  grid-row: 2;
+                }
+
+                > .volume-controls {
+                  grid-column: 3;
+                  grid-row: 2;
+                }
+
+                > button:last-child {
+                  grid-column: 4;
+                  grid-row: 2;
+                }
 
                 .time-group {
                   display: none;
                 }
 
                 .timeline-container {
-                  flex: 1 1 0;
+                  grid-column: 1 / -1;
+                  grid-row: 1;
                   min-width: 0;
                 }
 
