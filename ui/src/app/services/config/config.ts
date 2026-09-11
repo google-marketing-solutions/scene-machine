@@ -27,6 +27,7 @@ import {
 import {toObservable} from '@angular/core/rxjs-interop';
 import {MatSnackBar} from '@angular/material/snack-bar';
 import {Router} from '@angular/router';
+import {CandidateVideoCacheService} from '../media/candidate-video-cache';
 import {debounceTime, distinctUntilChanged, firstValueFrom, skip} from 'rxjs';
 
 /**
@@ -599,6 +600,7 @@ export class ConfigService {
   );
   private httpClient = inject(HttpClient);
   private matSnackBar = inject(MatSnackBar);
+  private candidateVideoCache = inject(CandidateVideoCacheService);
   private router = inject(Router);
   private document = inject(DOCUMENT);
   private projectId = signal<string | null>(null);
@@ -1439,5 +1441,6 @@ export class ConfigService {
     this.persistedProjectIds.delete(projectId);
     this.projectSaveStates.delete(projectId);
     await firstValueFrom(this.httpClient.delete(`/api/projects/${projectId}`));
+    await this.candidateVideoCache.invalidateProject(projectId);
   }
 }
