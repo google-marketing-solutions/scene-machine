@@ -222,6 +222,7 @@
                       @if (scene.candidates) {
                         @for (candidate of scene.candidates; track candidate.video?.url) {
                           @if (!candidate.isArchived) {
+                            @let candidateIndex = $index;
                             <div
                               class="video-item"
                               (click)="selectCandidate(scene, $index)"
@@ -255,6 +256,70 @@
                                 >
                                   <mat-icon>archive</mat-icon>
                                 </button>
+                                <button
+                                  mat-icon-button
+                                  class="move-btn"
+                                  type="button"
+                                  [disabled]="
+                                    areCandidatesGenerating(scene.id) ||
+                                    !!scene.pendingGeneration ||
+                                    !candidate.video?.path ||
+                                    !!candidate.errorMessage
+                                  "
+                                  [matMenuTriggerFor]="moveMenu"
+                                  aria-label="Move candidate to another scene"
+                                  matTooltip="Move to another scene"
+                                  (menuOpened)="prepareMoveCandidate(scene, candidateIndex)"
+                                  (click)="$event.stopPropagation()"
+                                >
+                                  <mat-icon>drive_file_move</mat-icon>
+                                </button>
+                                <mat-menu #moveMenu="matMenu">
+                                  <ng-template matMenuContent>
+                                    <button
+                                      mat-menu-item
+                                      (click)="
+                                        movePreparedCandidate($event, {
+                                          kind: 'new-after-source',
+                                          id: config.sceneIdCounter().toString(),
+                                        })
+                                      "
+                                    >
+                                      Move to new scene
+                                    </button>
+                                    @for (
+                                      destination of config.projectConfig.value().storyboard;
+                                      track destination.id
+                                    ) {
+                                      @if (
+                                        destination.id !== scene.id &&
+                                        config.isGeneratedScene(destination)
+                                      ) {
+                                        <button
+                                          mat-menu-item
+                                          [disabled]="
+                                            areCandidatesGenerating(destination.id) ||
+                                            !!destination.pendingGeneration
+                                          "
+                                          [matTooltip]="
+                                            areCandidatesGenerating(destination.id) ||
+                                            destination.pendingGeneration
+                                              ? 'Cannot move while this scene is generating'
+                                              : ''
+                                          "
+                                          (click)="
+                                            movePreparedCandidate($event, {
+                                              kind: 'existing',
+                                              sceneId: destination.id,
+                                            })
+                                          "
+                                        >
+                                          Move to {{ destination.name }}
+                                        </button>
+                                      }
+                                    }
+                                  </ng-template>
+                                </mat-menu>
 
                                 @let thumb = getThumbnailData(candidate);
                                 <!-- 1. Low quality image -->
