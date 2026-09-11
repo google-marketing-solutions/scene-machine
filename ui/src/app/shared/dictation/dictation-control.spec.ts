@@ -81,6 +81,7 @@ class FakeRecorder {
   static isTypeSupported = vi.fn(() => true);
   static holdStop = false;
   static pendingStops: Array<(() => void) | null> = [];
+  static last: FakeRecorder | undefined;
   state: 'inactive' | 'recording' = 'inactive';
   ondataavailable: ((event: {data: Blob}) => void) | null = null;
   onstop: (() => void) | null = null;
@@ -89,7 +90,9 @@ class FakeRecorder {
   constructor(
     readonly stream: unknown,
     readonly options?: {mimeType?: string},
-  ) {}
+  ) {
+    FakeRecorder.last = this;
+  }
 
   start(): void {
     this.state = 'recording';
@@ -153,6 +156,7 @@ describe('DictationControl', () => {
   afterEach(() => {
     FakeRecorder.holdStop = false;
     FakeRecorder.releaseStops();
+    FakeRecorder.last = undefined;
     fixture.destroy();
     http.verify();
     vi.useRealTimers();
@@ -283,6 +287,53 @@ describe('DictationControl', () => {
     ).toBeNull();
   });
 
+  it('shows a recording overflow error before a deferred recorder stop', async () => {
+    host.audioConfig = {
+      enabled: true,
+      maxAudioBytes: 1,
+      maxDurationSeconds: 120,
+      mimeTypes: DICTATION_MIME_TYPES,
+    };
+    fixture.componentRef.changeDetectorRef.detectChanges();
+    FakeRecorder.holdStop = true;
+    control.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(control.isRecording()).toBe(true);
+
+    control.stop();
+    fixture.detectChanges();
+
+    expect(control.state().status).toBe('overflow');
+    expect(fixture.nativeElement.textContent).toContain(
+      'Recording exceeded the 4 MiB audio limit.',
+    );
+    FakeRecorder.releaseStops();
+    fixture.detectChanges();
+    expect(control.state().status).toBe('overflow');
+    http.expectNone('/api/transcribe');
+  });
+
+  it('keeps a recording failure visible before a deferred recorder stop', async () => {
+    FakeRecorder.holdStop = true;
+    vi.useFakeTimers();
+    control.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(control.isRecording()).toBe(true);
+
+    FakeRecorder.last?.onerror?.();
+    fixture.detectChanges();
+    expect(control.state().status).toBe('error');
+    expect(fixture.nativeElement.textContent).toContain(
+      'Recording failed. Please try again.',
+    );
+    vi.advanceTimersByTime(1000);
+    expect(control.state().status).toBe('error');
+    FakeRecorder.releaseStops();
+    http.expectNone('/api/transcribe');
+  });
+
   it('keeps an overflowing transcript in review without exposing Retry', async () => {
     host.maxChars = 'Existing'.length;
     fixture.componentRef.changeDetectorRef.detectChanges();
@@ -393,6 +444,37 @@ describe('DictationControl', () => {
     expect(control.state().code).toBe('unsupported_format');
     expect(track.stopped).toBe(true);
     http.expectNone('/api/transcribe');
+  });
+
+  it('reports a useful error when MediaRecorder is unavailable after permission', async () => {
+    vi.stubGlobal('MediaRecorder', undefined);
+    control.start();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(control.state().status).toBe('error');
+    expect(control.state().code).toBe('unsupported_format');
+    expect(control.state().error).toContain('allowed audio format');
+    expect(track.stopped).toBe(true);
+    http.expectNone('/api/transcribe');
+  });
+
+  it('clears the timer before a deferred recorder stop', async () => {
+    FakeRecorder.holdStop = true;
+    vi.useFakeTimers();
+    control.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(control.isRecording()).toBe(true);
+
+    control.stop();
+    expect(control.state().status).toBe('transcribing');
+    vi.advanceTimersByTime(1000);
+    expect(control.state().status).toBe('transcribing');
+
+    FakeRecorder.releaseStops();
+    const request = http.expectOne('/api/transcribe');
+    request.flush({text: 'spoken words'});
   });
 
   it('uses the smaller product field cap when server config allows 120 seconds', async () => {

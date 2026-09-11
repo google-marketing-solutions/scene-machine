@@ -196,6 +196,7 @@ export class DictationService {
       return;
     }
     if (this.recorder.state === 'recording') {
+      this.clearTimer();
       this.setState({
         status: 'transcribing',
         owner,
@@ -236,7 +237,12 @@ export class DictationService {
   }
 
   private supportedMimeType(): string | undefined {
-    if (typeof MediaRecorder.isTypeSupported !== 'function') return undefined;
+    if (
+      typeof MediaRecorder === 'undefined' ||
+      typeof MediaRecorder.isTypeSupported !== 'function'
+    ) {
+      return undefined;
+    }
     return this.mimeTypes.find(type => MediaRecorder.isTypeSupported(type));
   }
 
@@ -245,6 +251,7 @@ export class DictationService {
     this.encodedBytes += chunk.size;
     if (this.encodedBytes > this.maxAudioBytes) {
       this.recordingTooLarge = true;
+      this.clearTimer();
       this.setState({
         status: 'overflow',
         owner: this.activeOwner,
@@ -384,6 +391,7 @@ export class DictationService {
     if (!owner) return;
     this.recordingFailed = true;
     const recorder = this.recorder;
+    this.clearTimer();
     this.setState({
       status: 'error',
       owner,

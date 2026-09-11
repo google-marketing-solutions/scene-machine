@@ -397,7 +397,7 @@ def test_dictation_mode_deploy_validation_executes_exact_allowlist(
       text,
   )
   assert match
-  block = match.group(1) + '\nprintf "%s\n" "$DICTATION_MODE"\n'
+  block = match.group(1) + '\nprintf "%s\\n" "$DICTATION_MODE"\n'
   environment = os.environ.copy()
   environment.pop('DICTATION_MODE', None)
   if value is not None:
