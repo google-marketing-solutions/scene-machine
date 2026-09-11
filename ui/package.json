@@ -37,12 +37,12 @@
     "@angular/cli": "^21.2.21",
     "@angular/compiler-cli": "^21.2.20",
     "@types/node": "^22.7.5",
-    "baseline-browser-mapping": "^2.10.10",
+    "baseline-browser-mapping": "^2.11.21",
     "gts": "^7.0.0",
     "jsdom": "^27.1.0",
     "prettier": "^3.8.1",
     "typescript": "~5.9.2",
-    "vitest": "^4.0.8"
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "external-editor": {
