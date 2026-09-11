@@ -107,7 +107,9 @@ def test_cli_enforces_subcommand_arity():
 
 
 @pytest.mark.parametrize(
-    'status, succeeds', [(200, True), (409, True), (401, False), (500, False)]
+    'status, succeeds', [
+        (200, True), (201, True), (409, True), (401, False), (403, False), (500, False)
+    ]
 )
 def test_seed_posts_safe_payload_and_only_accepts_create_or_conflict(
     monkeypatch, status, succeeds
@@ -131,7 +133,7 @@ def test_seed_posts_safe_payload_and_only_accepts_create_or_conflict(
     received['auth'] = request.headers['Authorization']
     received['body'] = json.loads(request.data)
     received['timeout'] = kwargs['timeout']
-    if status == 200:
+    if status in (200, 201):
       return Response()
     raise urllib.error.HTTPError(request.full_url, status, 'fake', {}, None)
 
@@ -151,7 +153,7 @@ def test_seed_posts_safe_payload_and_only_accepts_create_or_conflict(
   finally:
     message.unlink()
 
-  assert (result in (200, 409)) is succeeds
+  assert (result in (200, 201, 409)) is succeeds
   assert received == {
       'method': 'POST',
       'path': 'https://firestore.test/v1/projects/p/databases/db/documents/config?documentId=announcement',

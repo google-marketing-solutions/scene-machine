@@ -1142,6 +1142,7 @@ def test_announcement_returns_only_valid_enabled_document_and_no_store(
   for invalid in (
       {'id': 'welcome-v1', 'markdown': 'x', 'enabled': False},
       {'id': 'welcome-v1', 'markdown': '', 'enabled': True},
+      {'id': 'welcome-v1', 'markdown': '   \t\n', 'enabled': True},
       {'id': 'welcome-v1', 'markdown': 'x', 'enabled': 1},
       {'id': 'welcome-v1', 'markdown': 'x' * 256, 'enabled': True},
   ):

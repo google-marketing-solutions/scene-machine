@@ -118,6 +118,13 @@ describe('HomepageAnnouncement', () => {
     await fixture.whenStable();
 
     const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.getAttribute('aria-label')).toBeNull();
+    expect(dialog?.getAttribute('aria-labelledby')).toBe(
+      'announcement-dialog-title',
+    );
+    expect(
+      dialog?.querySelector('#announcement-dialog-title')?.textContent,
+    ).toBe('Announcement');
     expect(
       dialog?.querySelector('.announcement-dialog-content')?.textContent,
     ).toContain(expectedText);
@@ -261,6 +268,7 @@ describe('HomepageAnnouncement', () => {
   it.each([
     {announcement: null},
     {announcement: {id: 'bad id', markdown: 'not valid'}},
+    {announcement: {id: 'blank', markdown: '   \t\n'}},
   ])('renders nothing for an empty or invalid response', response => {
     http.expectOne('/api/announcement').flush(response);
     fixture.detectChanges();

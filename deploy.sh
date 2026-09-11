@@ -968,7 +968,7 @@ if ! ANNOUNCEMENT_SEED_STATUS=$(GOOGLE_CLOUD_PROJECT="$PROJECT" \
   python3 scripts/seed_announcement.py seed \
   "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config?documentId=announcement" \
   "$ANNOUNCEMENT_MARKDOWN_FILE" "$ANNOUNCEMENT_ENABLED"); then
-  echo "ERROR: seeding homepage announcement failed (HTTP ${ANNOUNCEMENT_SEED_STATUS:-no response})." >&2
+  echo "ERROR: seeding homepage announcement failed." >&2
   echo "       Existing operator content was not overwritten; aborting." >&2
   exit 1
 fi

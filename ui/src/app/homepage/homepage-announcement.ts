@@ -165,7 +165,7 @@ export class HomepageAnnouncement {
 
   openFullAnnouncement() {
     this.dialog.open(this.announcementDialog, {
-      ariaLabel: 'Full announcement',
+      ariaLabelledBy: 'announcement-dialog-title',
       maxWidth: 'min(560px, calc(100vw - 32px))',
     });
   }
@@ -201,6 +201,7 @@ export class HomepageAnnouncement {
       ANNOUNCEMENT_ID.test(candidate.id) &&
       typeof candidate.markdown === 'string' &&
       candidate.markdown.length > 0 &&
+      candidate.markdown.trim().length > 0 &&
       Array.from(candidate.markdown).length <= MAX_MARKDOWN_LENGTH
     );
   }
