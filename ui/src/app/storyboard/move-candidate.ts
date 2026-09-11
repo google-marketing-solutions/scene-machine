@@ -176,8 +176,11 @@ export function moveCandidate(input: MoveCandidateInput): MoveCandidateResult {
     const runNumber = candidates.length
       ? Math.max(...candidates.map(item => item.runNumber)) + 1
       : 1;
+    const destinationWithoutFailure = {...destination};
+    delete destinationWithoutFailure.generationError;
+    delete destinationWithoutFailure.generationErrorAcknowledged;
     next[destinationIndex] = {
-      ...destination,
+      ...destinationWithoutFailure,
       candidates: [...candidates, {...moved, runNumber}],
       ...(destination.selectedCandidateIndex === undefined
         ? {selectedCandidateIndex: candidates.length}

@@ -1250,9 +1250,9 @@ export class RemixEngineService {
         pending.executionId,
         projectId,
       );
-      if (workflowStatus.sink?.output['0']['video'][0]['_error']) {
+      if (workflowStatus.sink?.output['0']['video'][0]?.['_error']) {
         const errorMsg =
-          workflowStatus.sink?.output['0']['video'][0]['_error'] ||
+          workflowStatus.sink?.output['0']['video'][0]?.['_error'] ||
           'Unknown error';
         throw new Error(errorMsg);
       }
@@ -1483,11 +1483,28 @@ export class RemixEngineService {
         if (s.id !== sceneId || !this.configService.isGeneratedScene(s)) {
           return s;
         }
+        const existingCandidates = s.candidates ?? [];
+        const candidates = [...existingCandidates, ...newCandidates];
+        const selectedCandidateIndex = s.selectedCandidateIndex;
         const updated: GeneratedScene = {
           ...s,
-          candidates: [...(s.candidates ?? []), ...newCandidates],
-          selectedCandidateIndex: s.selectedCandidateIndex ?? 0,
+          ...(candidates.length ? {candidates} : {}),
+          ...(candidates.length
+            ? {
+                selectedCandidateIndex:
+                  selectedCandidateIndex !== undefined &&
+                  Number.isInteger(selectedCandidateIndex) &&
+                  selectedCandidateIndex >= 0 &&
+                  selectedCandidateIndex < candidates.length
+                    ? selectedCandidateIndex
+                    : 0,
+              }
+            : {}),
         };
+        if (!candidates.length) {
+          delete updated.candidates;
+          delete updated.selectedCandidateIndex;
+        }
         delete updated.pendingGeneration;
         // A successful run clears any prior failure marker + "!" badge.
         delete updated.generationError;

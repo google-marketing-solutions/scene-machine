@@ -299,7 +299,10 @@ export class Storyboard {
     if (candidate.origin) {
       const original = `originally ${candidate.origin.candidateLabel} in ${candidate.origin.sceneName}`;
       if (this.selectedScene()?.id === candidate.origin.sceneId) {
-        return `${base} (Originally ${candidate.origin.candidateLabel})`;
+        if (candidate.origin.editedFromRun !== undefined) {
+          return `${base} (edit of run ${candidate.origin.editedFromRun}; originally ${candidate.origin.candidateLabel})`;
+        }
+        return `${base} (originally ${candidate.origin.candidateLabel})`;
       }
       return candidate.origin.editedFromRun !== undefined
         ? `${base} (edit of run ${candidate.origin.editedFromRun} in ${candidate.origin.sceneName}; ${original})`
@@ -1119,6 +1122,21 @@ export class Storyboard {
       this.config.saveNow();
       this.userSelectedSceneId.set(result.destinationSceneId);
       this.isVideoPlaying.set(false);
+    } else if (result.reason === 'busy') {
+      this.snackBar.open(
+        'Cannot move this candidate while the source or destination is generating.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
+    } else if (
+      result.reason === 'invalid-source' ||
+      result.reason === 'invalid-destination'
+    ) {
+      this.snackBar.open(
+        'Failed to move candidate. Please try again.',
+        'Dismiss',
+        {panelClass: ['error-snackbar']},
+      );
     }
   }
 

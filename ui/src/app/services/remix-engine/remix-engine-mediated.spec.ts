@@ -24,6 +24,7 @@ import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ClientMediaService} from '../client-media/client-media';
 import {
   ConfigService,
+  resolveSceneRenderClip,
   type GeneratedScene,
   type ProvidedVideoScene,
 } from '../config/config';
@@ -1407,6 +1408,90 @@ describe('RemixEngineService (mediated)', () => {
         }),
       ]);
       expect(configServiceMock.flushPendingSave).toHaveBeenCalled();
+    });
+
+    it('clears an empty resumed completion without selecting an empty scene', async () => {
+      mockProjectWithPending();
+      httpClientMock.get.mockReturnValue(
+        of({sink: {output: {'0': {video: []}}}}),
+      );
+
+      runResumeScan();
+      await vi.waitFor(() =>
+        expect(configServiceMock.updateProjectConfig).toHaveBeenCalled(),
+      );
+
+      const finalScene = lastUpdatedScene();
+      expect(finalScene).not.toHaveProperty('pendingGeneration');
+      expect(finalScene).not.toHaveProperty('candidates');
+      expect(finalScene).not.toHaveProperty('selectedCandidateIndex');
+      expect(resolveSceneRenderClip(finalScene)).toEqual({
+        state: 'not-selected',
+      });
+      expect(httpClientMock.get).toHaveBeenCalledWith(
+        '/api/getStatus?executionId=persisted-exec-id&signedUrls=false&gcsBucket=mock-bucket',
+      );
+    });
+
+    it('preserves a valid existing selection and normalizes an invalid one', async () => {
+      const candidates = [
+        {
+          runNumber: 1,
+          durationSeconds: 7,
+          model: 'm',
+          prompt: 'a',
+          generateAudio: true,
+          resolution: '1080p',
+          video: {path: 'a.mp4'},
+        },
+        {
+          runNumber: 1,
+          durationSeconds: 7,
+          model: 'm',
+          prompt: 'b',
+          generateAudio: true,
+          resolution: '1080p',
+          video: {path: 'b.mp4'},
+        },
+      ];
+      const validProject = mockProjectWithPending(candidates);
+      const validProjectWithSelection = {
+        ...validProject,
+        storyboard: [
+          {...validProject.storyboard[0], selectedCandidateIndex: 1},
+        ],
+      };
+      projectConfigSignal.set(validProjectWithSelection);
+      httpClientMock.get.mockReturnValue(
+        of({sink: {output: {'0': {video: []}}}}),
+      );
+      runResumeScan();
+      await vi.waitFor(() =>
+        expect(configServiceMock.updateProjectConfig).toHaveBeenCalled(),
+      );
+      expect(lastUpdatedScene().selectedCandidateIndex).toBe(1);
+
+      const invalidProject = mockProjectWithPending(candidates);
+      const invalidProjectWithSelection = {
+        ...invalidProject,
+        storyboard: [
+          {
+            ...invalidProject.storyboard[0],
+            selectedCandidateIndex: 99,
+            pendingGeneration: {
+              ...invalidProject.storyboard[0].pendingGeneration,
+              executionId: 'second-resume',
+            },
+          },
+        ],
+      };
+      projectConfigSignal.set(invalidProjectWithSelection);
+      configServiceMock.updateProjectConfig.mockClear();
+      runResumeScan();
+      await vi.waitFor(() =>
+        expect(configServiceMock.updateProjectConfig).toHaveBeenCalled(),
+      );
+      expect(lastUpdatedScene().selectedCandidateIndex).toBe(0);
     });
 
     it('appends resumed results to live state after delayed collection', async () => {

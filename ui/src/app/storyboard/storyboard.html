@@ -275,48 +275,50 @@
                                   <mat-icon>drive_file_move</mat-icon>
                                 </button>
                                 <mat-menu #moveMenu="matMenu">
-                                  <button
-                                    mat-menu-item
-                                    (click)="
-                                      movePreparedCandidate($event, {
-                                        kind: 'new-after-source',
-                                        id: config.sceneIdCounter().toString(),
-                                      })
-                                    "
-                                  >
-                                    Move to new scene
-                                  </button>
-                                  @for (
-                                    destination of config.projectConfig.value().storyboard;
-                                    track destination.id
-                                  ) {
-                                    @if (
-                                      destination.id !== scene.id &&
-                                      config.isGeneratedScene(destination)
+                                  <ng-template matMenuContent>
+                                    <button
+                                      mat-menu-item
+                                      (click)="
+                                        movePreparedCandidate($event, {
+                                          kind: 'new-after-source',
+                                          id: config.sceneIdCounter().toString(),
+                                        })
+                                      "
+                                    >
+                                      Move to new scene
+                                    </button>
+                                    @for (
+                                      destination of config.projectConfig.value().storyboard;
+                                      track destination.id
                                     ) {
-                                      <button
-                                        mat-menu-item
-                                        [disabled]="
-                                          areCandidatesGenerating(destination.id) ||
-                                          !!destination.pendingGeneration
-                                        "
-                                        [matTooltip]="
-                                          areCandidatesGenerating(destination.id) ||
-                                          destination.pendingGeneration
-                                            ? 'Cannot move while this scene is generating'
-                                            : ''
-                                        "
-                                        (click)="
-                                          movePreparedCandidate($event, {
-                                            kind: 'existing',
-                                            sceneId: destination.id,
-                                          })
-                                        "
-                                      >
-                                        Move to {{ destination.name }}
-                                      </button>
+                                      @if (
+                                        destination.id !== scene.id &&
+                                        config.isGeneratedScene(destination)
+                                      ) {
+                                        <button
+                                          mat-menu-item
+                                          [disabled]="
+                                            areCandidatesGenerating(destination.id) ||
+                                            !!destination.pendingGeneration
+                                          "
+                                          [matTooltip]="
+                                            areCandidatesGenerating(destination.id) ||
+                                            destination.pendingGeneration
+                                              ? 'Cannot move while this scene is generating'
+                                              : ''
+                                          "
+                                          (click)="
+                                            movePreparedCandidate($event, {
+                                              kind: 'existing',
+                                              sceneId: destination.id,
+                                            })
+                                          "
+                                        >
+                                          Move to {{ destination.name }}
+                                        </button>
+                                      }
                                     }
-                                  }
+                                  </ng-template>
                                 </mat-menu>
 
                                 @let thumb = getThumbnailData(candidate);
