@@ -814,9 +814,7 @@ describe('ConfigService (mediated data plane)', () => {
       await expect(service.deleteProject('proj-2')).rejects.toThrow(
         'delete failed',
       );
-      expect(
-        candidateVideoCacheMock.invalidateProject,
-      ).not.toHaveBeenCalled();
+      expect(candidateVideoCacheMock.invalidateProject).not.toHaveBeenCalled();
     });
   });
 

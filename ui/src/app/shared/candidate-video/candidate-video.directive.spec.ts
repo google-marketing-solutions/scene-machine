@@ -82,11 +82,16 @@ describe('CandidateVideoDirective', () => {
     fixture.componentRef.setInput('media', {path: 'stale.mp4'});
     fixture.detectChanges();
     await Promise.resolve();
+    const video = fixture.nativeElement.querySelector(
+      'video',
+    ) as HTMLVideoElement;
+    const pause = vi.spyOn(video, 'pause');
     fixture.destroy();
     const release = vi.fn();
     resolve({url: 'blob:stale', release});
     await Promise.resolve();
     expect(release).toHaveBeenCalledOnce();
+    expect(pause).toHaveBeenCalled();
   });
 
   it('does not reacquire when an equivalent scope object is recreated', async () => {
@@ -95,6 +100,18 @@ describe('CandidateVideoDirective', () => {
     fixture.componentRef.setInput('scope', {
       bucket: 'bucket',
       projectId: 'project',
+    });
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(acquire).toHaveBeenCalledTimes(calls);
+  });
+
+  it('does not reload when a signed URL changes for the same path', async () => {
+    await fixture.whenStable();
+    const calls = acquire.mock.calls.length;
+    fixture.componentRef.setInput('media', {
+      path: 'candidate.mp4',
+      url: 'https://signed.example/refreshed',
     });
     fixture.detectChanges();
     await fixture.whenStable();
