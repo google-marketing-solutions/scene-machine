@@ -647,6 +647,45 @@ describe('CompositionComponent', () => {
     expect(component.currentClipIncludesAudio()).toBe(false);
   });
 
+  it.each([
+    [true, false],
+    [false, true],
+  ])(
+    'uses candidate audio intent rather than live project toggle (project=%s, candidate=%s)',
+    (projectAudio, candidateAudio) => {
+      const scene: GeneratedScene = {
+        id: 'audio-matrix',
+        type: 'generated',
+        name: 'Audio matrix scene',
+        prompt: 'test prompt',
+        candidates: [
+          {
+            runNumber: 1,
+            durationSeconds: 5,
+            model: 'veo-3.0-generate-001',
+            prompt: 'test prompt',
+            generateAudio: candidateAudio,
+            resolution: '1080p',
+            video: {url: 'http://video.url', path: 'path/to/video'},
+          },
+        ],
+        selectedCandidateIndex: 0,
+      };
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        generateAudio: projectAudio,
+        storyboard: [scene],
+      });
+      fixture.detectChanges();
+
+      expect(component.playlist()[0].includeAudio).toBe(candidateAudio);
+      const volumeButton = fixture.nativeElement.querySelector(
+        '.volume-controls button',
+      ) as HTMLButtonElement;
+      expect(volumeButton.disabled).toBe(!candidateAudio);
+    },
+  );
+
   describe('player src (held, never null)', () => {
     // Two clips: clip 1 spans 0-10s, clip 2 spans 10-15s on the timeline.
     const twoClipStoryboard: ProvidedVideoScene[] = [
