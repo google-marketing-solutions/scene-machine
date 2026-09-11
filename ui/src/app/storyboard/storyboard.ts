@@ -113,7 +113,7 @@ export class Storyboard {
   private mediaService = inject(MediaService);
   private destroyRef = inject(DestroyRef);
   private router = inject(Router);
-  private downloadCancel$ = new Subject<void>();
+  private downloadCancel = new Subject<void>();
   private pendingObjectUrlCleanups = new Map<
     string,
     ReturnType<typeof setTimeout>
@@ -902,8 +902,8 @@ export class Storyboard {
       sourceExtension ?? 'mp4',
     );
     this.downloadInProgress.set(true);
-    this.downloadCancel$ = new Subject<void>();
-    const cancel$ = this.downloadCancel$;
+    this.downloadCancel = new Subject<void>();
+    const cancel = this.downloadCancel;
 
     void (async () => {
       try {
@@ -920,7 +920,7 @@ export class Storyboard {
         const blob = await firstValueFrom(
           this.httpClient
             .get(url, {responseType: 'blob'})
-            .pipe(takeUntil(cancel$)),
+            .pipe(takeUntil(cancel)),
         );
         if (
           epoch !== this.downloadEpoch ||
@@ -960,9 +960,9 @@ export class Storyboard {
   }
 
   private cancelDownload() {
-    this.downloadCancel$.next();
-    this.downloadCancel$.complete();
-    this.downloadCancel$ = new Subject<void>();
+    this.downloadCancel.next();
+    this.downloadCancel.complete();
+    this.downloadCancel = new Subject<void>();
     this.downloadInProgress.set(false);
   }
 
