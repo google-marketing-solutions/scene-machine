@@ -2,6 +2,16 @@
  * Copyright 2026 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 import {
@@ -40,8 +50,7 @@ export class CandidateVideoDirective implements OnChanges, OnDestroy {
 
   ngOnChanges(): void {
     const key = JSON.stringify([
-      this.media?.path,
-      this.media?.url,
+      this.media?.path || this.media?.url,
       this.candidateVideoCacheScope?.bucket,
       this.candidateVideoCacheScope?.projectId,
       this.candidateVideoPersist,
@@ -65,12 +74,10 @@ export class CandidateVideoDirective implements OnChanges, OnDestroy {
     video.pause();
     video.currentTime = 0;
     this.release(true);
-    video.removeAttribute('src');
-    this.loadVideo();
   }
 
   ngOnDestroy(): void {
-    this.release();
+    this.release(true);
   }
 
   private async acquire(): Promise<void> {
