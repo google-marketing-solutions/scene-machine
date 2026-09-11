@@ -270,6 +270,89 @@ def test_blocked_without_content_remains_distinct_502(
   assert fake_client.closed
 
 
+def test_prompt_feedback_block_with_no_candidates_is_safe_502(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_enabled(monkeypatch)
+  response = types.SimpleNamespace(
+      candidates=[],
+      prompt_feedback=types.SimpleNamespace(block_reason='SAFETY'),
+  )
+  fake_client = _FakeClient(response)
+  monkeypatch.setattr(orch.transcription.genai, 'Client', lambda **_: fake_client)
+  result = orch.app.test_client().post(
+      '/api/transcribe',
+      data={'audio': (io.BytesIO(_wav()), 'voice.wav')},
+      content_type='multipart/form-data',
+  )
+  assert result.status_code == 502
+  assert result.get_json()['code'] == 'provider_blocked'
+  assert fake_client.closed
+
+
+def test_prompt_feedback_block_with_missing_candidates_is_safe_502(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_enabled(monkeypatch)
+  response = types.SimpleNamespace(
+      candidates=None,
+      prompt_feedback=types.SimpleNamespace(block_reason='SAFETY'),
+  )
+  fake_client = _FakeClient(response)
+  monkeypatch.setattr(orch.transcription.genai, 'Client', lambda **_: fake_client)
+  result = orch.app.test_client().post(
+      '/api/transcribe',
+      data={'audio': (io.BytesIO(_wav()), 'voice.wav')},
+      content_type='multipart/form-data',
+  )
+  assert result.status_code == 502
+  assert result.get_json()['code'] == 'provider_blocked'
+  assert fake_client.closed
+
+
+def test_prompt_feedback_block_wins_over_stop_content():
+  from transcription import TranscriptionError, parse_response
+
+  response = genai_types.GenerateContentResponse(
+      candidates=[
+          genai_types.Candidate(
+              finish_reason='STOP',
+              content=genai_types.Content(
+                  parts=[genai_types.Part(text='blocked content')]
+              ),
+          )
+      ],
+      prompt_feedback=genai_types.GenerateContentResponsePromptFeedback(
+          block_reason='SAFETY'
+      ),
+  )
+  with pytest.raises(TranscriptionError) as error:
+    parse_response(response)
+  assert error.value.code == 'provider_blocked'
+
+
+@pytest.mark.parametrize(
+    'finish_reason', ['SAFETY', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII']
+)
+@pytest.mark.parametrize('with_content', [False, True])
+def test_blocked_finish_reason_is_safe_even_with_content(
+    finish_reason, with_content
+):
+  from transcription import TranscriptionError, parse_response
+
+  content = types.SimpleNamespace(parts=[_part(text='blocked')]) if with_content else None
+  response = types.SimpleNamespace(
+      candidates=[
+          types.SimpleNamespace(finish_reason=finish_reason, content=content)
+      ]
+  )
+  with pytest.raises(TranscriptionError) as error:
+    parse_response(response)
+  assert error.value.code == 'provider_blocked'
+
+
 def test_explicit_zero_disables_route_before_parse_or_provider(
     monkeypatch, orchestrator_module
 ):

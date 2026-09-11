@@ -265,6 +265,12 @@ export class DictationControl implements OnChanges, OnDestroy {
       if (current.status === 'recording') {
         this.recovery.set(undefined);
       }
+      if (current.status === 'overflow') {
+        this.recovery.set({
+          kind: 'failed',
+          message: current.error ?? 'Recording exceeded the 4 MiB audio limit.',
+        });
+      }
       if (
         current.eventId === this.handledEventId ||
         current.status !== 'complete'

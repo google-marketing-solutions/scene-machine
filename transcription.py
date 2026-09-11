@@ -71,6 +71,15 @@ def _prompt_block_reason(response: Any) -> str | None:
   return None
 
 
+def _is_blocked_finish_reason(candidate: Any) -> bool:
+  return _enum_value(getattr(candidate, 'finish_reason', None)) in {
+      'SAFETY',
+      'BLOCKLIST',
+      'PROHIBITED_CONTENT',
+      'SPII',
+  }
+
+
 def _is_completed_empty(response: Any, candidate: Any) -> bool:
   return (
       _enum_value(getattr(candidate, 'finish_reason', None)) == 'STOP'
@@ -364,6 +373,10 @@ def _client(project: str) -> genai.Client:
 
 
 def _response_parts(response: Any) -> list[Any]:
+  if _prompt_block_reason(response) is not None:
+    raise TranscriptionError(
+        'provider_blocked', 502, 'Transcription was blocked'
+    )
   candidates = getattr(response, 'candidates', None)
   if candidates is None:
     raise TranscriptionError(
@@ -375,12 +388,12 @@ def _response_parts(response: Any) -> list[Any]:
     )
   if not candidates:
     return []
+  if _is_blocked_finish_reason(candidates[0]):
+    raise TranscriptionError(
+        'provider_blocked', 502, 'Transcription was blocked'
+    )
   content = getattr(candidates[0], 'content', None)
   if content is None:
-    if _prompt_block_reason(response) is not None:
-      raise TranscriptionError(
-          'provider_blocked', 502, 'Transcription was blocked'
-      )
     if _is_completed_empty(response, candidates[0]):
       return []
     raise TranscriptionError(
