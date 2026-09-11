@@ -13,7 +13,7 @@ import {
   HttpTestingController,
   provideHttpClientTesting,
 } from '@angular/common/http/testing';
-import {Component, ViewChild} from '@angular/core';
+import {Component, SimpleChange, ViewChild} from '@angular/core';
 import {
   ComponentFixture,
   TestBed as AngularTestBed,
@@ -207,6 +207,105 @@ describe('DictationControl', () => {
     expect(control.canUndo()).toBe(false);
   });
 
+  it('falls back to the end when the textarea has never been focused', async () => {
+    const request = await record();
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+
+    expect(host.value).toBe('Existing\nspoken words');
+  });
+
+  it('falls back to the end when focus moved to an unrelated field', async () => {
+    const textarea = fixture.nativeElement.querySelector(
+      'textarea',
+    ) as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(2, 2);
+    const unrelated = document.createElement('textarea');
+    document.body.appendChild(unrelated);
+    unrelated.focus();
+
+    const request = await record();
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+
+    expect(host.value).toBe('Existing\nspoken words');
+    unrelated.remove();
+  });
+
+  it('preserves the caret when focus moves from the textarea to its mic', async () => {
+    const textarea = fixture.nativeElement.querySelector(
+      'textarea',
+    ) as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(2, 2);
+    const mic = fixture.nativeElement.querySelector(
+      '[aria-label="Start dictation"]',
+    ) as HTMLButtonElement;
+    mic.focus();
+
+    const request = await record();
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+
+    expect(host.value).toBe('Exspoken wordsisting');
+  });
+
+  it('clears a remembered selection when blur has no related target', async () => {
+    const textarea = fixture.nativeElement.querySelector(
+      'textarea',
+    ) as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(2, 2);
+    textarea.dispatchEvent(new FocusEvent('blur', {relatedTarget: null}));
+    const unrelated = document.createElement('textarea');
+    document.body.appendChild(unrelated);
+    unrelated.focus();
+
+    const request = await record();
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+
+    expect(host.value).toBe('Existing\nspoken words');
+    unrelated.remove();
+  });
+
+  it('closes recovery details when the owner changes', async () => {
+    control.maxChars = 5;
+    const request = await record();
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+    (
+      fixture.nativeElement.querySelector('button') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+
+    control.ngOnChanges({
+      ownerKey: new SimpleChange(host.ownerKey, 'project-a:other', false),
+    });
+    await vi.waitFor(() =>
+      expect(document.querySelector('[role="dialog"]')).toBeNull(),
+    );
+  });
+
+  it('closes recovery details when the control is destroyed', async () => {
+    control.maxChars = 5;
+    const request = await record();
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+    (
+      fixture.nativeElement.querySelector('button') as HTMLButtonElement
+    ).click();
+    fixture.detectChanges();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+
+    fixture.destroy();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[role="dialog"]')).toBeNull(),
+    );
+  });
+
   it('inserts the returned transcript at the textarea caret', async () => {
     const textarea = fixture.nativeElement.querySelector(
       'textarea',
@@ -342,8 +441,29 @@ describe('DictationControl', () => {
     fixture.detectChanges();
 
     expect(host.value).toBe('Existing');
-    expect(fixture.nativeElement.textContent).toContain('Shorten it');
+    expect(fixture.nativeElement.textContent).toContain(
+      'Transcript exceeds field limit.',
+    );
     expect(fixture.nativeElement.textContent).not.toContain('Retry');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+    const details = Array.from(fixture.nativeElement.querySelectorAll('button'))
+      .map(button => button as HTMLButtonElement)
+      .find(button => button.textContent?.trim() === 'Details') as
+      | HTMLButtonElement
+      | undefined;
+    expect(details).toBeDefined();
+    details?.click();
+    fixture.detectChanges();
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(
+      document.querySelector('[aria-label="Transcript to review"]'),
+    ).not.toBeNull();
+    control.discard();
+    fixture.detectChanges();
+    await vi.waitFor(() =>
+      expect(document.querySelector('[role="dialog"]')).toBeNull(),
+    );
   });
 
   it('cancels the HTTP request and microphone tracks when the control is destroyed', async () => {

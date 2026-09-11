@@ -111,8 +111,17 @@ import {DictationConfig} from '../shared/dictation/dictation';
         position: relative;
 
         &.dictation-enabled textarea {
-          padding-bottom: 56px !important;
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: auto;
           scrollbar-gutter: stable;
+        }
+
+        &.dictation-enabled ::ng-deep .mat-mdc-form-field-infix {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          min-height: 0;
         }
       }
 
