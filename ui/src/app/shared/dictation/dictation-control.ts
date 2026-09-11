@@ -17,6 +17,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
   effect,
   EventEmitter,
   inject,
@@ -26,9 +27,16 @@ import {
   Output,
   signal,
   SimpleChanges,
+  TemplateRef,
+  ViewChild,
 } from '@angular/core';
 import {MatButtonModule} from '@angular/material/button';
 import {MatIconModule} from '@angular/material/icon';
+import {
+  MatDialog,
+  MatDialogModule,
+  MatDialogRef,
+} from '@angular/material/dialog';
 import {
   DictationConfig,
   DictationService,
@@ -40,57 +48,23 @@ import {
 @Component({
   selector: 'app-dictation-control',
   standalone: true,
-  imports: [MatButtonModule, MatIconModule],
+  imports: [MatButtonModule, MatIconModule, MatDialogModule],
   template: `
     @if (enabled) {
-      @if (overflowText() !== undefined) {
-        <div
-          class="dictation-recovery"
-          role="region"
-          aria-label="Dictation review"
-        >
-          <p>
-            This transcript is longer than this field allows. Shorten it before
-            adding it.
-          </p>
-          <textarea
-            readonly
-            [value]="overflowText()"
-            aria-label="Transcript to review"
-          ></textarea>
-          <div class="dictation-actions">
-            <button type="button" mat-button (click)="copyOverflow()">
-              Copy
-            </button>
-            <button type="button" mat-button (click)="discard()">
-              Discard
-            </button>
-          </div>
-        </div>
-      } @else if (failureMessage(); as message) {
-        <div class="dictation-recovery" role="status">
-          <span>{{ message }}</span>
-        </div>
-      }
       <div class="dictation-control" [class.busy]="isBusy()">
-        <button
-          type="button"
-          mat-icon-button
-          [attr.aria-label]="
-            isRecording()
-              ? 'Stop recording'
-              : isCancelable()
-                ? 'Cancel dictation'
-                : 'Start dictation'
-          "
-          [disabled]="isDisabled()"
-          (mousedown)="$event.preventDefault()"
-          (click)="isRecording() ? stop() : isCancelable() ? cancel() : start()"
-        >
-          <mat-icon>{{
-            isRecording() || isCancelable() ? 'stop' : 'mic'
-          }}</mat-icon>
-        </button>
+        @if (overflowText() !== undefined) {
+          <span class="dictation-status" role="status"
+            >Transcript exceeds field limit.</span
+          >
+          <button type="button" mat-button (click)="openRecoveryDetails()">
+            Details
+          </button>
+        } @else if (failureMessage(); as message) {
+          <span class="dictation-status" role="status">{{ message }}</span>
+          <button type="button" mat-button (click)="openRecoveryDetails()">
+            Details
+          </button>
+        }
         @if (statusText(); as status) {
           <span class="dictation-status" role="status">{{ status }}</span>
         }
@@ -111,30 +85,72 @@ import {
             }
           </div>
         }
+        <button
+          type="button"
+          mat-icon-button
+          [attr.aria-label]="
+            isRecording()
+              ? 'Stop recording'
+              : isCancelable()
+                ? 'Cancel dictation'
+                : 'Start dictation'
+          "
+          [disabled]="isDisabled()"
+          (mousedown)="$event.preventDefault()"
+          (click)="isRecording() ? stop() : isCancelable() ? cancel() : start()"
+        >
+          <mat-icon>{{
+            isRecording() || isCancelable() ? 'stop' : 'mic'
+          }}</mat-icon>
+        </button>
       </div>
+      <ng-template #recoveryDetails>
+        <h2 mat-dialog-title>Dictation details</h2>
+        <mat-dialog-content>
+          @if (overflowText(); as transcript) {
+            <p>This transcript is longer than this field allows.</p>
+            <textarea
+              readonly
+              [value]="transcript"
+              aria-label="Transcript to review"
+            ></textarea>
+          } @else if (failureMessage(); as details) {
+            <p>{{ details }}</p>
+          }
+        </mat-dialog-content>
+        <mat-dialog-actions align="end">
+          @if (overflowText() !== undefined) {
+            <button type="button" mat-button (click)="copyOverflow()">
+              Copy
+            </button>
+          }
+          <button type="button" mat-button (click)="discard()">Discard</button>
+          <button type="button" mat-button mat-dialog-close>Close</button>
+        </mat-dialog-actions>
+      </ng-template>
     }
   `,
   styles: [
     `
       :host {
-        position: absolute;
-        top: 0;
-        left: 8px;
-        /* Keep the toolbar clear of the textarea's reserved scrollbar lane. */
-        right: 24px;
-        bottom: 6px;
-        z-index: 3;
-        pointer-events: none;
+        position: relative;
+        z-index: 1;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 0 8px 6px;
         display: flex;
-        flex-direction: column;
         justify-content: flex-end;
+        pointer-events: none;
       }
       .dictation-control {
         display: flex;
         align-items: center;
         gap: 4px;
         min-height: 36px;
-        flex: 0 0 36px;
+        flex: 0 1 auto;
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
         padding: 0 4px;
         border-radius: 8px;
         background: color-mix(
@@ -143,6 +159,9 @@ import {
           transparent
         );
         pointer-events: auto;
+      }
+      .dictation-control > button[mat-icon-button] {
+        margin-left: auto;
       }
       .dictation-control.busy {
         color: var(--mat-sys-primary);
@@ -161,32 +180,7 @@ import {
         gap: 2px;
         margin-left: auto;
       }
-      .dictation-recovery {
-        margin-bottom: 4px;
-        padding: 8px 10px;
-        border-radius: 8px;
-        background: var(--mat-sys-surface-container);
-        font-size: 0.82rem;
-        max-height: calc(100% - 44px);
-        flex: 0 1 auto;
-        overflow: auto;
-        pointer-events: auto;
-      }
-      .dictation-recovery p {
-        margin: 0 0 6px;
-      }
-      .dictation-recovery[role='status'] {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-      }
-      .dictation-recovery[role='status'] > span {
-        min-width: 0;
-        flex: 1 1 auto;
-        max-height: 4.5rem;
-        overflow: auto;
-      }
-      .dictation-recovery textarea {
+      mat-dialog-content textarea {
         width: 100%;
         min-height: 52px;
         max-height: 70px;
@@ -205,6 +199,10 @@ import {
 })
 export class DictationControl implements OnChanges, OnDestroy {
   private readonly service = inject(DictationService);
+  private readonly hostElement = inject(ElementRef<HTMLElement>);
+  private readonly dialog = inject(MatDialog);
+  private recoveryDialogRef: MatDialogRef<unknown> | undefined;
+  @ViewChild('recoveryDetails') recoveryDetails!: TemplateRef<unknown>;
 
   @Input() enabled = false;
   @Input() value = '';
@@ -252,6 +250,10 @@ export class DictationControl implements OnChanges, OnDestroy {
   private insertionSelection:
     | {value: string; revision: number; start: number; end: number}
     | undefined;
+  private textareaWithListeners: HTMLTextAreaElement | undefined;
+  private blurredSelection:
+    | {value: string; revision: number; start: number; end: number}
+    | undefined;
   private lastOwner = '';
   private lastValue = '';
   private lastRevision = 0;
@@ -292,14 +294,28 @@ export class DictationControl implements OnChanges, OnDestroy {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
+    if (changes['textarea'] && this.textarea !== this.textareaWithListeners) {
+      this.textareaWithListeners?.removeEventListener(
+        'blur',
+        this.rememberBlurredSelection,
+      );
+      this.textareaWithListeners = this.textarea;
+      this.textareaWithListeners?.addEventListener(
+        'blur',
+        this.rememberBlurredSelection,
+      );
+    }
     const ownerChanged =
       changes['ownerKey'] && !changes['ownerKey'].firstChange;
     const valueChanged = changes['value'] && !changes['value'].firstChange;
     const revisionChanged =
       changes['revision'] && !changes['revision'].firstChange;
     if (ownerChanged) {
+      this.recoveryDialogRef?.close();
+      this.recoveryDialogRef = undefined;
       this.recovery.set(undefined);
       this.insertionSelection = undefined;
+      this.blurredSelection = undefined;
       this.service.dismiss(this.lastOwner || this.ownerKey);
     } else if (this.lastOwner && (valueChanged || revisionChanged)) {
       const selfWrite =
@@ -323,6 +339,11 @@ export class DictationControl implements OnChanges, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.recoveryDialogRef?.close();
+    this.textareaWithListeners?.removeEventListener(
+      'blur',
+      this.rememberBlurredSelection,
+    );
     this.service.cancel(this.ownerKey);
     this.service.dismiss(this.ownerKey);
   }
@@ -364,9 +385,20 @@ export class DictationControl implements OnChanges, OnDestroy {
   }
 
   discard(): void {
+    this.recoveryDialogRef?.close();
+    this.recoveryDialogRef = undefined;
     this.recovery.set(undefined);
     this.insertionSelection = undefined;
     this.service.dismiss(this.ownerKey);
+  }
+
+  openRecoveryDetails(): void {
+    this.recoveryDialogRef = this.dialog.open(this.recoveryDetails, {
+      width: 'min(460px, calc(100vw - 32px))',
+    });
+    this.recoveryDialogRef.afterClosed().subscribe(() => {
+      this.recoveryDialogRef = undefined;
+    });
   }
 
   async copyOverflow(): Promise<void> {
@@ -464,6 +496,19 @@ export class DictationControl implements OnChanges, OnDestroy {
     | undefined {
     const textarea = this.textarea;
     if (!textarea) return undefined;
+    if (document.activeElement !== textarea) {
+      const activeInControl =
+        document.activeElement instanceof Node &&
+        this.hostElement.nativeElement.contains(document.activeElement);
+      return activeInControl && this.blurredSelection
+        ? this.blurredSelection
+        : {
+            value: this.value,
+            revision: this.revision,
+            start: this.value.length,
+            end: this.value.length,
+          };
+    }
     const start = textarea.selectionStart ?? this.value.length;
     const end = textarea.selectionEnd ?? start;
     return {
@@ -473,6 +518,25 @@ export class DictationControl implements OnChanges, OnDestroy {
       end: Math.max(0, Math.min(end, this.value.length)),
     };
   }
+
+  private readonly rememberBlurredSelection = (event: FocusEvent) => {
+    const textarea = this.textarea;
+    if (!textarea) return;
+    const relatedTarget = event.relatedTarget;
+    if (
+      !(relatedTarget instanceof Node) ||
+      !this.hostElement.nativeElement.contains(relatedTarget)
+    ) {
+      this.blurredSelection = undefined;
+      return;
+    }
+    this.blurredSelection = {
+      value: this.value,
+      revision: this.revision,
+      start: Math.max(0, Math.min(textarea.selectionStart, this.value.length)),
+      end: Math.max(0, Math.min(textarea.selectionEnd, this.value.length)),
+    };
+  };
 
   private formatTime(seconds: number): string {
     const whole = Math.floor(seconds);
