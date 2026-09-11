@@ -19,18 +19,24 @@ import {
   DragDropModule,
   moveItemInArray,
 } from '@angular/cdk/drag-drop';
+import {HttpClient} from '@angular/common/http';
 import {DatePipe, DecimalPipe} from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   ElementRef,
   HostListener,
   inject,
+  DestroyRef,
   signal,
   viewChild,
 } from '@angular/core';
 import {FormsModule} from '@angular/forms';
+import {NavigationStart, Router} from '@angular/router';
+import {filter, firstValueFrom, Subject, takeUntil} from 'rxjs';
+import {takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {MatButtonModule} from '@angular/material/button';
 import {MatChipsModule} from '@angular/material/chips';
 import {MatDialog, MatDialogModule} from '@angular/material/dialog';
@@ -55,6 +61,7 @@ import {
 } from '../services/config/config';
 import {ImageImportService} from '../services/image-import/image-import';
 import {MediaSrcPipe} from '../services/media/media-src.pipe';
+import {MediaService} from '../services/media/media';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {EditableProjectTitle} from '../shared/editable-project-title/editable-project-title';
 import {
@@ -102,6 +109,50 @@ export class Storyboard {
   private clientMediaService = inject(ClientMediaService);
   private imageImport = inject(ImageImportService);
   private snackBar = inject(MatSnackBar);
+  private httpClient = inject(HttpClient);
+  private mediaService = inject(MediaService);
+  private destroyRef = inject(DestroyRef);
+  private router = inject(Router);
+  private downloadCancel = new Subject<void>();
+  private pendingObjectUrlCleanups = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+  private downloadEpoch = 0;
+  private lastProjectId: string | undefined;
+  readonly downloadInProgress = signal(false);
+
+  constructor() {
+    this.destroyRef.onDestroy(() => {
+      this.downloadEpoch++;
+      this.cancelDownload();
+      for (const [objectUrl, timer] of this.pendingObjectUrlCleanups) {
+        clearTimeout(timer);
+        URL.revokeObjectURL(objectUrl);
+      }
+      this.pendingObjectUrlCleanups.clear();
+    });
+    this.router.events
+      .pipe(filter(event => event instanceof NavigationStart))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.downloadEpoch++;
+        this.cancelDownload();
+        this.downloadInProgress.set(false);
+      });
+    effect(() => {
+      const projectId = this.config.projectConfig.value().id;
+      if (
+        this.lastProjectId !== undefined &&
+        projectId !== this.lastProjectId
+      ) {
+        this.downloadEpoch++;
+        this.cancelDownload();
+        this.downloadInProgress.set(false);
+      }
+      this.lastProjectId = projectId;
+    });
+  }
 
   videoElement = viewChild<ElementRef<HTMLVideoElement>>('mainVideo');
   timelineTrack = viewChild<ElementRef<HTMLElement>>('timelineTrack');
@@ -819,6 +870,139 @@ export class Storyboard {
     scene.referenceImage = scene.candidates![index].referenceImage;
     this.updateScenes();
     this.isVideoPlaying.set(false);
+  }
+
+  downloadOriginal() {
+    const scene = this.selectedScene();
+    const candidate = this.selectedCandidate();
+    const video = candidate?.video;
+    if (
+      this.downloadInProgress() ||
+      !scene ||
+      !candidate ||
+      !video ||
+      (!video.path && !video.url)
+    ) {
+      return;
+    }
+
+    const epoch = ++this.downloadEpoch;
+    const project = this.config.projectConfig.value();
+    const projectId = project.id;
+    const projectName = project.name;
+    const sceneName = scene.name;
+    const source = {...video};
+    const label =
+      this.runLabels().get(candidate) ?? `run${candidate.runNumber}`;
+    const sourceExtension = this.mediaExtension(source);
+    const filenameBase = this.originalFilename(
+      projectName,
+      sceneName,
+      label,
+      sourceExtension ?? 'mp4',
+    );
+    this.downloadInProgress.set(true);
+    this.downloadCancel = new Subject<void>();
+    const cancel = this.downloadCancel;
+
+    void (async () => {
+      try {
+        const url = await this.mediaService.resolve(source);
+        if (!url) {
+          throw new Error('Original media URL is unavailable.');
+        }
+        if (
+          epoch !== this.downloadEpoch ||
+          this.config.projectConfig.value().id !== projectId
+        ) {
+          return;
+        }
+        const blob = await firstValueFrom(
+          this.httpClient
+            .get(url, {responseType: 'blob'})
+            .pipe(takeUntil(cancel)),
+        );
+        if (
+          epoch !== this.downloadEpoch ||
+          this.config.projectConfig.value().id !== projectId
+        ) {
+          return;
+        }
+        const filename =
+          sourceExtension === undefined
+            ? this.originalFilename(
+                projectName,
+                sceneName,
+                label,
+                this.mimeExtension(blob.type),
+              )
+            : filenameBase;
+        const objectUrl = URL.createObjectURL(blob);
+        const cleanupTimer = setTimeout(() => {
+          URL.revokeObjectURL(objectUrl);
+          this.pendingObjectUrlCleanups.delete(objectUrl);
+        }, 0);
+        this.pendingObjectUrlCleanups.set(objectUrl, cleanupTimer);
+        const anchor = document.createElement('a');
+        anchor.href = objectUrl;
+        anchor.download = filename;
+        anchor.click();
+      } catch {
+        if (epoch === this.downloadEpoch) {
+          this.snackBar.open('Failed to download original video.', 'Dismiss');
+        }
+      } finally {
+        if (epoch === this.downloadEpoch) {
+          this.downloadInProgress.set(false);
+        }
+      }
+    })();
+  }
+
+  private cancelDownload() {
+    this.downloadCancel.next();
+    this.downloadCancel.complete();
+    this.downloadCancel = new Subject<void>();
+    this.downloadInProgress.set(false);
+  }
+
+  private originalFilename(
+    projectName: string,
+    sceneName: string,
+    label: string,
+    extension: string,
+  ): string {
+    const sanitize = (value: string) =>
+      value.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') ||
+      'untitled';
+    return `${sanitize(projectName)}_${sanitize(sceneName)}_${sanitize(label)}_original.${extension}`;
+  }
+
+  private mediaExtension(media: {
+    path?: string;
+    url?: string;
+  }): string | undefined {
+    const source = media.path || media.url;
+    if (!source) {
+      return undefined;
+    }
+    try {
+      const pathname = new URL(source, window.location.href).pathname;
+      return pathname.match(/\.([a-z0-9]+)$/i)?.[1];
+    } catch {
+      return source.match(/\.([a-z0-9]+)$/i)?.[1];
+    }
+  }
+
+  private mimeExtension(mimeType: string): string {
+    const subtype = mimeType.split('/')[1]?.split(';')[0];
+    const knownExtensions: Record<string, string> = {
+      mp4: 'mp4',
+      webm: 'webm',
+      quicktime: 'mov',
+      'x-msvideo': 'avi',
+    };
+    return (subtype && knownExtensions[subtype]) || 'bin';
   }
 
   updateScenes(scene?: GeneratedScene | ProvidedVideoScene) {
