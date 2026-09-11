@@ -166,6 +166,8 @@ describe('moveCandidate', () => {
     destination.referenceImage = {path: 'ref', url: 'ref-url'};
     destination.transition = 'fade';
     destination.transitionOverlap = 0.25;
+    destination.generationError = 'stale failure';
+    destination.generationErrorAcknowledged = false;
     const result = moveCandidate({
       storyboard: [source, destination],
       sourceSceneId: '1',
@@ -184,6 +186,8 @@ describe('moveCandidate', () => {
     expect(movedDestination.prompt).toBe('keep this prompt');
     expect(movedDestination.referenceImage?.path).toBe('ref');
     expect(movedDestination.transitionOverlap).toBe(0.25);
+    expect(movedDestination.generationError).toBeUndefined();
+    expect(movedDestination.generationErrorAcknowledged).toBeUndefined();
   });
 
   it('shifts a later source selection while preserving source setup', () => {

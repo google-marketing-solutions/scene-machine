@@ -23,6 +23,7 @@ import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {MatDialog} from '@angular/material/dialog';
 import {MatMenuHarness} from '@angular/material/menu/testing';
 import {MatSelectHarness} from '@angular/material/select/testing';
+import {MatSnackBar} from '@angular/material/snack-bar';
 import {MatSlideToggle} from '@angular/material/slide-toggle';
 import {MatSlider} from '@angular/material/slider';
 import {NavigationStart, Router} from '@angular/router';
@@ -528,7 +529,7 @@ describe('Storyboard', () => {
     }));
     component.selectScene('source');
     fixture.detectChanges();
-    expect(component.runTooltip(candidate)).toContain('Originally 2C');
+    expect(component.runTooltip(candidate)).toContain('originally 2C');
     mockRemixEngineService.generatingSceneIds.set(new Set(['destination']));
     fixture.detectChanges();
 
@@ -552,6 +553,80 @@ describe('Storyboard', () => {
       .map(id => document.getElementById(id)?.textContent?.trim())
       .filter((text): text is string => !!text);
     expect(helpText).toContain('Cannot move while this scene is generating');
+  });
+
+  it.each([
+    ['busy destination', 'busy'],
+    ['stale source', 'invalid-source'],
+    ['invalid destination', 'invalid-destination'],
+  ])('reports a %s move failure without mutating state', (label, reason) => {
+    const candidate: Candidate = {
+      runNumber: 1,
+      durationSeconds: 4,
+      model: 'veo-1',
+      prompt: 'target',
+      generateAudio: true,
+      resolution: '1080p',
+      video: {path: 'target', url: 'target'},
+    };
+    const source: GeneratedScene = {
+      id: 'source',
+      type: 'generated',
+      name: 'Source',
+      prompt: 'source',
+      candidates: [candidate],
+    };
+    const destination: GeneratedScene = {
+      id: 'destination',
+      type: 'generated',
+      name: 'Destination',
+      prompt: 'destination',
+      candidates: [],
+    };
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [source, destination],
+    }));
+    component.selectScene('source');
+    fixture.detectChanges();
+    component.prepareMoveCandidate(source, 0);
+    if (reason === 'busy') {
+      mockRemixEngineService.generatingSceneIds.set(new Set(['destination']));
+    } else if (reason === 'invalid-source') {
+      projectConfigSignal.update(config => ({
+        ...config,
+        storyboard: [
+          {
+            ...source,
+            candidates: [
+              {...candidate, video: {path: 'changed', url: 'changed'}},
+            ],
+          },
+          destination,
+        ],
+      }));
+    }
+    fixture.detectChanges();
+    const snackBar = fixture.debugElement.injector.get(MatSnackBar);
+    const open = vi.spyOn(snackBar, 'open');
+    const before = projectConfigSignal();
+    const beforeScene = component.selectedSceneId();
+    component.movePreparedCandidate(new Event('click'), {
+      kind: 'existing',
+      sceneId: reason === 'invalid-destination' ? 'missing' : 'destination',
+    });
+
+    expect(projectConfigSignal()).toBe(before);
+    expect(mockConfigService.saveNow).not.toHaveBeenCalled();
+    expect(component.selectedSceneId()).toBe(beforeScene);
+    expect(open).toHaveBeenCalledWith(
+      reason === 'busy'
+        ? 'Cannot move this candidate while the source or destination is generating.'
+        : 'Failed to move candidate. Please try again.',
+      'Dismiss',
+      {panelClass: ['error-snackbar']},
+    );
+    open.mockRestore();
   });
 
   it('drives the candidate-duration slider from durationSlider()', () => {
@@ -1076,6 +1151,34 @@ describe('Storyboard', () => {
       selectSceneWithCandidates([c2a, c2b]);
       expect(component.runTooltip(c2a)).toBe('Run: 2, Candidate: A');
       expect(component.runTooltip(c2b)).toBe('Run: 2, Candidate: B');
+    });
+
+    it('keeps edit ancestry and uses lowercase originally wording', () => {
+      const edited = makeCandidate(2, 'edited.mp4', {
+        origin: {
+          sceneId: '1',
+          sceneName: 'Scene 1',
+          runNumber: 2,
+          candidateLabel: '2A',
+          editedFromRun: 1,
+        },
+      });
+      const original = makeCandidate(2, 'original.mp4', {
+        origin: {
+          sceneId: 'other',
+          sceneName: 'Other scene',
+          runNumber: 2,
+          candidateLabel: '2A',
+        },
+      });
+      selectSceneWithCandidates([edited, original]);
+
+      expect(component.runTooltip(edited)).toBe(
+        'Run: 2, Candidate: A (edit of run 1; originally 2A)',
+      );
+      expect(component.runTooltip(original)).toContain(
+        '(originally 2A in Other scene)',
+      );
     });
   });
 

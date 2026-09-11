@@ -719,6 +719,10 @@
             }
           }
 
+          &:not(:has(.edit-btn)) .move-btn {
+            right: 40px;
+          }
+
           .reference-image-bg {
             position: absolute;
             top: 0;
