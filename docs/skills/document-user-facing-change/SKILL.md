@@ -20,15 +20,16 @@ does, configures, or pays for. Start with the repository map in
    model/catalog names, permissions, cost surface, and known limits. Do not
    infer a release or claim a private feature is shipped.
 4. Choose the smallest canonical edit: README capability/teaser,
-   `docs/walkthrough.md` step, `CHANGELOG.md` release entry, or a feature
+   `docs/walkthrough.md` step, `CHANGELOG.md` `## Unreleased` entry, or a feature
    document. If none is needed, record that decision in the handover.
 5. If visuals are needed, reuse a truthful existing GIF or capture one or two
    real states from the target build. Keep viewport/theme consistent and write
    meaningful alt text and captions. Never fabricate UI or expose private data.
 6. Write `Benefit`, 3–5 UI actions, `Expected result`, one important
-   `Caveat`, and one or two screenshots only when useful. Use stable
-   repo-relative media paths. Verify links/anchors, rendered Markdown, and
-   adjacent outdated text.
+   `Caveat`, and one or two screenshots only when useful. Resolve media paths
+   relative to the Markdown file containing each link: use `media/` inside
+   `docs/*.md`, and `docs/media/` from root-level Markdown. Verify
+   links/anchors, rendered Markdown, and adjacent outdated text.
 7. State what was verified and what was not tested. Keep wording literal:
    experimental, unreleased, and shipped are different states.
 

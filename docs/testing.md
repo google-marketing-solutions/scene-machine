@@ -152,3 +152,6 @@ Notes:
 Attach a screenshot or recording only when it demonstrates a result or
 failure. Sanitize project/user identifiers, customer assets, signed media
 URLs, tokens, and other private data before sharing evidence.
+
+For an agent-executable version of this flow, see
+[test-ui-change](skills/test-ui-change/SKILL.md).
