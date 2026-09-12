@@ -135,8 +135,14 @@ class FakeDocumentRef:
     self._collection = collection
     self.id = doc_id
 
+  @property
+  def path(self):
+    return f'{self._collection.path}/{self.id}'
+
   def get(self):
-    return FakeSnapshot(self.id, self._collection.docs.get(self.id))
+    snapshot = FakeSnapshot(self.id, self._collection.docs.get(self.id))
+    snapshot.reference = self
+    return snapshot
 
   def set(self, data):
     self._collection.docs[self.id] = copy.deepcopy(data)
@@ -188,8 +194,9 @@ class FakeQuery:
 
 class FakeCollection(FakeQuery):
 
-  def __init__(self):
+  def __init__(self, path=''):
     super().__init__(self)
+    self.path = path
     self.docs = {}
     self._subcollections = {}  # (doc_id, name) -> FakeCollection
 
@@ -202,7 +209,9 @@ class FakeCollection(FakeQuery):
     return None, FakeDocumentRef(self, doc_id)
 
   def subcollection(self, doc_id, name):
-    return self._subcollections.setdefault((doc_id, name), FakeCollection())
+    return self._subcollections.setdefault(
+        (doc_id, name), FakeCollection(f'{self.path}/{doc_id}/{name}')
+    )
 
 
 class FakeBatch:
@@ -243,9 +252,21 @@ class FakeUiDb:
     self._collections = {}
     self.lock = threading.Lock()
     self.commit_barrier = None
+    self.get_all_calls = 0
+    self.get_all_refs = []
+    self.reverse_get_all = False
 
   def collection(self, name):
-    return self._collections.setdefault(name, FakeCollection())
+    return self._collections.setdefault(name, FakeCollection(name))
+
+  def get_all(self, refs):
+    refs = list(refs)
+    self.get_all_calls += 1
+    self.get_all_refs.append([ref.path for ref in refs])
+    snapshots = [ref.get() for ref in refs]
+    if self.reverse_get_all:
+      snapshots.reverse()
+    return snapshots
 
   def batch(self):
     return FakeBatch(self)
@@ -990,6 +1011,135 @@ def test_project_storyboard_split_into_scenes_subcollection(
   # from reading every scene of every project.
   listed = client.get('/api/projects').get_json()['projects']
   assert [s['description'] for s in listed[0]['storyboard']] == ['scene-0']
+
+
+def test_project_list_batches_first_scene_reads_and_keeps_query_order(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  for project_id in ('b-project', 'a-project'):
+    assert (
+        client.post(
+            '/api/projects',
+            json={
+                'id': project_id,
+                'name': project_id,
+                'storyboard': [
+                    {'description': f'{project_id}-first'},
+                    {'description': f'{project_id}-second'},
+                ],
+            },
+        ).status_code
+        == 200
+    )
+
+  fake_db.reverse_get_all = True
+  response = client.get('/api/projects')
+
+  assert response.status_code == 200
+  listed = response.get_json()['projects']
+  assert [project['id'] for project in listed] == ['a-project', 'b-project']
+  assert [scene['description'] for scene in listed[0]['storyboard']] == [
+      'a-project-first'
+  ]
+  assert fake_db.get_all_calls == 1
+  assert fake_db.get_all_refs == [[
+      'projects/a-project/scenes/000000',
+      'projects/b-project/scenes/000000',
+  ]]
+
+
+def test_project_list_keeps_project_with_missing_first_scene(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  assert (
+      client.post(
+          '/api/projects',
+          json={'id': 'no-scene', 'name': 'No scene', 'storyboard': []},
+      ).status_code
+      == 200
+  )
+
+  response = client.get('/api/projects')
+
+  assert response.status_code == 200
+  assert response.get_json()['projects'] == [{
+      'id': 'no-scene',
+      'name': 'No scene',
+      'createdBy': None,
+      'storyboard': [],
+  }]
+  assert fake_db.get_all_calls == 1
+  assert fake_db.get_all_refs == [['projects/no-scene/scenes/000000']]
+
+
+def test_empty_project_list_skips_empty_batch(monkeypatch, orchestrator_module):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+
+  response = orch.app.test_client().get('/api/projects')
+
+  assert response.status_code == 200
+  assert response.get_json() == {'projects': []}
+  assert fake_db.get_all_calls == 0
+
+
+def test_project_list_batches_after_verified_owner_filter(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(
+      monkeypatch, AUTH_MODE='iap', IAP_AUDIENCE=_IAP_AUDIENCE
+  )
+  _stub_identity(
+      monkeypatch,
+      orch,
+      {'t-u1': {'email': 'u1@x'}, 't-u2': {'email': 'u2@x'}},
+  )
+  client = orch.app.test_client()
+
+  for project_id, assertion in (('u2-project', 't-u2'), ('u1-project', 't-u1')):
+    assert (
+        client.post(
+            '/api/projects',
+            json={'id': project_id, 'name': project_id, 'storyboard': []},
+            headers=_iap(assertion),
+        ).status_code
+        == 200
+    )
+
+  fake_db.get_all_calls = 0
+  fake_db.get_all_refs.clear()
+  mine_u1 = client.get('/api/projects?createdBy=me', headers=_iap('t-u1'))
+  mine_u2 = client.get('/api/projects?createdBy=me', headers=_iap('t-u2'))
+  shared = client.get('/api/projects', headers=_iap('t-u2'))
+
+  assert [project['id'] for project in mine_u1.get_json()['projects']] == [
+      'u1-project'
+  ]
+  assert [project['id'] for project in mine_u2.get_json()['projects']] == [
+      'u2-project'
+  ]
+  assert [project['id'] for project in shared.get_json()['projects']] == [
+      'u1-project',
+      'u2-project',
+  ]
+  assert fake_db.get_all_calls == 3
+  assert fake_db.get_all_refs == [
+      ['projects/u1-project/scenes/000000'],
+      ['projects/u2-project/scenes/000000'],
+      [
+          'projects/u1-project/scenes/000000',
+          'projects/u2-project/scenes/000000',
+      ],
+  ]
 
 
 def test_project_patch_prunes_removed_scenes(monkeypatch, orchestrator_module):

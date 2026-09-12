@@ -105,6 +105,13 @@ ahead; offscreen images wait until needed. The homepage shows images only,
 with a static placeholder when no image is available; it never loads videos.
 Changing the selected candidate uses its own thumbnail, not the old selection's
 cached image. Oversized images still display using their original URL.
+Cached thumbnails do not need a new signed-URL request. Nearby images that
+are not cached share batched signing requests as they come into view.
+
+Versioned application JavaScript and CSS also use long-lived private browser
+caching. The HTML entry point remains revalidated so a reload discovers new
+application versions; project data and announcements keep their existing
+freshness policies.
 
 This is bounded, best-effort browser storage: browsers may evict it earlier,
 it does not provide offline project access, and it is not a remote security
