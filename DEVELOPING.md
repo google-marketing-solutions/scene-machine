@@ -155,8 +155,8 @@ A full `./deploy.sh` stays the safe default and is what you should run for a rel
 
 ### Thumbnail cache identity
 
-Homepage and storyboard image previews use `ThumbnailCacheService` with a
-separate Cache Storage budget from candidate videos. Keep thumbnail object
+Homepage, storyboard and composition image previews use `ThumbnailCacheService`
+with a separate Cache Storage budget from candidate videos. Keep thumbnail object
 paths immutable: `uploadThumbnail` includes a content hash in the filename,
 so changed bytes get a new path. Cache identity is bucket + project + path;
 rotating a signed URL does not invalidate unchanged image bytes. Do not start
@@ -168,6 +168,25 @@ stale-request fencing and object-URL cleanup stay consistent. Archived candidate
 previews must use `thumbnailImagePersist=false`. The cache is an optional
 optimization, not an authorization boundary or an offline project store; see
 the [user-facing cache limits and caveats](README.md#local-media-cache).
+
+Composition uses `CandidateVideoCacheService.acquireCached` for its active clip:
+a warm hit returns an object-URL lease, while a miss keeps normal browser
+streaming. Do not replace this with unconditional `acquire`, which waits for a
+complete cold download. Release leases when switching sources or leaving the
+page. Filmstrip cards use actual clip thumbnails when present; legacy clips
+without thumbnails retain their video-frame preview.
+
+### Response delivery
+
+Only successful GET responses from the SPA and project list/detail endpoints
+are eligible for gzip compression, with a 500-byte minimum and an explicit
+text MIME-type allowlist. Auth errors, mutations, worker/control routes and
+partial range responses bypass it. Keep this opt-in: do not enable Flask-Compress
+globally or publicly cache authenticated project JSON. Content-hashed Angular
+JS/CSS have private immutable caching; HTML still revalidates. Regression tests
+in `test/test_spa_delivery.py` cover negotiation, validators, ranges and endpoint
+boundaries. Measure deployed transfer sizes separately from local fixture
+results before claiming a production latency improvement.
 
 ### Dictation feature flag
 

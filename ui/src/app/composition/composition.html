@@ -56,8 +56,8 @@
                 [src]="heldVideoSrc()"
                 [muted]="isMuted() || !currentClipIncludesAudio() || !currentClipSourceReady()"
                 [volume]="videoVolume()"
-                (timeupdate)="onTimeUpdate()"
-                (loadedmetadata)="onVideoLoadedMetadata()"
+                (timeupdate)="onTimeUpdate($event)"
+                (loadedmetadata)="onVideoLoadedMetadata($event)"
                 (click)="togglePlay()"
                 [autoplay]="isPlaying()"
                 playsinline
@@ -283,14 +283,34 @@
                 </div>
               }
               <div class="video-thumbnail">
-                <video
-                  [src]="
-                    (configService.isGeneratedScene(scene)
-                      ? scene.candidates![scene.selectedCandidateIndex!].video
-                      : scene.video
-                    ) | mediaSrc
-                  "
-                ></video>
+                @if (configService.isGeneratedScene(scene)) {
+                  @let candidate = scene.candidates![scene.selectedCandidateIndex!];
+                  @if (candidate.highQualityThumbnail) {
+                    <img
+                      [appThumbnailImage]="candidate.highQualityThumbnail"
+                      [thumbnailCacheScope]="candidateCacheScope()"
+                      [thumbnailImagePersist]="!candidate.isArchived"
+                      alt="Thumbnail"
+                    />
+                  } @else if (candidate.lowQualityThumbnail) {
+                    <img [src]="candidate.lowQualityThumbnail" alt="Thumbnail" />
+                  } @else {
+                    <video [src]="candidate.video | mediaSrc"></video>
+                  }
+                } @else if (scene.highQualityThumbnail || scene.lowQualityThumbnail) {
+                  @if (scene.highQualityThumbnail) {
+                    <img
+                      [appThumbnailImage]="scene.highQualityThumbnail"
+                      [thumbnailCacheScope]="candidateCacheScope()"
+                      [thumbnailImagePersist]="true"
+                      alt="Thumbnail"
+                    />
+                  } @else {
+                    <img [src]="scene.lowQualityThumbnail" alt="Thumbnail" />
+                  }
+                } @else {
+                  <video [src]="scene.video | mediaSrc"></video>
+                }
               </div>
               <div class="video-info">
                 <div class="video-chip" [title]="scene.name">{{ scene.name }}</div>
