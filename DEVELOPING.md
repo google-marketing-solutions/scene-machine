@@ -163,6 +163,11 @@ rotating a signed URL does not invalidate unchanged image bytes. Do not start
 overwriting existing thumbnail paths without also adding an explicit revision
 to cache identity.
 
+Resolve thumbnail URLs through `MediaService.signUrls` after a byte-cache miss.
+It splits requests by both the endpoint's 100-path cap and a 3,500-character
+encoded relative-URL budget, leaving headroom below Gunicorn's default request
+line limit. A path-count cap alone is insufficient for long or escaped names.
+
 When adding a preview, use `ThumbnailImageDirective` so near-viewport loading,
 stale-request fencing and object-URL cleanup stay consistent. Archived candidate
 previews must use `thumbnailImagePersist=false`. The cache is an optional
