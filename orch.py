@@ -60,6 +60,7 @@ from flask import g as flask_g
 from flask import request as flask_request
 from flask import Response as flask_response
 from flask import send_from_directory
+from flask_compress import Compress
 from werkzeug.exceptions import BadRequest
 from werkzeug.exceptions import RequestEntityTooLarge
 from flask_cors import CORS
@@ -188,6 +189,61 @@ CORS(
         'http://localhost:4200',
     ],
 )
+
+# Compression is deliberately opt-in per endpoint. The project responses are
+# authenticated, user-specific JSON; control-plane and signed-URL routes must
+# never inherit a blanket compressor. Flask-Compress handles negotiation and
+# validator updates once this hook has selected an eligible successful GET.
+app.config.update(
+    COMPRESS_REGISTER=False,
+    COMPRESS_ALGORITHM=['gzip'],
+    COMPRESS_MIMETYPES=[
+        'application/javascript',
+        'application/json',
+        'text/css',
+        'text/html',
+        'text/javascript',
+    ],
+    COMPRESS_MIN_SIZE=500,
+    # send_from_directory returns streamed responses. Keep gzip available for
+    # those allow-listed views, and let Flask-Compress re-evaluate validators
+    # after it has selected the representation.
+    COMPRESS_ALGORITHM_STREAMING=['gzip'],
+    COMPRESS_STREAMING_ENDPOINT_CONDITIONAL=[
+        'spa_handler',
+        'projects_handler',
+        'project_detail_handler',
+    ],
+)
+_compressor = Compress(app)
+_COMPRESS_GET_ENDPOINTS = frozenset({
+    'spa_handler',
+    'projects_handler',
+    'project_detail_handler',
+})
+
+
+@app.after_request
+def compress_selected_get(response: flask_response) -> flask_response:
+  """Compress only successful GETs from the explicitly allow-listed views."""
+  if (
+      flask_request.method != 'GET'
+      or flask_request.endpoint not in _COMPRESS_GET_ENDPOINTS
+      or not 200 <= response.status_code < 300
+  ):
+    return response
+  vary = response.headers.get('Vary')
+  if not vary:
+    response.headers['Vary'] = 'Accept-Encoding'
+  elif 'accept-encoding' not in vary.lower():
+    response.headers['Vary'] = f'{vary}, Accept-Encoding'
+  if (
+      response.status_code == 206
+      or 'Content-Range' in response.headers
+      or flask_request.accept_encodings.quality('gzip') <= 0
+  ):
+    return response
+  return _compressor.after_request(response)
 
 
 def _unauthorized(message: str) -> flask_response:

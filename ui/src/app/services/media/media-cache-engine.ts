@@ -126,6 +126,30 @@ export class MediaCacheEngine {
     }
   }
 
+  async acquireCached(
+    scope: MediaCacheScope,
+    file: MediaRef | null | undefined,
+  ): Promise<MediaCacheLease | null> {
+    if (!file?.path) return null;
+
+    const key = this.cacheRequest(scope, file.path).url;
+    const version = this.version(scope.projectId, file.path);
+    const current = this.active.get(key);
+    if (current?.version === version) return this.retain(current);
+
+    const cache = await this.openCache();
+    if (!cache) return null;
+    const blob = await this.readCached(cache, new Request(key));
+    if (!blob || this.version(scope.projectId, file.path) !== version) {
+      return null;
+    }
+    try {
+      return this.createLease(key, version, blob);
+    } catch {
+      return null;
+    }
+  }
+
   async invalidateCandidate(projectId: string, path: string): Promise<void> {
     this.bump(this.candidateVersions, this.candidateKey(projectId, path));
     await this.enqueueMutation(async () => {
@@ -166,20 +190,9 @@ export class MediaCacheEngine {
       const cache = await this.openCache();
       const request = new Request(key);
       if (cache) {
-        const cached = await cache.match(request);
-        if (cached) {
-          const metadata = this.metadata(cached);
-          if (metadata && this.isFresh(metadata.downloadedAt)) {
-            try {
-              const blob = await this.readResponse(cached);
-              if (this.version(scope.projectId, file.path!) === version) {
-                return {blob, fallbackUrl: ''};
-              }
-            } catch {
-              // A corrupt or unexpectedly large entry is discarded below.
-            }
-          }
-          await cache.delete(request);
+        const blob = await this.readCached(cache, request);
+        if (blob && this.version(scope.projectId, file.path!) === version) {
+          return {blob, fallbackUrl: ''};
         }
       }
 
@@ -247,6 +260,47 @@ export class MediaCacheEngine {
     return new Blob(chunks, {
       type: response.headers.get('content-type') || 'application/octet-stream',
     });
+  }
+
+  private async readCached(
+    cache: Cache,
+    request: Request,
+  ): Promise<Blob | undefined> {
+    let cached: Response | undefined;
+    try {
+      cached = await cache.match(request);
+    } catch {
+      return undefined;
+    }
+    if (!cached) return undefined;
+
+    if (
+      cached.status !== 200 ||
+      !['basic', 'cors', 'default'].includes(cached.type)
+    ) {
+      await this.deleteCached(cache, request);
+      return undefined;
+    }
+
+    const metadata = this.metadata(cached);
+    if (!metadata || !this.isFresh(metadata.downloadedAt)) {
+      await this.deleteCached(cache, request);
+      return undefined;
+    }
+    try {
+      return await this.readResponse(cached);
+    } catch {
+      await this.deleteCached(cache, request);
+      return undefined;
+    }
+  }
+
+  private async deleteCached(cache: Cache, request: Request): Promise<void> {
+    try {
+      await cache.delete(request);
+    } catch {
+      // Cache Storage cleanup is best effort.
+    }
   }
 
   private async store(
