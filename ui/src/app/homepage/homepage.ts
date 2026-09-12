@@ -37,7 +37,6 @@ import {
 import {CandidateCacheScope} from '../services/media/candidate-video-cache';
 import {MediaService} from '../services/media/media';
 import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialog';
-import {CandidateVideoDirective} from '../shared/candidate-video/candidate-video.directive';
 import {ThumbnailImageDirective} from '../shared/thumbnail-image/thumbnail-image.directive';
 import {HomepageAnnouncement} from './homepage-announcement';
 
@@ -55,7 +54,6 @@ import {HomepageAnnouncement} from './homepage-announcement';
     DatePipe,
     MatDialogModule,
     MatMenuModule,
-    CandidateVideoDirective,
     ThumbnailImageDirective,
     HomepageAnnouncement,
   ],
@@ -138,7 +136,6 @@ export class Homepage {
       return {
         lowQualityThumbnail: firstScene.lowQualityThumbnail,
         highQualityThumbnail: firstScene.highQualityThumbnail,
-        videoUrl: firstScene.video,
       };
     }
     if (this.config.isGeneratedScene(firstScene)) {
@@ -153,7 +150,6 @@ export class Homepage {
           selectedCandidate?.highQualityThumbnail ||
           firstScene.highQualityThumbnail,
         referenceImage: firstScene.referenceImage,
-        videoUrl: selectedCandidate?.video,
       };
     }
     return {};
@@ -167,8 +163,7 @@ export class Homepage {
     return {
       ...thumb,
       showReference: !hasThumb && thumb.referenceImage !== undefined,
-      showVideo: !hasThumb && !thumb.referenceImage && !!thumb.videoUrl,
-      showPlaceholder: !hasThumb && !thumb.referenceImage && !thumb.videoUrl,
+      showPlaceholder: !hasThumb && !thumb.referenceImage,
     };
   }
 

@@ -100,7 +100,8 @@ The browser may cache selected or hovered candidate videos locally for up to
 seven days to make scene switching faster. Homepage and storyboard thumbnails
 use a separate cache: up to 1 MiB per image and 64 MiB total (at most 1,024
 images), with the same seven-day expiry. Images near the visible area load
-ahead; offscreen images and unhovered video previews do not all load at startup.
+ahead; offscreen images wait until needed. The homepage shows images only,
+with a static placeholder when no image is available; it never loads videos.
 Changing the selected candidate uses its own thumbnail, not the old selection's
 cached image. Oversized images still display using their original URL.
 

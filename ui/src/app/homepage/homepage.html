@@ -83,20 +83,7 @@
                 />
               }
 
-              <!-- Fallback 2: Video -->
-              @if (thumb.showVideo) {
-                <video
-                  [appCandidateVideo]="thumb.videoUrl"
-                  [candidateVideoCacheScope]="getThumbnailCacheScope(project)"
-                  [candidateVideoPersist]="thumbnailPersistForProject(project)"
-                  [candidateVideoHover]="true"
-                  muted
-                  loop
-                  preload="none"
-                ></video>
-              }
-
-              <!-- Fallback 3: Placeholder -->
+              <!-- Fallback: Placeholder -->
               @if (thumb.showPlaceholder) {
                 <div class="placeholder-thumbnail">
                   <mat-icon>movie</mat-icon>
