@@ -97,7 +97,8 @@ project.
 ### Local media cache
 
 The browser may cache selected or hovered candidate videos locally for up to
-seven days to make scene switching faster. Homepage and storyboard thumbnails
+seven days to make scene switching faster: up to 64 MiB per video and 512 MiB
+total (at most 64 videos). Homepage and storyboard thumbnails
 use a separate cache: up to 1 MiB per image and 64 MiB total (at most 1,024
 images), with the same seven-day expiry. Images near the visible area load
 ahead; offscreen images wait until needed. The homepage shows images only,

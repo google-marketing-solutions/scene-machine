@@ -28,7 +28,7 @@ export type CandidateVideoLease = MediaCacheLease;
 const CACHE_NAME = 'scene-machine-candidate-videos-v1';
 const CACHE_PATH = '/__scene_machine_candidate_video_cache__/v1/';
 const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 512 * 1024 * 1024;
 const MAX_ENTRIES = 64;
 
 @Injectable({providedIn: 'root'})
