@@ -691,6 +691,7 @@
     flex: 1 1 auto;
     min-height: 0;
     overflow: auto;
+    padding-inline-end: 64px !important;
     scrollbar-gutter: stable;
   }
 
@@ -702,7 +703,10 @@
   }
 
   &.dictation-enabled app-dictation-control {
-    flex: 0 0 auto;
+    position: absolute;
+    inset-inline-end: 16px;
+    bottom: 4px;
+    z-index: 2;
   }
 }
 

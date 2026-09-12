@@ -243,6 +243,79 @@ describe('Storyboard', () => {
     expect(component).toBeTruthy();
   });
 
+  it('exposes native vertical prompt resizing without stretch styles', () => {
+    mockConfigService.globalConfig.value = () => ({
+      duration: 5,
+      veoModel: 'veo-model',
+      numberOfCandidates: 1,
+      generateAudio: false,
+      dictation: {enabled: true},
+    });
+    const scene: GeneratedScene = {
+      id: 'resize-scene',
+      type: 'generated',
+      name: 'Resize scene',
+      prompt: 'scene prompt',
+      candidates: [],
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    fixture.detectChanges();
+
+    const textarea = fixture.nativeElement.querySelector(
+      '.prompt-box textarea',
+    ) as HTMLTextAreaElement;
+    const controlsArea = fixture.nativeElement.querySelector(
+      '.controls-area',
+    ) as HTMLElement;
+    const previewWrapper = fixture.nativeElement.querySelector(
+      '.preview-wrapper',
+    ) as HTMLElement;
+    const trimControls = fixture.nativeElement.querySelector(
+      '.trim-controls',
+    ) as HTMLElement;
+
+    expect(getComputedStyle(textarea).resize).toBe('vertical');
+    expect(getComputedStyle(textarea).overflow).toBe('auto');
+    expect(getComputedStyle(textarea).minHeight).toBe('136px');
+    expect(
+      fixture.nativeElement.querySelector(
+        '[aria-label="Open dictation controls"]',
+      ),
+    ).not.toBeNull();
+    expect(getComputedStyle(controlsArea).maxHeight).toBe('none');
+    expect(getComputedStyle(controlsArea).flexGrow).toBe('0');
+    expect(getComputedStyle(controlsArea).flexShrink).toBe('0');
+    expect(getComputedStyle(controlsArea).alignItems).toBe('flex-start');
+    expect(getComputedStyle(trimControls).justifyContent).toBe('flex-start');
+    expect(getComputedStyle(previewWrapper).flexGrow).toBe('0');
+    expect(getComputedStyle(previewWrapper).flexShrink).toBe('0');
+    expect(getComputedStyle(previewWrapper).minHeight).toBe('260px');
+  });
+
+  it('keeps the prompt resizable when dictation is disabled', () => {
+    const scene: GeneratedScene = {
+      id: 'resize-without-dictation-scene',
+      type: 'generated',
+      name: 'Resize without dictation',
+      prompt: 'scene prompt',
+      candidates: [],
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    fixture.detectChanges();
+
+    const textarea = fixture.nativeElement.querySelector(
+      '.prompt-box textarea',
+    ) as HTMLTextAreaElement;
+
+    expect(getComputedStyle(textarea).resize).toBe('vertical');
+    expect(getComputedStyle(textarea).minHeight).toBe('136px');
+    expect(
+      fixture.nativeElement.querySelector(
+        '[aria-label="Open dictation controls"]',
+      ),
+    ).toBeNull();
+  });
+
   it('updates the real filmstrip image when the selected candidate changes', async () => {
     const candidate = (path: string): Candidate => ({
       runNumber: path === 'candidate-a.jpg' ? 1 : 2,
