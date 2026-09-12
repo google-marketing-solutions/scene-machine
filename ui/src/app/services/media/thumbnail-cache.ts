@@ -22,24 +22,24 @@ import {
 } from './media-cache-engine';
 import {MediaRef, MediaService} from './media';
 
-export type CandidateCacheScope = MediaCacheScope;
-export type CandidateVideoLease = MediaCacheLease;
+export type ThumbnailCacheScope = MediaCacheScope;
+export type ThumbnailLease = MediaCacheLease;
 
-const CACHE_NAME = 'scene-machine-candidate-videos-v1';
-const CACHE_PATH = '/__scene_machine_candidate_video_cache__/v1/';
-const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
-const MAX_ENTRIES = 64;
+const CACHE_NAME = 'scene-machine-thumbnails-v1';
+const CACHE_PATH = '/__scene_machine_thumbnail_cache__/v1/';
+const MAX_ENTRY_BYTES = 1 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+const MAX_ENTRIES = 1024;
 
 @Injectable({providedIn: 'root'})
-export class CandidateVideoCacheService {
+export class ThumbnailCacheService {
   private readonly mediaService = inject(MediaService);
   private readonly engine = new MediaCacheEngine(
     file => this.mediaService.resolve(file),
     {
       cacheName: CACHE_NAME,
       cachePath: CACHE_PATH,
-      entryLabel: 'Candidate video',
+      entryLabel: 'Thumbnail',
       maxEntryBytes: MAX_ENTRY_BYTES,
       maxTotalBytes: MAX_TOTAL_BYTES,
       maxEntries: MAX_ENTRIES,
@@ -47,10 +47,10 @@ export class CandidateVideoCacheService {
   );
 
   acquire(
-    scope: CandidateCacheScope,
+    scope: ThumbnailCacheScope,
     file: MediaRef | null | undefined,
-    persist: boolean,
-  ): Promise<CandidateVideoLease> {
+    persist = true,
+  ): Promise<ThumbnailLease> {
     return this.engine.acquire(scope, file, persist);
   }
 
