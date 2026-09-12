@@ -34,9 +34,11 @@ import {
   ProjectConfig,
   ThumbnailMaterial,
 } from '../services/config/config';
+import {CandidateCacheScope} from '../services/media/candidate-video-cache';
 import {MediaService} from '../services/media/media';
-import {MediaSrcPipe} from '../services/media/media-src.pipe';
 import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialog';
+import {CandidateVideoDirective} from '../shared/candidate-video/candidate-video.directive';
+import {ThumbnailImageDirective} from '../shared/thumbnail-image/thumbnail-image.directive';
 import {HomepageAnnouncement} from './homepage-announcement';
 
 /**
@@ -53,7 +55,8 @@ import {HomepageAnnouncement} from './homepage-announcement';
     DatePipe,
     MatDialogModule,
     MatMenuModule,
-    MediaSrcPipe,
+    CandidateVideoDirective,
+    ThumbnailImageDirective,
     HomepageAnnouncement,
   ],
   templateUrl: './homepage.html',
@@ -92,9 +95,9 @@ export class Homepage {
   }
 
   /**
-   * Pre-warms the signed-URL cache for every visible thumbnail with one batch
-   * `/api/signUrl` request, so each card's `| mediaSrc` resolves from the cache
-   * instead of firing its own request (one IAM signBlob RPC per card).
+   * Pre-warms the signed-URL cache for every rendered image thumbnail with one
+   * batch `/api/signUrl` request. ThumbnailImageDirective then resolves from
+   * this cache instead of firing one signing request per card.
    */
   private presignThumbnails(projects: ProjectConfig[]) {
     const paths: string[] = [];
@@ -106,14 +109,11 @@ export class Homepage {
       if (thumb.showReference && thumb.referenceImage?.path) {
         paths.push(thumb.referenceImage.path);
       }
-      if (thumb.showVideo && thumb.videoUrl?.path) {
-        paths.push(thumb.videoUrl.path);
-      }
     }
     if (paths.length === 0) {
       return;
     }
-    // Best-effort: each mediaSrc pipe re-signs its own path on a cache miss.
+    // Best-effort: the thumbnail directive resolves its own path on a cache miss.
     void this.mediaService.signUrls(paths).catch((error: unknown) => {
       console.error('Failed to pre-sign project thumbnails', error);
     });
@@ -166,10 +166,21 @@ export class Homepage {
 
     return {
       ...thumb,
-      showReference: thumb.referenceImage !== undefined,
+      showReference: !hasThumb && thumb.referenceImage !== undefined,
       showVideo: !hasThumb && !thumb.referenceImage && !!thumb.videoUrl,
       showPlaceholder: !hasThumb && !thumb.referenceImage && !thumb.videoUrl,
     };
+  }
+
+  getThumbnailCacheScope(project: ProjectConfig): CandidateCacheScope | null {
+    const bucket = this.config.globalConfig.value()?.gcsBucket;
+    return bucket && project.id ? {bucket, projectId: project.id} : null;
+  }
+
+  thumbnailPersistForProject(project: ProjectConfig): boolean {
+    const scene = project.storyboard?.[0];
+    if (!scene || !this.config.isGeneratedScene(scene)) return true;
+    return !scene.candidates?.[scene.selectedCandidateIndex ?? 0]?.isArchived;
   }
 
   getAspectRatio(project: ProjectConfig): string {
