@@ -41,7 +41,12 @@ describe('Homepage', () => {
     deleteProject: vi.fn().mockResolvedValue(undefined),
     theme: signal('light-mode'),
     primaryColor: signal('theme-azure'),
-    globalConfig: {value: () => ({gcsBucket: 'bucket-a'})},
+    globalConfig: {
+      value: (): {gcsBucket: string} | undefined => ({
+        gcsBucket: 'bucket-a',
+      }),
+      isLoading: () => false,
+    },
     isGeneratedScene: (scene: GeneratedScene) => scene.type === 'generated',
     isProvidedVideoScene: (scene: GeneratedScene) => scene.type === 'video',
   };
@@ -72,7 +77,12 @@ describe('Homepage', () => {
       deleteProject: vi.fn().mockResolvedValue(undefined),
       theme: signal('light-mode'),
       primaryColor: signal('theme-azure'),
-      globalConfig: {value: () => ({gcsBucket: 'bucket-a'})},
+      globalConfig: {
+        value: (): {gcsBucket: string} | undefined => ({
+          gcsBucket: 'bucket-a',
+        }),
+        isLoading: () => false,
+      },
       isGeneratedScene: (scene: GeneratedScene) => scene.type === 'generated',
       isProvidedVideoScene: (scene: GeneratedScene) => scene.type === 'video',
     };
@@ -239,7 +249,93 @@ describe('Homepage', () => {
     expect(card.querySelector('.high-res-img').src).toContain(
       'blob:candidate.jpg',
     );
-    expect(mockMediaService.signUrls).toHaveBeenCalledWith(['candidate.jpg']);
+    expect(mockMediaService.signUrls).not.toHaveBeenCalled();
+  });
+
+  it('waits for global config before creating cached thumbnail images', async () => {
+    const loading = signal(true);
+    const globalConfig = signal<{gcsBucket: string} | undefined>(undefined);
+    mockConfigService.globalConfig = {
+      value: () => globalConfig(),
+      isLoading: () => loading(),
+    };
+    const project = {
+      id: 'project-a',
+      name: 'Project',
+      aspectRatio: '16:9',
+      storyboard: [
+        {
+          id: 'scene-a',
+          name: 'Scene',
+          type: 'generated',
+          selectedCandidateIndex: 0,
+          candidates: [{highQualityThumbnail: {path: 'candidate.jpg'}}],
+        },
+      ],
+    } as unknown as ProjectConfig;
+    mockConfigService.getProjects.mockResolvedValueOnce([project]);
+    mockThumbnailCache.acquire.mockClear();
+
+    component.fetchProjects();
+    await Promise.resolve();
+    await Promise.resolve();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.project-thumbnail');
+    expect(card.querySelector('.high-res-img')).toBeNull();
+    expect(mockThumbnailCache.acquire).not.toHaveBeenCalled();
+
+    globalConfig.set({gcsBucket: 'bucket-a'});
+    loading.set(false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(card.querySelector('.high-res-img')).not.toBeNull();
+    expect(mockThumbnailCache.acquire).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps images available with a non-persistent fallback when config fails', async () => {
+    const loading = signal(true);
+    mockConfigService.globalConfig = {
+      value: () => undefined,
+      isLoading: () => loading(),
+    };
+    const project = {
+      id: 'project-a',
+      name: 'Project',
+      aspectRatio: '16:9',
+      storyboard: [
+        {
+          id: 'scene-a',
+          name: 'Scene',
+          type: 'generated',
+          selectedCandidateIndex: 0,
+          candidates: [{highQualityThumbnail: {path: 'candidate.jpg'}}],
+        },
+      ],
+    } as unknown as ProjectConfig;
+    mockConfigService.getProjects.mockResolvedValueOnce([project]);
+    mockThumbnailCache.acquire.mockClear();
+
+    component.fetchProjects();
+    await Promise.resolve();
+    await Promise.resolve();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.high-res-img')).toBeNull();
+    expect(mockThumbnailCache.acquire).not.toHaveBeenCalled();
+
+    loading.set(false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('.high-res-img')).not.toBeNull();
+    expect(mockThumbnailCache.acquire).toHaveBeenCalledWith(
+      {bucket: '', projectId: ''},
+      {path: 'candidate.jpg'},
+      false,
+    );
   });
 
   it.each([

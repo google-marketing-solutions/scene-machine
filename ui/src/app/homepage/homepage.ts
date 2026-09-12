@@ -35,7 +35,6 @@ import {
   ThumbnailMaterial,
 } from '../services/config/config';
 import {CandidateCacheScope} from '../services/media/candidate-video-cache';
-import {MediaService} from '../services/media/media';
 import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialog';
 import {ThumbnailImageDirective} from '../shared/thumbnail-image/thumbnail-image.directive';
 import {HomepageAnnouncement} from './homepage-announcement';
@@ -64,7 +63,6 @@ import {HomepageAnnouncement} from './homepage-announcement';
 export class Homepage {
   private config = inject(ConfigService);
   private dialog = inject(MatDialog);
-  private mediaService = inject(MediaService);
   projects = signal<ProjectConfig[]>([]);
   theme = this.config.theme;
   primaryColor = this.config.primaryColor;
@@ -88,32 +86,6 @@ export class Homepage {
         return dateB - dateA;
       });
       this.projects.set(projects);
-      this.presignThumbnails(projects);
-    });
-  }
-
-  /**
-   * Pre-warms the signed-URL cache for every rendered image thumbnail with one
-   * batch `/api/signUrl` request. ThumbnailImageDirective then resolves from
-   * this cache instead of firing one signing request per card.
-   */
-  private presignThumbnails(projects: ProjectConfig[]) {
-    const paths: string[] = [];
-    for (const project of projects) {
-      const thumb = this.getThumbnailData(project);
-      if (thumb.highQualityThumbnail?.path) {
-        paths.push(thumb.highQualityThumbnail.path);
-      }
-      if (thumb.showReference && thumb.referenceImage?.path) {
-        paths.push(thumb.referenceImage.path);
-      }
-    }
-    if (paths.length === 0) {
-      return;
-    }
-    // Best-effort: the thumbnail directive resolves its own path on a cache miss.
-    void this.mediaService.signUrls(paths).catch((error: unknown) => {
-      console.error('Failed to pre-sign project thumbnails', error);
     });
   }
 
@@ -170,6 +142,10 @@ export class Homepage {
   getThumbnailCacheScope(project: ProjectConfig): CandidateCacheScope | null {
     const bucket = this.config.globalConfig.value()?.gcsBucket;
     return bucket && project.id ? {bucket, projectId: project.id} : null;
+  }
+
+  thumbnailImagesReady(): boolean {
+    return !this.config.globalConfig.isLoading();
   }
 
   thumbnailPersistForProject(project: ProjectConfig): boolean {

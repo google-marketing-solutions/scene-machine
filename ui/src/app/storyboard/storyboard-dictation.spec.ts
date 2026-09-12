@@ -179,6 +179,14 @@ describe('Storyboard dictation parent binding', () => {
               (path: string) => `https://example.test/${path}`,
             ),
             resolve: vi.fn((file: {url: string}) => Promise.resolve(file.url)),
+            signUrls: vi
+              .fn()
+              .mockImplementation(
+                async (paths: string[]) =>
+                  new Map(
+                    paths.map(path => [path, `https://example.test/${path}`]),
+                  ),
+              ),
           },
         },
         {provide: RemixEngineService, useValue: remixEngine},
@@ -337,7 +345,14 @@ describe('Storyboard dictation with the real control', () => {
               .mockImplementation((path: string) =>
                 Promise.resolve(`https://example.test/${path}`),
               ),
-            signUrls: vi.fn().mockResolvedValue(new Map()),
+            signUrls: vi
+              .fn()
+              .mockImplementation(
+                async (paths: string[]) =>
+                  new Map(
+                    paths.map(path => [path, `https://example.test/${path}`]),
+                  ),
+              ),
           },
         },
         RemixEngineService,

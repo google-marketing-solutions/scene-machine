@@ -62,7 +62,7 @@
                 <img [src]="thumb.lowQualityThumbnail" class="low-quality-thumb" alt="Thumbnail" />
               }
 
-              @if (thumb.highQualityThumbnail) {
+              @if (thumb.highQualityThumbnail && thumbnailImagesReady()) {
                 <img
                   [appThumbnailImage]="thumb.highQualityThumbnail"
                   [thumbnailCacheScope]="getThumbnailCacheScope(project)"
@@ -74,7 +74,7 @@
               }
 
               <!-- Fallback 1: Reference image -->
-              @if (thumb.showReference) {
+              @if (thumb.showReference && thumbnailImagesReady()) {
                 <img
                   [appThumbnailImage]="thumb.referenceImage"
                   [thumbnailCacheScope]="getThumbnailCacheScope(project)"
