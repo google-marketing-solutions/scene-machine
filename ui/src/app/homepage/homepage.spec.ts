@@ -28,7 +28,6 @@ import {
   GeneratedScene,
   ProjectConfig,
 } from '../services/config/config';
-import {CandidateVideoCacheService} from '../services/media/candidate-video-cache';
 import {MediaService} from '../services/media/media';
 import {ThumbnailCacheService} from '../services/media/thumbnail-cache';
 import {Homepage} from './homepage';
@@ -100,7 +99,6 @@ describe('Homepage', () => {
         provideHttpClientTesting(),
         {provide: ConfigService, useValue: mockConfigService},
         {provide: MediaService, useValue: mockMediaService},
-        {provide: CandidateVideoCacheService, useValue: {acquire: vi.fn()}},
         {provide: ThumbnailCacheService, useValue: mockThumbnailCache},
       ],
     })
@@ -243,6 +241,62 @@ describe('Homepage', () => {
     );
     expect(mockMediaService.signUrls).toHaveBeenCalledWith(['candidate.jpg']);
   });
+
+  it.each([
+    {
+      label: 'a provided video scene',
+      scene: {
+        id: 'scene-a',
+        name: 'Scene',
+        type: 'video',
+        video: {path: 'scene.mp4', url: 'scene-url'},
+      },
+    },
+    {
+      label: 'a generated scene with a video-only candidate',
+      scene: {
+        id: 'scene-a',
+        name: 'Scene',
+        type: 'generated',
+        selectedCandidateIndex: 0,
+        candidates: [
+          {
+            runNumber: 1,
+            durationSeconds: 4,
+            model: 'model',
+            prompt: 'prompt',
+            generateAudio: false,
+            resolution: '1080p',
+            video: {path: 'candidate.mp4', url: 'candidate-url'},
+          },
+        ],
+      },
+    },
+  ])(
+    'renders a placeholder for $label without a hover video',
+    async ({scene}) => {
+      const project = {
+        id: 'video-project',
+        name: 'Video project',
+        aspectRatio: '16:9',
+        storyboard: [scene],
+      } as unknown as ProjectConfig;
+      mockConfigService.getProjects.mockResolvedValueOnce([project]);
+
+      component.fetchProjects();
+      await Promise.resolve();
+      await Promise.resolve();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const card = fixture.nativeElement.querySelector('.project-thumbnail');
+      expect(card.querySelector('video')).toBeNull();
+      expect(card.querySelector('.placeholder-thumbnail')).not.toBeNull();
+      card.dispatchEvent(new MouseEvent('mouseenter', {bubbles: true}));
+      await fixture.whenStable();
+      expect(card.querySelector('video')).toBeNull();
+    },
+  );
 
   it('does not refetch the project list until the server delete resolves', async () => {
     // Let the constructor's synchronous fetch settle before measuring.

@@ -540,7 +540,6 @@ export interface ThumbnailMaterial {
   lowQualityThumbnail?: string;
   highQualityThumbnail?: GcsFile;
   referenceImage?: GcsFile;
-  videoUrl?: GcsFile;
 }
 
 /**
