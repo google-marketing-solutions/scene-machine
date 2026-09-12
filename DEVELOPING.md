@@ -216,7 +216,10 @@ For local endpoint testing, use the existing `DEV` procedure above. The
 backend also enables dictation when the variable is absent; set
 `DICTATION_ENABLED=0` in that process to opt out. Set `DICTATION_MODE` in the
 same backend process environment to override the default mode locally.
-Recording requires a user click and browser microphone permission.
+Recording requires opening the microphone panel, choosing **Start recording**,
+and browser microphone permission. Opening or closing the panel alone does not
+start or cancel a recording. Closing it preserves pending work and Undo; use
+the explicit Stop or Cancel controls for an active session.
 Transcription uses the configured
 Google Cloud project, requires access to the preview model and can incur
 model charges and consume quota. Verify browser/provider behavior on your
