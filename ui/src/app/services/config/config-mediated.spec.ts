@@ -840,9 +840,14 @@ describe('ConfigService (mediated data plane)', () => {
       });
 
       firstA.error(new HttpErrorResponse({status: 500}));
-      await vi.waitFor(() => {
-        expect(service.setupInputsError()).toBe(false);
-      });
+      // Subject.error rejects firstValueFrom on a microtask; flush that
+      // rejection and Angular's resource/effect bookkeeping before asserting.
+      await Promise.resolve();
+      await Promise.resolve();
+      TestBed.tick();
+      await Promise.resolve();
+      expect(service.projectConfig.value().name).toBe('new A');
+      expect(service.setupInputsError()).toBe(false);
     });
 
     it('does not mark a recreated project persisted from a stale load success', async () => {
