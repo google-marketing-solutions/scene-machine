@@ -83,6 +83,7 @@ describe('ThumbnailImageDirective', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
