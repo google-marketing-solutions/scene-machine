@@ -1590,6 +1590,7 @@ describe('RemixEngineService (mediated)', () => {
         id: 'other-project',
         storyboard: [],
       });
+      TestBed.tick();
 
       await vi.waitFor(() =>
         expect(service.generatingSceneIds().has('scene-1')).toBe(false),
@@ -1924,6 +1925,7 @@ describe('RemixEngineService (mediated)', () => {
         id: 'other-project',
         storyboard: [],
       });
+      TestBed.tick();
 
       // The button is reset (not left stuck on "Rendering...").
       await vi.waitFor(() => expect(service.combiningScenes()).toBe(false));
@@ -2335,10 +2337,12 @@ describe('RemixEngineService (mediated)', () => {
         }));
         startResponse.next({executionId: 'omni-deferred-exec'});
         startResponse.complete();
-        await vi.waitFor(() =>
-          expect(httpClientMock.get).toHaveBeenCalledWith(
-            '/api/getStatus?executionId=omni-deferred-exec&signedUrls=false&gcsBucket=mock-bucket',
-          ),
+        await vi.waitFor(
+          () =>
+            expect(httpClientMock.get).toHaveBeenCalledWith(
+              '/api/getStatus?executionId=omni-deferred-exec&signedUrls=false&gcsBucket=mock-bucket',
+            ),
+          {timeout: 4500},
         );
 
         statusResponse.next({

@@ -148,6 +148,8 @@ describe('Storyboard dictation parent binding', () => {
     const remixEngine = {
       generatingSceneIds: signal(new Set<string>()),
       editingSceneIds: signal(new Set<string>()),
+      setForegroundScene: vi.fn(),
+      clearForegroundScene: vi.fn(),
     };
     const config = {
       projectConfig: {value: project, isLoading: signal(false)},

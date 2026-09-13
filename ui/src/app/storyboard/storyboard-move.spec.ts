@@ -129,6 +129,8 @@ describe('Storyboard move persistence', () => {
           useValue: {
             generatingSceneIds: signal(new Set<string>()),
             editingSceneIds: signal(new Set<string>()),
+            setForegroundScene: vi.fn(),
+            clearForegroundScene: vi.fn(),
           },
         },
         {provide: ClientMediaService, useValue: {}},
