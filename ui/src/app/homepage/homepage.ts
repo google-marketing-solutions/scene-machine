@@ -31,6 +31,7 @@ import {RouterModule} from '@angular/router';
 import {env} from '../../env';
 import {
   ConfigService,
+  GcsFile,
   ProjectConfig,
   ProjectSummary,
   ThumbnailMaterial,
@@ -141,11 +142,18 @@ export class Homepage {
     const thumb = this.getThumbnailMaterial(project);
     const hasThumb =
       !!thumb.lowQualityThumbnail || !!thumb.highQualityThumbnail;
+    const referenceImage =
+      thumb.referenceImage &&
+      'preview' in thumb.referenceImage &&
+      thumb.referenceImage.preview
+        ? (thumb.referenceImage.preview as GcsFile)
+        : thumb.referenceImage;
 
     return {
       ...thumb,
-      showReference: !hasThumb && thumb.referenceImage !== undefined,
-      showPlaceholder: !hasThumb && !thumb.referenceImage,
+      referenceImage,
+      showReference: !hasThumb && referenceImage !== undefined,
+      showPlaceholder: !hasThumb && !referenceImage,
     };
   }
 

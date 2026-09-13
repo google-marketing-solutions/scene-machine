@@ -237,6 +237,27 @@ describe('Homepage', () => {
     );
   });
 
+  it('uses a reference preview for a summary fallback without changing the original ref', () => {
+    const original = {
+      path: 'original.jpg',
+      url: 'https://example.test/original.jpg',
+      preview: {
+        path: 'preview.jpg',
+        url: 'https://example.test/preview.jpg',
+      },
+    };
+    const project: ProjectSummary = {
+      id: 'preview-summary',
+      thumbnail: {referenceImage: original},
+      thumbnailPersist: true,
+    };
+
+    const data = component.getThumbnailData(project);
+
+    expect(data.referenceImage).toEqual(original.preview);
+    expect(project.thumbnail!.referenceImage).toBe(original);
+  });
+
   it('renders only the selected candidate thumbnail when a reference fallback exists', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const project = {
