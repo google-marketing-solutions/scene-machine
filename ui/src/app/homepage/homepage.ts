@@ -32,6 +32,7 @@ import {env} from '../../env';
 import {
   ConfigService,
   ProjectConfig,
+  ProjectSummary,
   ThumbnailMaterial,
 } from '../services/config/config';
 import {CandidateCacheScope} from '../services/media/candidate-video-cache';
@@ -63,7 +64,7 @@ import {HomepageAnnouncement} from './homepage-announcement';
 export class Homepage {
   private config = inject(ConfigService);
   private dialog = inject(MatDialog);
-  projects = signal<ProjectConfig[]>([]);
+  projects = signal<ProjectSummary[]>([]);
   theme = this.config.theme;
   primaryColor = this.config.primaryColor;
   // Default to "my projects" only when there is a verified identity to filter
@@ -99,8 +100,17 @@ export class Homepage {
     return email.split('@')[0];
   }
 
-  getThumbnailMaterial(project: ProjectConfig): ThumbnailMaterial {
-    if (!project.storyboard || project.storyboard.length === 0) {
+  getThumbnailMaterial(
+    project: ProjectSummary | ProjectConfig,
+  ): ThumbnailMaterial {
+    if ('thumbnail' in project && project.thumbnail) {
+      return project.thumbnail;
+    }
+    if (
+      !('storyboard' in project) ||
+      !project.storyboard ||
+      project.storyboard.length === 0
+    ) {
       return {};
     }
     const firstScene = project.storyboard[0];
@@ -127,7 +137,7 @@ export class Homepage {
     return {};
   }
 
-  getThumbnailData(project: ProjectConfig) {
+  getThumbnailData(project: ProjectSummary | ProjectConfig) {
     const thumb = this.getThumbnailMaterial(project);
     const hasThumb =
       !!thumb.lowQualityThumbnail || !!thumb.highQualityThumbnail;
@@ -139,7 +149,9 @@ export class Homepage {
     };
   }
 
-  getThumbnailCacheScope(project: ProjectConfig): CandidateCacheScope | null {
+  getThumbnailCacheScope(
+    project: ProjectSummary | ProjectConfig,
+  ): CandidateCacheScope | null {
     const bucket = this.config.globalConfig.value()?.gcsBucket;
     return bucket && project.id ? {bucket, projectId: project.id} : null;
   }
@@ -148,13 +160,16 @@ export class Homepage {
     return !this.config.globalConfig.isLoading();
   }
 
-  thumbnailPersistForProject(project: ProjectConfig): boolean {
+  thumbnailPersistForProject(project: ProjectSummary | ProjectConfig): boolean {
+    if ('thumbnailPersist' in project) {
+      return project.thumbnailPersist;
+    }
     const scene = project.storyboard?.[0];
     if (!scene || !this.config.isGeneratedScene(scene)) return true;
     return !scene.candidates?.[scene.selectedCandidateIndex ?? 0]?.isArchived;
   }
 
-  getAspectRatio(project: ProjectConfig): string {
+  getAspectRatio(project: ProjectSummary | ProjectConfig): string {
     return project.aspectRatio ? project.aspectRatio.replace(':', '/') : '16/9';
   }
 

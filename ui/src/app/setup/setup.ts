@@ -114,6 +114,24 @@ export class Setup {
   private readonly imageImport = inject(ImageImportService);
   readonly templatesService = inject(TemplatesService);
 
+  /** The form is only rendered after the full route-scoped load settles. */
+  inputConfig(): InputConfig {
+    const inputConfig = this.config.projectConfig.value().inputConfig;
+    if (!inputConfig) {
+      throw new Error('Setup input configuration is not loaded');
+    }
+    return inputConfig;
+  }
+
+  /** Keep the form closed while the route-scoped full project load settles. */
+  readonly setupLoading = computed(() => this.config.setupInputsLoading());
+  readonly setupError = computed(() => this.config.setupInputsError());
+  readonly setupReady = computed(
+    () =>
+      this.config.setupInputsLoaded() &&
+      this.config.projectConfig.value().inputConfig !== undefined,
+  );
+
   /** Per-product: true while that product's links are being fetched. */
   importingLinks = signal<Record<number, boolean>>({});
   /** Per-product: images from the last import that could not be added. */
@@ -170,7 +188,7 @@ export class Setup {
   readonly ASPECT_RATIO_DEVIATION_THRESHOLD = ASPECT_RATIO_DEVIATION_THRESHOLD;
 
   selectedTemplateId = computed(() => {
-    return this.config.projectConfig.value().inputConfig.templateId ?? 'custom';
+    return this.inputConfig().templateId ?? 'custom';
   });
 
   getCustomDescription(): string {
@@ -180,6 +198,9 @@ export class Setup {
   constructor() {
     effect(() => {
       // Backwards compatibility for projects created before inputConfig was introduced
+      if (this.config.setupInputsLoaded && !this.config.setupInputsLoaded()) {
+        return;
+      }
       const inputConfig = this.config.projectConfig.value().inputConfig;
       if (!inputConfig) {
         this.config.updateProjectConfig({
@@ -211,9 +232,7 @@ export class Setup {
       console.error('Invalid aspect ratio');
       return;
     }
-    const products = [
-      ...this.config.projectConfig.value().inputConfig.products,
-    ];
+    const products = [...this.inputConfig().products];
     for (const product of products) {
       for (const image of product.images) {
         if (!image.widthPixels || !image.heightPixels) {
@@ -228,7 +247,7 @@ export class Setup {
     }
     this.config.updateProjectConfig({
       inputConfig: {
-        ...this.config.projectConfig.value().inputConfig,
+        ...this.inputConfig(),
         products,
       },
     });
@@ -259,7 +278,7 @@ export class Setup {
 
     const products = this.config.projectConfig
       .value()
-      .inputConfig.products.map(p => {
+      .inputConfig!.products.map(p => {
         if (p.id === productId) {
           p.images[imageIndex].widthPixels = width;
           p.images[imageIndex].heightPixels = height;
@@ -271,7 +290,7 @@ export class Setup {
 
     this.config.updateProjectConfig({
       inputConfig: {
-        ...this.config.projectConfig.value().inputConfig,
+        ...this.inputConfig(),
         products,
       },
     });
@@ -382,10 +401,10 @@ export class Setup {
     if (uploadedImages.length > 0) {
       this.config.updateProjectConfig({
         inputConfig: {
-          ...this.config.projectConfig.value().inputConfig,
+          ...this.inputConfig(),
           products: this.config.projectConfig
             .value()
-            .inputConfig.products.map(p =>
+            .inputConfig!.products.map(p =>
               p.id === productId
                 ? {...p, images: [...p.images, ...uploadedImages]}
                 : p,
@@ -484,7 +503,7 @@ export class Setup {
     if (images.length === 0) {
       return;
     }
-    const products = this.config.projectConfig.value().inputConfig.products;
+    const products = this.inputConfig().products;
     if (products.length === 0) {
       return;
     }
@@ -497,10 +516,10 @@ export class Setup {
   removeImage(productId: number, imageIndex: number) {
     this.config.updateProjectConfig({
       inputConfig: {
-        ...this.config.projectConfig.value().inputConfig,
+        ...this.inputConfig(),
         products: this.config.projectConfig
           .value()
-          .inputConfig.products.map(p => {
+          .inputConfig!.products.map(p => {
             if (p.id === productId) {
               // TODO: Remove from GCS
               return {
@@ -564,7 +583,7 @@ export class Setup {
     if (
       template.id !== 'custom' &&
       this.selectedTemplateId() === 'custom' &&
-      this.config.projectConfig.value().inputConfig.composition
+      this.inputConfig().composition
     ) {
       const dialogRef = this.dialog.open(ConfirmTemplateDialog);
       dialogRef.afterClosed().subscribe(result => {
@@ -590,7 +609,7 @@ export class Setup {
   }
 
   addProduct() {
-    const inputConfig = this.config.projectConfig.value().inputConfig;
+    const inputConfig = this.inputConfig();
     this.config.updateProjectConfig({
       inputConfig: {
         ...inputConfig,
@@ -607,7 +626,7 @@ export class Setup {
   }
 
   removeProduct(id: number) {
-    const inputConfig = this.config.projectConfig.value().inputConfig;
+    const inputConfig = this.inputConfig();
     this.config.updateProjectConfig({
       inputConfig: {
         ...inputConfig,
@@ -633,7 +652,7 @@ export class Setup {
   }
 
   updateProductDescriptionText(productId: number, description: string) {
-    const inputConfig = this.config.projectConfig.value().inputConfig;
+    const inputConfig = this.inputConfig();
     this.config.updateProjectConfig({
       inputConfig: {
         ...inputConfig,
@@ -652,7 +671,7 @@ export class Setup {
         : partial;
     this.config.updateProjectConfig({
       inputConfig: {
-        ...this.config.projectConfig.value().inputConfig,
+        ...this.inputConfig(),
         ...update,
       },
     });
@@ -680,7 +699,7 @@ export class Setup {
   }
 
   getCombinedBriefing(): string {
-    const inputConfig = this.config.projectConfig.value().inputConfig;
+    const inputConfig = this.inputConfig();
     const briefingEllements: string[] = [];
     if (inputConfig.composition) {
       briefingEllements.push(`#### Composition:\n${inputConfig.composition}`);
@@ -719,7 +738,7 @@ export class Setup {
           data: {
             aspectRatio: this.config.projectConfig.value().aspectRatio,
             products: this.adjustProductDescriptionLength(
-              this.config.projectConfig.value().inputConfig.products,
+              this.inputConfig().products,
             ),
             briefing: this.getCombinedBriefing(),
           },

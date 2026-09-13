@@ -418,7 +418,7 @@ describe('ConfigService (mediated data plane)', () => {
         id: 'proj-1',
         name: 'new A',
         inputConfig: {
-          ...service.projectConfig.value().inputConfig,
+          ...service.projectConfig.value().inputConfig!,
           composition: 'new local composition',
         },
       });
@@ -437,7 +437,7 @@ describe('ConfigService (mediated data plane)', () => {
         id: 'proj-1',
         name: 'old A',
         inputConfig: {
-          ...service.projectConfig.value().inputConfig,
+          ...service.projectConfig.value().inputConfig!,
           composition: 'old server composition',
         },
       });
@@ -563,7 +563,7 @@ describe('ConfigService (mediated data plane)', () => {
       service.saveNow();
 
       const queuedSource = service.projectConfig.value();
-      queuedSource.inputConfig.products[0].name = 'mutated after queueing';
+      queuedSource.inputConfig!.products[0].name = 'mutated after queueing';
       service.saveNow();
 
       expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
@@ -793,6 +793,106 @@ describe('ConfigService (mediated data plane)', () => {
     it('reset with a clean project should not save', () => {
       service.resetProjectConfig();
       expect(saveRequestCount()).toBe(0);
+    });
+  });
+
+  describe('route-scoped project loading', () => {
+    it('requests the editor projection and hydrates Setup with the full route', async () => {
+      const project = {
+        ...service.projectConfig.value(),
+        id: 'proj-scoped',
+        name: 'Scoped project',
+      };
+      httpClientMock.get.mockImplementation((url: string) =>
+        url === '/api/config'
+          ? of({})
+          : of({
+              ...project,
+              inputConfig: url.endsWith('?view=editor')
+                ? undefined
+                : project.inputConfig,
+            }),
+      );
+
+      service.loadProjectConfig('proj-scoped', 'editor');
+      await vi.waitFor(() => {
+        expect(httpClientMock.get).toHaveBeenCalledWith(
+          '/api/projects/proj-scoped?view=editor',
+        );
+      });
+      expect(service.projectConfig.value().inputConfig).toBeUndefined();
+
+      service.loadProjectConfig('proj-scoped', 'full');
+      await vi.waitFor(() => {
+        expect(httpClientMock.get).toHaveBeenCalledWith(
+          '/api/projects/proj-scoped',
+        );
+      });
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().inputConfig).toEqual(
+          project.inputConfig,
+        );
+      });
+    });
+
+    it('preserves an unsettled editor object while merging full Setup input', async () => {
+      const pendingPatch = new Subject<unknown>();
+      const serverInput = {
+        products: [{id: 9, name: 'Server product', images: []}],
+        composition: 'server composition',
+      };
+      const editorProject = {
+        ...service.projectConfig.value(),
+        id: 'proj-hydrate',
+        storyboard: [],
+        inputConfig: undefined,
+      };
+      httpClientMock.get.mockImplementation((url: string) =>
+        url === '/api/config'
+          ? of({})
+          : of(
+              url.endsWith('?view=editor')
+                ? editorProject
+                : {...editorProject, inputConfig: serverInput},
+            ),
+      );
+      httpClientMock.patch.mockReturnValue(pendingPatch);
+
+      service.loadProjectConfig('proj-hydrate', 'editor');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().id).toBe('proj-hydrate');
+      });
+      markPersisted('proj-hydrate');
+      service.updateProjectConfig({
+        storyboard: [{id: 'local-scene', name: 'Local', type: 'video'}] as any,
+      });
+      service.saveNow();
+
+      service.loadProjectConfig('proj-hydrate', 'full');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().inputConfig).toEqual(serverInput);
+      });
+      expect(service.projectConfig.value().storyboard[0].id).toBe(
+        'local-scene',
+      );
+      pendingPatch.next({});
+      pendingPatch.complete();
+    });
+
+    it('uses the editor PATCH scope only when inputConfig is absent', () => {
+      markPersisted('proj-editor-save');
+      service.projectConfig.value.set({
+        ...service.projectConfig.value(),
+        id: 'proj-editor-save',
+        inputConfig: undefined,
+      } as any);
+      service.updateProjectConfig({name: 'summary save'});
+      service.saveNow();
+
+      expect(httpClientMock.patch).toHaveBeenCalledWith(
+        '/api/projects/proj-editor-save?view=editor',
+        expect.objectContaining({name: 'summary save', inputConfig: undefined}),
+      );
     });
   });
 

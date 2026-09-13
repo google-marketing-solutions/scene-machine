@@ -57,6 +57,9 @@ describe('Setup image upload', () => {
   let component: Setup;
   let configMock: {
     projectConfig: {value: ReturnType<typeof signal<Partial<ProjectConfig>>>};
+    setupInputsLoading: () => boolean;
+    setupInputsError: () => boolean;
+    setupInputsLoaded: () => boolean;
     updateProjectConfig: ReturnType<typeof vi.fn>;
     saveNow: ReturnType<typeof vi.fn>;
     videoModels: () => string[];
@@ -83,6 +86,9 @@ describe('Setup image upload', () => {
     });
     configMock = {
       projectConfig: {value: projectConfig},
+      setupInputsLoading: () => false,
+      setupInputsError: () => false,
+      setupInputsLoaded: () => true,
       // Mirror the real updateProjectConfig signal merge so processFiles'
       // reads of the latest value behave like production.
       updateProjectConfig: vi.fn((partial: Partial<ProjectConfig>) =>
@@ -359,6 +365,9 @@ describe('Setup video controls', () => {
       isLoading: () => boolean;
       error: () => null;
     };
+    setupInputsLoading: () => boolean;
+    setupInputsError: () => boolean;
+    setupInputsLoaded: () => boolean;
     updateProjectConfig: ReturnType<typeof vi.fn>;
     saveNow: ReturnType<typeof vi.fn>;
     videoModels: () => string[];
@@ -397,6 +406,9 @@ describe('Setup video controls', () => {
         isLoading: () => false,
         error: () => null,
       },
+      setupInputsLoading: () => false,
+      setupInputsError: () => false,
+      setupInputsLoaded: () => true,
       updateProjectConfig: vi.fn((partial: Partial<ProjectConfig>) =>
         projectConfigSignal.update(c => ({...c, ...partial})),
       ),
