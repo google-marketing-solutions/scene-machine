@@ -1847,7 +1847,7 @@ describe('RemixEngineService (mediated)', () => {
       await vi.advanceTimersByTimeAsync(1);
       expect(statusRequests).toHaveLength(12);
 
-      // A project switch cancels both the active second batch and queued
+      // A project switch cancels both the active third batch and queued
       // remainder. No subsequent scheduler wake may start more requests.
       projectConfigSignal.set({
         ...projectConfigSignal(),
