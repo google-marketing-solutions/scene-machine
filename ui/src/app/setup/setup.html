@@ -14,7 +14,14 @@
  limitations under the License.
 -->
 
-@if (config.projectConfig.isLoading() || !config.projectConfig.value().id) {
+@if (setupError()) {
+  <div class="loading-state">
+    <p>Could not load this project. Please try again.</p>
+    <button mat-button type="button" (click)="config.reloadProjectConfig()">
+      Retry
+    </button>
+  </div>
+} @else if (setupLoading() || !setupReady()) {
   <div class="loading-state">
     <mat-spinner diameter="40"></mat-spinner>
     <p>Loading project...</p>
@@ -150,7 +157,7 @@
         </div>
         <div class="section-content">
           <mat-accordion class="product-accordion" multi>
-            @for (product of config.projectConfig.value().inputConfig.products; track product.id) {
+            @for (product of inputConfig().products; track product.id) {
               <mat-expansion-panel
                 [expanded]="true"
                 (pointerdown)="activeProductId.set(product.id)"
@@ -211,12 +218,14 @@
                               (click)="$event.stopPropagation()"
                             >
                               <img
-                                [src]="image | mediaSrc"
+                                [appThumbnailImage]="image.preview ?? image"
+                                [thumbnailCacheScope]="imageCacheScope()"
                                 (load)="
                                   (image.heightPixels === undefined ||
                                     image.widthPixels === undefined) &&
                                     imageLoaded($event, product.id, i)
                                 "
+                                alt="Product image"
                               />
                               <button
                                 class="remove-image-btn"
@@ -375,13 +384,13 @@
               #audienceInput
               matInput
               placeholder="Audience, location, market, demographics, affinity groups, etc..."
-              [ngModel]="config.projectConfig.value().inputConfig.audience"
+              [ngModel]="inputConfig().audience"
               (ngModelChange)="updateInputConfig({audience: $event})"
             ></textarea>
             <app-dictation-control
               [enabled]="dictationEnabled()"
               [audioConfig]="dictationConfig()"
-              [value]="config.projectConfig.value().inputConfig.audience || ''"
+              [value]="inputConfig().audience || ''"
               [revision]="fieldRevision('audience')"
               [ownerKey]="config.projectConfig.value().id + ':audience'"
               [textarea]="audienceInput"
@@ -406,13 +415,13 @@
               #styleInput
               matInput
               placeholder="Corporate Identity (CI) or brand guidance. Additional visual styles or color palettes can also be described..."
-              [ngModel]="config.projectConfig.value().inputConfig.style"
+              [ngModel]="inputConfig().style"
               (ngModelChange)="updateInputConfig({style: $event})"
             ></textarea>
             <app-dictation-control
               [enabled]="dictationEnabled()"
               [audioConfig]="dictationConfig()"
-              [value]="config.projectConfig.value().inputConfig.style || ''"
+              [value]="inputConfig().style || ''"
               [revision]="fieldRevision('style')"
               [ownerKey]="config.projectConfig.value().id + ':style'"
               [textarea]="styleInput"
@@ -492,13 +501,13 @@
             matInput
             placeholder="Describe the style, mood, pacing, or specific elements you want to see in the video..."
             (input)="revertToCustomTemplate()"
-            [ngModel]="config.projectConfig.value().inputConfig.composition"
+            [ngModel]="inputConfig().composition"
             (ngModelChange)="updateInputConfig({composition: $event})"
           ></textarea>
           <app-dictation-control
             [enabled]="dictationEnabled()"
             [audioConfig]="dictationConfig()"
-            [value]="config.projectConfig.value().inputConfig.composition || ''"
+            [value]="inputConfig().composition || ''"
             [revision]="fieldRevision('composition')"
             [ownerKey]="config.projectConfig.value().id + ':composition'"
             [textarea]="compositionInput"

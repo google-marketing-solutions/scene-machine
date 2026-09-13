@@ -42,20 +42,20 @@ import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {MatTooltipModule} from '@angular/material/tooltip';
 import {ActivatedRoute, Router, RouterLink} from '@angular/router';
 import {ClientMediaService} from '../services/client-media/client-media';
+import {ImagePreviewService} from '../services/image-preview/image-preview';
 import {
   ImageImportService,
   ImportFailure,
   MAX_IMAGE_UPLOAD_MB,
 } from '../services/image-import/image-import';
-import {MediaSrcPipe} from '../services/media/media-src.pipe';
 import {
   ASPECT_RATIO_DEVIATION_THRESHOLD,
   AspectRatio,
   ConfigService,
-  GcsFile,
   GeneratedScene,
   InputConfig,
   Product,
+  ProductImage,
 } from '../services/config/config';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {Template, TemplatesService} from '../services/templates/templates';
@@ -64,6 +64,7 @@ import {TemplateCard} from '../templates/template-card/template-card';
 import {ConfirmTemplateDialog} from './confirm-template-dialog/confirm-template-dialog';
 import {GenerateStoryboardDialog} from './generate-storyboard-dialog/generate-storyboard-dialog';
 import {DictationControl} from '../shared/dictation/dictation-control';
+import {ThumbnailImageDirective} from '../shared/thumbnail-image/thumbnail-image.directive';
 
 interface FileProcessResult {
   added: number;
@@ -94,10 +95,10 @@ interface FileProcessResult {
     MatExpansionModule,
     MatTooltipModule,
     MatDialogModule,
-    MediaSrcPipe,
     TemplateCard,
     RouterLink,
     DictationControl,
+    ThumbnailImageDirective,
   ],
   templateUrl: './setup.html',
   styleUrl: './setup.scss',
@@ -111,8 +112,35 @@ export class Setup {
   private readonly snackBar = inject(MatSnackBar);
   readonly config = inject(ConfigService);
   readonly clientMediaService = inject(ClientMediaService);
+  private readonly imagePreviewService = inject(ImagePreviewService);
   private readonly imageImport = inject(ImageImportService);
   readonly templatesService = inject(TemplatesService);
+
+  /** The form is only rendered after the full route-scoped load settles. */
+  inputConfig(): InputConfig {
+    const inputConfig = this.config.projectConfig.value().inputConfig;
+    if (!inputConfig) {
+      throw new Error('Setup input configuration is not loaded');
+    }
+    return inputConfig;
+  }
+
+  /** Keep the form closed while the route-scoped full project load settles. */
+  readonly setupLoading = computed(() => this.config.setupInputsLoading());
+  readonly setupError = computed(() => this.config.setupInputsError());
+  readonly setupReady = computed(() => {
+    if (!this.config.setupInputsLoaded()) {
+      return false;
+    }
+    const project = this.config.projectConfig.value();
+    return !!project.id && project.inputConfig !== undefined;
+  });
+
+  readonly imageCacheScope = computed(() => {
+    const projectId = this.config.projectConfig.value().id;
+    const bucket = this.config.globalConfig.value()?.gcsBucket;
+    return bucket && projectId ? {bucket, projectId} : null;
+  });
 
   /** Per-product: true while that product's links are being fetched. */
   importingLinks = signal<Record<number, boolean>>({});
@@ -170,7 +198,7 @@ export class Setup {
   readonly ASPECT_RATIO_DEVIATION_THRESHOLD = ASPECT_RATIO_DEVIATION_THRESHOLD;
 
   selectedTemplateId = computed(() => {
-    return this.config.projectConfig.value().inputConfig.templateId ?? 'custom';
+    return this.inputConfig().templateId ?? 'custom';
   });
 
   getCustomDescription(): string {
@@ -180,6 +208,9 @@ export class Setup {
   constructor() {
     effect(() => {
       // Backwards compatibility for projects created before inputConfig was introduced
+      if (this.config.setupInputsLoaded && !this.config.setupInputsLoaded()) {
+        return;
+      }
       const inputConfig = this.config.projectConfig.value().inputConfig;
       if (!inputConfig) {
         this.config.updateProjectConfig({
@@ -211,9 +242,7 @@ export class Setup {
       console.error('Invalid aspect ratio');
       return;
     }
-    const products = [
-      ...this.config.projectConfig.value().inputConfig.products,
-    ];
+    const products = [...this.inputConfig().products];
     for (const product of products) {
       for (const image of product.images) {
         if (!image.widthPixels || !image.heightPixels) {
@@ -228,7 +257,7 @@ export class Setup {
     }
     this.config.updateProjectConfig({
       inputConfig: {
-        ...this.config.projectConfig.value().inputConfig,
+        ...this.inputConfig(),
         products,
       },
     });
@@ -238,6 +267,22 @@ export class Setup {
     const ratio = this.config.projectConfig.value().aspectRatio;
     return ratio ? ratio.replace(':', '/') : '16/9';
   });
+
+  private aspectRatioDeviation(
+    width: number,
+    height: number,
+  ): number | undefined {
+    const aspectRatio = this.config.projectConfig.value().aspectRatio;
+    const targetAspectRatio =
+      aspectRatio === '16:9'
+        ? 16 / 9
+        : aspectRatio === '9:16'
+          ? 9 / 16
+          : undefined;
+    return targetAspectRatio
+      ? Math.abs(width / height / targetAspectRatio - 1)
+      : undefined;
+  }
 
   imageLoaded(event: Event, productId: number, imageIndex: number) {
     const img = event.target as HTMLImageElement;
@@ -259,7 +304,7 @@ export class Setup {
 
     const products = this.config.projectConfig
       .value()
-      .inputConfig.products.map(p => {
+      .inputConfig!.products.map(p => {
         if (p.id === productId) {
           p.images[imageIndex].widthPixels = width;
           p.images[imageIndex].heightPixels = height;
@@ -271,7 +316,7 @@ export class Setup {
 
     this.config.updateProjectConfig({
       inputConfig: {
-        ...this.config.projectConfig.value().inputConfig,
+        ...this.inputConfig(),
         products,
       },
     });
@@ -327,6 +372,7 @@ export class Setup {
     files: FileList | File[],
     reportResult = true,
   ): Promise<FileProcessResult> {
+    const projectId = this.config.projectConfig.value().id;
     const fileArray = Array.from(files);
     const results = await Promise.allSettled(
       fileArray.map(async originalFile => {
@@ -355,15 +401,28 @@ export class Setup {
         }
         const {path, url} =
           await this.remixEngineService.uploadMedia(uploadFile);
+        let preview;
+        try {
+          preview = await this.imagePreviewService.create(uploadFile);
+        } catch {
+          // Preview creation is optional; keep the original image usable.
+        }
         return {
           path,
           url,
           name: uploadFile.name,
+          ...(preview
+            ? {
+                preview: preview.preview,
+                widthPixels: preview.widthPixels,
+                heightPixels: preview.heightPixels,
+              }
+            : {}),
         };
       }),
     );
 
-    const uploadedImages: GcsFile[] = [];
+    const uploadedImages: ProductImage[] = [];
     const failures: ImportFailure[] = [];
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') {
@@ -379,17 +438,35 @@ export class Setup {
       });
     });
 
+    const currentProject = this.config.projectConfig.value();
+    if (currentProject.id !== projectId || !currentProject.inputConfig) {
+      return {added: 0, failures};
+    }
+
     if (uploadedImages.length > 0) {
+      const currentAspectImages = uploadedImages.map(image => {
+        if (
+          image.widthPixels === undefined ||
+          image.heightPixels === undefined
+        ) {
+          return image;
+        }
+        const aspectRatioDeviation = this.aspectRatioDeviation(
+          image.widthPixels,
+          image.heightPixels,
+        );
+        return aspectRatioDeviation === undefined
+          ? image
+          : {...image, aspectRatioDeviation};
+      });
       this.config.updateProjectConfig({
         inputConfig: {
-          ...this.config.projectConfig.value().inputConfig,
-          products: this.config.projectConfig
-            .value()
-            .inputConfig.products.map(p =>
-              p.id === productId
-                ? {...p, images: [...p.images, ...uploadedImages]}
-                : p,
-            ),
+          ...currentProject.inputConfig,
+          products: currentProject.inputConfig.products.map(p =>
+            p.id === productId
+              ? {...p, images: [...p.images, ...currentAspectImages]}
+              : p,
+          ),
         },
       });
       // Image upload is a discrete, expensive, irreversible event (bytes are
@@ -484,7 +561,11 @@ export class Setup {
     if (images.length === 0) {
       return;
     }
-    const products = this.config.projectConfig.value().inputConfig.products;
+    const inputConfig = this.config.projectConfig.value().inputConfig;
+    if (!inputConfig) {
+      return;
+    }
+    const products = inputConfig.products;
     if (products.length === 0) {
       return;
     }
@@ -497,10 +578,10 @@ export class Setup {
   removeImage(productId: number, imageIndex: number) {
     this.config.updateProjectConfig({
       inputConfig: {
-        ...this.config.projectConfig.value().inputConfig,
+        ...this.inputConfig(),
         products: this.config.projectConfig
           .value()
-          .inputConfig.products.map(p => {
+          .inputConfig!.products.map(p => {
             if (p.id === productId) {
               // TODO: Remove from GCS
               return {
@@ -564,7 +645,7 @@ export class Setup {
     if (
       template.id !== 'custom' &&
       this.selectedTemplateId() === 'custom' &&
-      this.config.projectConfig.value().inputConfig.composition
+      this.inputConfig().composition
     ) {
       const dialogRef = this.dialog.open(ConfirmTemplateDialog);
       dialogRef.afterClosed().subscribe(result => {
@@ -590,7 +671,7 @@ export class Setup {
   }
 
   addProduct() {
-    const inputConfig = this.config.projectConfig.value().inputConfig;
+    const inputConfig = this.inputConfig();
     this.config.updateProjectConfig({
       inputConfig: {
         ...inputConfig,
@@ -607,7 +688,7 @@ export class Setup {
   }
 
   removeProduct(id: number) {
-    const inputConfig = this.config.projectConfig.value().inputConfig;
+    const inputConfig = this.inputConfig();
     this.config.updateProjectConfig({
       inputConfig: {
         ...inputConfig,
@@ -633,7 +714,7 @@ export class Setup {
   }
 
   updateProductDescriptionText(productId: number, description: string) {
-    const inputConfig = this.config.projectConfig.value().inputConfig;
+    const inputConfig = this.inputConfig();
     this.config.updateProjectConfig({
       inputConfig: {
         ...inputConfig,
@@ -652,7 +733,7 @@ export class Setup {
         : partial;
     this.config.updateProjectConfig({
       inputConfig: {
-        ...this.config.projectConfig.value().inputConfig,
+        ...this.inputConfig(),
         ...update,
       },
     });
@@ -680,7 +761,7 @@ export class Setup {
   }
 
   getCombinedBriefing(): string {
-    const inputConfig = this.config.projectConfig.value().inputConfig;
+    const inputConfig = this.inputConfig();
     const briefingEllements: string[] = [];
     if (inputConfig.composition) {
       briefingEllements.push(`#### Composition:\n${inputConfig.composition}`);
@@ -719,7 +800,7 @@ export class Setup {
           data: {
             aspectRatio: this.config.projectConfig.value().aspectRatio,
             products: this.adjustProductDescriptionLength(
-              this.config.projectConfig.value().inputConfig.products,
+              this.inputConfig().products,
             ),
             briefing: this.getCombinedBriefing(),
           },

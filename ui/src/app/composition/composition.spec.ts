@@ -67,7 +67,10 @@ describe('CompositionComponent', () => {
       projectConfig: {
         value: projectConfigSignal,
         isLoading: signal(false),
+        error: signal(null),
       },
+      projectLoadError: signal(false),
+      reloadProjectConfig: vi.fn(),
       globalConfig: {
         value: () => ({gcsBucket: 'bucket-a'}),
       },
@@ -123,6 +126,24 @@ describe('CompositionComponent', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('shows a project load error with a retry action', () => {
+    const configService = mockConfigService as {
+      projectLoadError: WritableSignal<boolean>;
+      reloadProjectConfig: ReturnType<typeof vi.fn>;
+    };
+    configService.projectLoadError.set(true);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain(
+      'Could not load this project',
+    );
+    const retry = fixture.nativeElement.querySelector('button');
+    expect(retry?.textContent).toContain('Retry');
+
+    retry.click();
+    expect(configService.reloadProjectConfig).toHaveBeenCalledTimes(1);
   });
 
   it('should have an empty filmstrip when there are no scenes', () => {

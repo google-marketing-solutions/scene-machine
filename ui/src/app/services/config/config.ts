@@ -106,9 +106,16 @@ function nearestAllowed(allowed: number[], value: number): number {
 /**
  * Represents a file stored in Google Cloud Storage.
  */
+export interface ImagePreviewRef {
+  path: string;
+  url: string;
+}
+
 export interface GcsFile {
   path: string; // GCS path, starting after gcs://
   url: string; // signed GCS URL with token, starting with https://
+  /** Optional bounded display preview; the original ref remains authoritative. */
+  preview?: ImagePreviewRef;
 }
 
 /**
@@ -230,6 +237,17 @@ export interface InputConfig {
   templateId?: string;
 }
 
+/** The intentionally small project shape used by the homepage card list. */
+export interface ProjectSummary {
+  id: string;
+  name?: string;
+  createdBy?: string;
+  aspectRatio?: AspectRatio;
+  lastEdited?: Date;
+  thumbnail?: ThumbnailMaterial;
+  thumbnailPersist: boolean;
+}
+
 /**
  * Represents a render run.
  */
@@ -272,7 +290,8 @@ export interface ProjectConfig {
   numberOfCandidates: number;
   model: string;
   lastEdited?: Date;
-  inputConfig: InputConfig;
+  /** Omitted by the editor-scoped response until Setup hydrates it. */
+  inputConfig?: InputConfig;
   storyboard: Array<GeneratedScene | ProvidedVideoScene>;
   audioTracks: AudioTrack[];
   visualOverlays: VisualOverlay[];
@@ -284,6 +303,8 @@ interface ProjectSave {
   source: ProjectConfig;
   payload: ProjectConfig;
 }
+
+export type ProjectConfigView = 'editor' | 'full';
 
 interface ProjectSaveState {
   latestSource: ProjectConfig | null;
@@ -605,6 +626,8 @@ export class ConfigService {
   private router = inject(Router);
   private document = inject(DOCUMENT);
   private projectId = signal<string | null>(null);
+  private projectView = signal<ProjectConfigView>('full');
+  private projectLoadErrorValue = signal<unknown>(undefined);
   /**
    * Mediated mode only: ids known to exist server-side (loaded via GET or
    * already POSTed). First save of a new project goes through
@@ -903,10 +926,18 @@ export class ConfigService {
   }
 
   projectConfig = resource({
-    params: () => ({projectId: this.projectId()}),
-    loader: async ({params}) => {
+    params: () => ({projectId: this.projectId(), view: this.projectView()}),
+    loader: async ({params, abortSignal}) => {
       if (params.projectId === null) {
+        this.projectLoadErrorValue.set(undefined);
         return {...this.DEFAULT_PROJECT_CONFIG()};
+      }
+      const isCurrentLoad = () =>
+        !abortSignal.aborted &&
+        this.projectId() === params.projectId &&
+        this.projectView() === params.view;
+      if (isCurrentLoad()) {
+        this.projectLoadErrorValue.set(undefined);
       }
       const localProjectAtLoad = this.projectWithUnsettledSave(
         params.projectId,
@@ -914,15 +945,31 @@ export class ConfigService {
       try {
         const data = await firstValueFrom(
           this.httpClient.get<ProjectConfig>(
-            `/api/projects/${params.projectId}`,
+            `/api/projects/${params.projectId}${params.view === 'editor' ? '?view=editor' : ''}`,
           ),
         );
-        this.persistedProjectIds.add(params.projectId);
+        if (isCurrentLoad()) {
+          this.projectLoadErrorValue.set(undefined);
+          this.persistedProjectIds.add(params.projectId);
+        }
         if (localProjectAtLoad) {
-          return (
+          const latest =
             this.projectSaveStates.get(params.projectId)?.latestSource ??
-            localProjectAtLoad
-          );
+            localProjectAtLoad;
+          // A full Setup load hydrates only the omitted inputConfig. Keep the
+          // newest local editor object (scenes and settings) intact. If Setup
+          // edits already supplied inputConfig, those local edits win too.
+          if (
+            params.view === 'full' &&
+            latest.inputConfig === undefined &&
+            data.inputConfig !== undefined
+          ) {
+            return this.normalizeLoadedProject({
+              ...latest,
+              inputConfig: data.inputConfig,
+            });
+          }
+          return latest;
         }
         return this.normalizeLoadedProject(data);
       } catch (error) {
@@ -937,11 +984,37 @@ export class ConfigService {
           console.error(`Project ${params.projectId} does not exist.`);
           return {...this.DEFAULT_PROJECT_CONFIG()};
         }
-        throw error;
+        // Keep the resource value readable for app-wide effects while Setup
+        // exposes this error through setupInputsError and offers a retry.
+        if (isCurrentLoad()) {
+          this.projectLoadErrorValue.set(error);
+        }
+        return {...this.DEFAULT_PROJECT_CONFIG()};
       }
     },
     defaultValue: {...this.DEFAULT_PROJECT_CONFIG()},
   });
+
+  /** Setup must use a full project response before exposing its input fields. */
+  readonly setupInputsLoading = computed(
+    () => this.projectView() === 'full' && this.projectConfig.isLoading(),
+  );
+  readonly projectLoadError = computed(
+    () =>
+      !this.projectConfig.isLoading() &&
+      (!!this.projectLoadErrorValue() || !!this.projectConfig.error()),
+  );
+  readonly setupInputsError = computed(
+    () => this.projectView() === 'full' && this.projectLoadError(),
+  );
+  readonly setupInputsLoaded = computed(
+    () =>
+      this.projectView() === 'full' &&
+      !this.projectConfig.isLoading() &&
+      !this.projectConfig.error() &&
+      (this.projectConfig.value().id === this.projectId() ||
+        (this.projectId() === null && !!this.projectConfig.value().id)),
+  );
 
   private normalizeLoadedProject(data: ProjectConfig): ProjectConfig {
     if (data.renderRuns) {
@@ -1215,8 +1288,12 @@ export class ConfigService {
   private saveProjectMediated(save: ProjectSave, state: ProjectSaveState) {
     const projectId = save.source.id;
     const isPersisted = this.persistedProjectIds.has(projectId);
+    const editorScope = save.payload.inputConfig === undefined;
     const request = isPersisted
-      ? this.httpClient.patch(`/api/projects/${projectId}`, save.payload)
+      ? this.httpClient.patch(
+          `/api/projects/${projectId}${editorScope ? '/editor' : ''}`,
+          save.payload,
+        )
       : this.httpClient.post<{id: string}>('/api/projects', save.payload);
     request.subscribe({
       next: () => {
@@ -1400,18 +1477,35 @@ export class ConfigService {
     );
   });
 
-  loadProjectConfig(projectId: string) {
-    if (this.projectConfig.value().id === projectId) {
+  loadProjectConfig(projectId: string, view: ProjectConfigView = 'full') {
+    const sameProject = this.projectConfig.value().id === projectId;
+    // A brand-new project is installed locally by Generate before routing and
+    // intentionally has no resource id yet; its default full input is already
+    // hydrated locally.
+    const sameResourceProject =
+      this.projectId() === null || this.projectId() === projectId;
+    const alreadyFull = this.projectView() === 'full';
+    if (
+      sameProject &&
+      sameResourceProject &&
+      (view === this.projectView() || (view === 'editor' && alreadyFull))
+    ) {
       return;
     }
     // Switching projects: persist the previous project's pending debounced
     // autosave before it is dropped.
     this.flushPendingSave();
     this.projectId.set(projectId);
+    this.projectView.set(view);
     this.shouldSave = false;
   }
 
-  async getProjects(mineOnly?: unknown): Promise<ProjectConfig[]> {
+  /** Retries the current route-scoped load after a Setup error. */
+  reloadProjectConfig() {
+    this.projectConfig.reload();
+  }
+
+  async getProjects(mineOnly?: unknown): Promise<ProjectSummary[]> {
     // The server filters on its own verified identity, so the client never
     // sends an email — it only sets the 'createdBy=me' marker when the caller
     // wants its own projects. `mineOnly` is used purely as a truthy flag: any
@@ -1419,7 +1513,7 @@ export class ConfigService {
     // "my projects only", and a falsy value means "all projects".
     const url = mineOnly ? '/api/projects?createdBy=me' : '/api/projects';
     const response = await firstValueFrom(
-      this.httpClient.get<{projects: ProjectConfig[]}>(url),
+      this.httpClient.get<{projects: ProjectSummary[]}>(url),
     );
     return response.projects.map(data => {
       if (data.lastEdited) {

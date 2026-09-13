@@ -52,6 +52,7 @@ import {MatSliderModule} from '@angular/material/slider';
 import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {MatTooltipModule} from '@angular/material/tooltip';
 import {ClientMediaService} from '../services/client-media/client-media';
+import {ImagePreviewService} from '../services/image-preview/image-preview';
 import {
   Candidate,
   ConfigService,
@@ -122,6 +123,7 @@ export class Storyboard {
   protected remixEngineService = inject(RemixEngineService);
   private dialog = inject(MatDialog);
   private clientMediaService = inject(ClientMediaService);
+  private imagePreviewService = inject(ImagePreviewService);
   private imageImport = inject(ImageImportService);
   private snackBar = inject(MatSnackBar);
   private httpClient = inject(HttpClient);
@@ -138,6 +140,7 @@ export class Storyboard {
   private downloadEpoch = 0;
   private lastProjectId: string | undefined;
   private moveVisitEpoch = 0;
+  private referenceUploadEpoch = 0;
   readonly downloadInProgress = signal(false);
   /** Scene prompt revisions make Undo recovery safe across repeated text values. */
   readonly scenePromptRevisions = signal<Record<string, number>>({});
@@ -414,8 +417,16 @@ export class Storyboard {
 
   getThumbnailData(item: {
     lowQualityThumbnail?: string;
-    highQualityThumbnail?: {path?: string; url?: string};
-    referenceImage?: {path?: string; url?: string};
+    highQualityThumbnail?: {
+      path?: string;
+      url?: string;
+      preview?: {path?: string; url?: string};
+    };
+    referenceImage?: {
+      path?: string;
+      url?: string;
+      preview?: {path?: string; url?: string};
+    };
   }) {
     const hasLowQualityThumbnail = !!item.lowQualityThumbnail;
     const hasHighQualityThumbnail = !!(
@@ -432,7 +443,9 @@ export class Storyboard {
       highQuality: hasHighQualityThumbnail
         ? item.highQualityThumbnail
         : undefined,
-      reference: hasReferenceImage ? item.referenceImage : undefined,
+      reference: hasReferenceImage
+        ? (item.referenceImage?.preview ?? item.referenceImage)
+        : undefined,
       showReference: !hasThumbnail && hasReferenceImage,
       showIcon: !hasThumbnail && !hasReferenceImage,
     };
@@ -954,6 +967,7 @@ export class Storyboard {
   selectCandidate(scene: GeneratedScene, index: number) {
     const candidate = scene.candidates![index];
     const promptChanged = scene.prompt !== candidate.prompt;
+    this.referenceUploadEpoch++;
     scene.selectedCandidateIndex = index;
     scene.prompt = candidate.prompt;
     scene.referenceImage = candidate.referenceImage;
@@ -1282,8 +1296,28 @@ export class Storyboard {
   removeReferenceImage() {
     const scene = this.selectedScene();
     if (this.config.isGeneratedScene(scene)) {
+      this.referenceUploadEpoch++;
+      this.invalidateReferenceMedia(scene.referenceImage);
       delete scene.referenceImage;
+      delete scene.highQualityThumbnail;
+      delete scene.lowQualityThumbnail;
       this.updateScenes();
+    }
+  }
+
+  private invalidateReferenceMedia(
+    reference:
+      | {
+          path?: string;
+          preview?: {path?: string};
+        }
+      | undefined,
+  ): void {
+    const projectId = this.config.projectConfig.value().id;
+    if (!projectId || !reference) return;
+    const paths = new Set([reference.path, reference.preview?.path]);
+    for (const path of paths) {
+      if (path) void this.thumbnailCache.invalidateCandidate(projectId, path);
     }
   }
 
@@ -1362,8 +1396,15 @@ export class Storyboard {
 
   async uploadImage(file: File) {
     console.debug('Upload triggered for file:', file.name);
+    const projectId = this.config.projectConfig.value().id;
     const sceneId = this.selectedSceneId();
     if (this.config.isGeneratedScene(this.selectedScene()) && sceneId) {
+      const uploadEpoch = ++this.referenceUploadEpoch;
+      const uploadVisitEpoch = this.moveVisitEpoch;
+      const isCurrentUpload = () =>
+        uploadEpoch === this.referenceUploadEpoch &&
+        uploadVisitEpoch === this.moveVisitEpoch &&
+        this.config.projectConfig.value().id === projectId;
       if (
         file.type.startsWith('image/') &&
         !['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)
@@ -1384,32 +1425,45 @@ export class Storyboard {
       const scene = this.config.projectConfig
         .value()
         .storyboard.find(s => s.id === sceneId);
-      if (scene && this.config.isGeneratedScene(scene)) {
+      if (scene && this.config.isGeneratedScene(scene) && isCurrentUpload()) {
+        this.invalidateReferenceMedia(scene.referenceImage);
         scene.referenceImage = {path, url};
+        // The scene-level thumbnails belong to the previous reference. Clear
+        // them before asynchronous generation so a failed replacement cannot
+        // persist or display stale image material alongside the new ref.
+        delete scene.lowQualityThumbnail;
+        delete scene.highQualityThumbnail;
         try {
-          const [lowQualityThumbnail, highQualityThumbnail] = await Promise.all(
-            [
-              this.clientMediaService.generateLowQualityThumbnail(
-                file,
-                'image',
-              ),
-              this.clientMediaService.generateHighQualityThumbnail(
-                file,
-                'image',
-              ),
-            ],
-          );
-          scene.lowQualityThumbnail =
-            await this.clientMediaService.toBase64(lowQualityThumbnail);
-          scene.highQualityThumbnail =
-            await this.remixEngineService.uploadThumbnail(
-              this.clientMediaService.toFile(highQualityThumbnail),
+          const lowQualityThumbnail =
+            await this.clientMediaService.generateLowQualityThumbnail(
+              file,
+              'image',
             );
+          const lowQualityData =
+            await this.clientMediaService.toBase64(lowQualityThumbnail);
+          if (!isCurrentUpload()) return;
+          scene.lowQualityThumbnail = lowQualityData;
+        } catch (error) {
+          console.error(error);
+        }
+        try {
+          const preview = await this.imagePreviewService.create(file);
+          if (
+            preview &&
+            isCurrentUpload() &&
+            scene.referenceImage?.path === path &&
+            scene.referenceImage.url === url
+          ) {
+            scene.referenceImage.preview = preview.preview;
+            scene.highQualityThumbnail = preview.preview;
+          }
         } catch (error) {
           console.error(error);
         }
       }
-      this.updateScenes(scene);
+      if (isCurrentUpload()) {
+        this.updateScenes(scene);
+      }
     }
   }
 

@@ -14,6 +14,14 @@
  limitations under the License.
 -->
 
+@if (configService.projectLoadError()) {
+  <div class="loading-state">
+    <p>Could not load this project. Please try again.</p>
+    <button mat-button type="button" (click)="configService.reloadProjectConfig()">
+      Retry
+    </button>
+  </div>
+} @else {
 <div class="output-layout">
   <div class="project-title-header">
     <app-editable-project-title />
@@ -186,3 +194,4 @@
     </div>
   </div>
 </div>
+}

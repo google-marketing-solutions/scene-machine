@@ -418,7 +418,7 @@ describe('ConfigService (mediated data plane)', () => {
         id: 'proj-1',
         name: 'new A',
         inputConfig: {
-          ...service.projectConfig.value().inputConfig,
+          ...service.projectConfig.value().inputConfig!,
           composition: 'new local composition',
         },
       });
@@ -437,7 +437,7 @@ describe('ConfigService (mediated data plane)', () => {
         id: 'proj-1',
         name: 'old A',
         inputConfig: {
-          ...service.projectConfig.value().inputConfig,
+          ...service.projectConfig.value().inputConfig!,
           composition: 'old server composition',
         },
       });
@@ -563,7 +563,7 @@ describe('ConfigService (mediated data plane)', () => {
       service.saveNow();
 
       const queuedSource = service.projectConfig.value();
-      queuedSource.inputConfig.products[0].name = 'mutated after queueing';
+      queuedSource.inputConfig!.products[0].name = 'mutated after queueing';
       service.saveNow();
 
       expect(httpClientMock.patch).toHaveBeenCalledTimes(1);
@@ -793,6 +793,302 @@ describe('ConfigService (mediated data plane)', () => {
     it('reset with a clean project should not save', () => {
       service.resetProjectConfig();
       expect(saveRequestCount()).toBe(0);
+    });
+  });
+
+  describe('route-scoped project loading', () => {
+    it('keeps a retry for an abandoned project from replacing the current project', async () => {
+      const firstA = new Subject<any>();
+      const retryA = new Subject<any>();
+      const projectA = {
+        ...service.projectConfig.value(),
+        id: 'project-a',
+        name: 'A',
+      };
+      const projectB = {...projectA, id: 'project-b', name: 'B'};
+      let aRequestCount = 0;
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') return of({});
+        if (url === '/api/projects/project-a?view=editor') {
+          aRequestCount += 1;
+          return aRequestCount === 1 ? firstA : retryA;
+        }
+        if (url === '/api/projects/project-b?view=editor') return of(projectB);
+        return of({});
+      });
+
+      service.loadProjectConfig('project-a', 'editor');
+      await vi.waitFor(() => expect(aRequestCount).toBe(1));
+      firstA.error(new HttpErrorResponse({status: 500}));
+      await vi.waitFor(() => expect(service.projectLoadError()).toBe(true));
+
+      service.reloadProjectConfig();
+      await vi.waitFor(() => expect(aRequestCount).toBe(2));
+      service.loadProjectConfig('project-b', 'editor');
+      await vi.waitFor(() =>
+        expect(service.projectConfig.value().id).toBe('project-b'),
+      );
+
+      retryA.next({...projectA, name: 'stale retry A'});
+      retryA.complete();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(service.projectConfig.value().id).toBe('project-b');
+      expect(service.projectConfig.value().name).toBe('B');
+    });
+
+    it('does not surface a late stale-load error after a newer same-route load succeeds', async () => {
+      const firstA = new Subject<any>();
+      const secondA = new Subject<any>();
+      const project = {
+        ...service.projectConfig.value(),
+        id: 'project-a',
+        inputConfig: {products: [], composition: 'a'},
+      };
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') return of({});
+        if (url === '/api/projects/project-a') {
+          return httpClientMock.get.mock.calls.filter(
+            ([calledUrl]: [string]) => calledUrl === url,
+          ).length === 1
+            ? firstA
+            : secondA;
+        }
+        return of({...project, id: 'project-b', name: 'B'});
+      });
+
+      service.loadProjectConfig('project-a', 'full');
+      await vi.waitFor(() => {
+        expect(httpClientMock.get).toHaveBeenCalledWith(
+          '/api/projects/project-a',
+        );
+      });
+      service.loadProjectConfig('project-b', 'full');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().id).toBe('project-b');
+      });
+      service.loadProjectConfig('project-a', 'full');
+      await vi.waitFor(() => {
+        expect(httpClientMock.get).toHaveBeenCalledTimes(4);
+      });
+
+      secondA.next({...project, name: 'new A'});
+      secondA.complete();
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().name).toBe('new A');
+        expect(service.setupInputsError()).toBe(false);
+      });
+
+      firstA.error(new HttpErrorResponse({status: 500}));
+      // Subject.error rejects firstValueFrom on a microtask; flush that
+      // rejection and Angular's resource/effect bookkeeping before asserting.
+      await Promise.resolve();
+      await Promise.resolve();
+      TestBed.tick();
+      await Promise.resolve();
+      expect(service.projectConfig.value().name).toBe('new A');
+      expect(service.setupInputsError()).toBe(false);
+    });
+
+    it('does not mark a recreated project persisted from a stale load success', async () => {
+      const firstA = new Subject<any>();
+      const secondA = new Subject<any>();
+      const project = {
+        ...service.projectConfig.value(),
+        id: 'project-a',
+        inputConfig: {products: [], composition: 'a'},
+      };
+      let aRequestCount = 0;
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') return of({});
+        if (url === '/api/projects/project-a') {
+          aRequestCount += 1;
+          return aRequestCount === 1 ? firstA : secondA;
+        }
+        return of({...project, id: 'project-b', name: 'B'});
+      });
+
+      service.loadProjectConfig('project-a', 'full');
+      await vi.waitFor(() => expect(aRequestCount).toBe(1));
+      service.loadProjectConfig('project-b', 'full');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().id).toBe('project-b');
+      });
+      service.setNewProject('project-a');
+      service.loadProjectConfig('project-a', 'full');
+      await vi.waitFor(() => expect(aRequestCount).toBe(2));
+
+      firstA.next({...project, name: 'stale A'});
+      firstA.complete();
+      await Promise.resolve();
+      expect((service as any).persistedProjectIds.has('project-a')).toBe(false);
+      secondA.next({...project, name: 'new A'});
+      secondA.complete();
+    });
+
+    it('requests the editor projection and hydrates Setup with the full route', async () => {
+      const project = {
+        ...service.projectConfig.value(),
+        id: 'proj-scoped',
+        name: 'Scoped project',
+      };
+      httpClientMock.get.mockImplementation((url: string) =>
+        url === '/api/config'
+          ? of({})
+          : of({
+              ...project,
+              inputConfig: url.endsWith('?view=editor')
+                ? undefined
+                : project.inputConfig,
+            }),
+      );
+
+      service.loadProjectConfig('proj-scoped', 'editor');
+      await vi.waitFor(() => {
+        expect(httpClientMock.get).toHaveBeenCalledWith(
+          '/api/projects/proj-scoped?view=editor',
+        );
+      });
+      expect(service.projectConfig.value().inputConfig).toBeUndefined();
+
+      service.loadProjectConfig('proj-scoped', 'full');
+      await vi.waitFor(() => {
+        expect(httpClientMock.get).toHaveBeenCalledWith(
+          '/api/projects/proj-scoped',
+        );
+      });
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().inputConfig).toEqual(
+          project.inputConfig,
+        );
+      });
+    });
+
+    it('preserves an unsettled editor object while merging full Setup input', async () => {
+      const pendingPatch = new Subject<unknown>();
+      const serverInput = {
+        products: [{id: 9, name: 'Server product', images: []}],
+        composition: 'server composition',
+      };
+      const editorProject = {
+        ...service.projectConfig.value(),
+        id: 'proj-hydrate',
+        storyboard: [],
+        inputConfig: undefined,
+      };
+      httpClientMock.get.mockImplementation((url: string) =>
+        url === '/api/config'
+          ? of({})
+          : of(
+              url.endsWith('?view=editor')
+                ? editorProject
+                : {...editorProject, inputConfig: serverInput},
+            ),
+      );
+      httpClientMock.patch.mockReturnValue(pendingPatch);
+
+      service.loadProjectConfig('proj-hydrate', 'editor');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().id).toBe('proj-hydrate');
+      });
+      markPersisted('proj-hydrate');
+      service.updateProjectConfig({
+        storyboard: [{id: 'local-scene', name: 'Local', type: 'video'}] as any,
+      });
+      service.saveNow();
+
+      service.loadProjectConfig('proj-hydrate', 'full');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().inputConfig).toEqual(serverInput);
+      });
+      expect(service.projectConfig.value().storyboard[0].id).toBe(
+        'local-scene',
+      );
+      pendingPatch.next({});
+      pendingPatch.complete();
+    });
+
+    it('uses the editor PATCH scope only when inputConfig is absent', () => {
+      markPersisted('proj-editor-save');
+      service.projectConfig.value.set({
+        ...service.projectConfig.value(),
+        id: 'proj-editor-save',
+        inputConfig: undefined,
+      } as any);
+      service.updateProjectConfig({name: 'summary save'});
+      service.saveNow();
+
+      expect(httpClientMock.patch).toHaveBeenCalledWith(
+        '/api/projects/proj-editor-save/editor',
+        expect.objectContaining({name: 'summary save', inputConfig: undefined}),
+      );
+    });
+
+    it('keeps projected edits unsaved after editor endpoint failure and retries there', () => {
+      markPersisted('proj-editor-retry');
+      service.projectConfig.value.set({
+        ...service.projectConfig.value(),
+        id: 'proj-editor-retry',
+        inputConfig: undefined,
+      } as any);
+      const failedResponse = new Subject<unknown>();
+      const retryResponse = new Subject<unknown>();
+      const retryAction = new Subject<void>();
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      httpClientMock.patch
+        .mockReturnValueOnce(failedResponse)
+        .mockReturnValueOnce(retryResponse);
+      matSnackBarMock.open.mockReturnValue({onAction: () => retryAction});
+
+      service.updateProjectConfig({name: 'projected edit'});
+      service.saveNow();
+
+      expect(httpClientMock.patch).toHaveBeenCalledWith(
+        '/api/projects/proj-editor-retry/editor',
+        expect.objectContaining({
+          id: 'proj-editor-retry',
+          name: 'projected edit',
+          inputConfig: undefined,
+        }),
+      );
+      failedResponse.error(new HttpErrorResponse({status: 405}));
+      expect(service.projectConfig.value().name).toBe('projected edit');
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Unsaved changes — failed to save the project.',
+        'Retry',
+        {panelClass: ['error-snackbar']},
+      );
+
+      retryAction.next();
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(2);
+      expect(httpClientMock.patch.mock.calls[1][0]).toBe(
+        '/api/projects/proj-editor-retry/editor',
+      );
+      expect(httpClientMock.patch.mock.calls[1][1]).toEqual(
+        expect.objectContaining({
+          name: 'projected edit',
+          inputConfig: undefined,
+        }),
+      );
+      retryResponse.next({});
+      errorSpy.mockRestore();
+    });
+
+    it('keeps a locally created full project ready after leaving another project', () => {
+      service.projectConfig.value.set({
+        ...service.projectConfig.value(),
+        id: 'project-a',
+      });
+      service.resetProjectConfig();
+      service.setNewProject('project-b');
+      service.saveNow();
+
+      service.loadProjectConfig('project-b', 'full');
+
+      expect(service.setupInputsLoaded()).toBe(true);
+      expect(service.projectConfig.value().id).toBe('project-b');
+      expect(service.projectConfig.value().inputConfig).toBeDefined();
     });
   });
 
