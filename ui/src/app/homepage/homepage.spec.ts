@@ -27,6 +27,7 @@ import {
   ConfigService,
   GeneratedScene,
   ProjectConfig,
+  ProjectSummary,
 } from '../services/config/config';
 import {MediaService} from '../services/media/media';
 import {ThumbnailCacheService} from '../services/media/thumbnail-cache';
@@ -260,6 +261,37 @@ describe('Homepage', () => {
     const card = fixture.nativeElement.querySelector('.project-thumbnail');
     expect(card.querySelector('img')).toBeNull();
     expect(card.querySelector('.placeholder-thumbnail')).not.toBeNull();
+  });
+
+  it('renders the homepage summary contract and preserves its cache policy', async () => {
+    const project: ProjectSummary = {
+      id: 'summary-project',
+      name: 'Summary project',
+      aspectRatio: '9:16',
+      thumbnail: {
+        highQualityThumbnail: {
+          path: 'summary-thumb.jpg',
+          url: 'https://example.test/summary-thumb.jpg',
+        },
+      },
+      thumbnailPersist: false,
+    };
+    mockConfigService.getProjects.mockResolvedValueOnce([project]);
+
+    component.fetchProjects();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.project-card-link');
+    expect(card.getAttribute('href')).toBe('/summary-project/storyboard');
+    expect(card.querySelector('.project-title').textContent).toContain(
+      'Summary project',
+    );
+    expect(mockThumbnailCache.acquire).toHaveBeenCalledWith(
+      {bucket: 'bucket-a', projectId: 'summary-project'},
+      project.thumbnail!.highQualityThumbnail,
+      false,
+    );
   });
 
   it('renders only the selected candidate thumbnail when a reference fallback exists', async () => {

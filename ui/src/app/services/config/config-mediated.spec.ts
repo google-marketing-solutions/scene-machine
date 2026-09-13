@@ -894,6 +894,22 @@ describe('ConfigService (mediated data plane)', () => {
         expect.objectContaining({name: 'summary save', inputConfig: undefined}),
       );
     });
+
+    it('keeps a locally created full project ready after leaving another project', () => {
+      service.projectConfig.value.set({
+        ...service.projectConfig.value(),
+        id: 'project-a',
+      });
+      service.resetProjectConfig();
+      service.setNewProject('project-b');
+      service.saveNow();
+
+      service.loadProjectConfig('project-b', 'full');
+
+      expect(service.setupInputsLoaded()).toBe(true);
+      expect(service.projectConfig.value().id).toBe('project-b');
+      expect(service.projectConfig.value().inputConfig).toBeDefined();
+    });
   });
 
   describe('deleteProject', () => {

@@ -627,6 +627,7 @@ export class ConfigService {
   private document = inject(DOCUMENT);
   private projectId = signal<string | null>(null);
   private projectView = signal<ProjectConfigView>('full');
+  private projectLoadError = signal<unknown>(undefined);
   /**
    * Mediated mode only: ids known to exist server-side (loaded via GET or
    * already POSTed). First save of a new project goes through
@@ -928,7 +929,14 @@ export class ConfigService {
     params: () => ({projectId: this.projectId(), view: this.projectView()}),
     loader: async ({params}) => {
       if (params.projectId === null) {
+        this.projectLoadError.set(undefined);
         return {...this.DEFAULT_PROJECT_CONFIG()};
+      }
+      const isCurrentLoad = () =>
+        this.projectId() === params.projectId &&
+        this.projectView() === params.view;
+      if (isCurrentLoad()) {
+        this.projectLoadError.set(undefined);
       }
       const localProjectAtLoad = this.projectWithUnsettledSave(
         params.projectId,
@@ -939,6 +947,9 @@ export class ConfigService {
             `/api/projects/${params.projectId}${params.view === 'editor' ? '?view=editor' : ''}`,
           ),
         );
+        if (isCurrentLoad()) {
+          this.projectLoadError.set(undefined);
+        }
         this.persistedProjectIds.add(params.projectId);
         if (localProjectAtLoad) {
           const latest =
@@ -972,7 +983,12 @@ export class ConfigService {
           console.error(`Project ${params.projectId} does not exist.`);
           return {...this.DEFAULT_PROJECT_CONFIG()};
         }
-        throw error;
+        // Keep the resource value readable for app-wide effects while Setup
+        // exposes this error through setupInputsError and offers a retry.
+        if (isCurrentLoad()) {
+          this.projectLoadError.set(error);
+        }
+        return {...this.DEFAULT_PROJECT_CONFIG()};
       }
     },
     defaultValue: {...this.DEFAULT_PROJECT_CONFIG()},
@@ -986,7 +1002,7 @@ export class ConfigService {
     () =>
       this.projectView() === 'full' &&
       !this.projectConfig.isLoading() &&
-      !!this.projectConfig.error(),
+      (!!this.projectLoadError() || !!this.projectConfig.error()),
   );
   readonly setupInputsLoaded = computed(
     () =>
@@ -994,7 +1010,7 @@ export class ConfigService {
       !this.projectConfig.isLoading() &&
       !this.projectConfig.error() &&
       (this.projectConfig.value().id === this.projectId() ||
-        (this.projectId() === null && !this.projectConfig.value().id)),
+        (this.projectId() === null && !!this.projectConfig.value().id)),
   );
 
   private normalizeLoadedProject(data: ProjectConfig): ProjectConfig {
@@ -1479,6 +1495,11 @@ export class ConfigService {
     this.projectId.set(projectId);
     this.projectView.set(view);
     this.shouldSave = false;
+  }
+
+  /** Retries the current route-scoped load after a Setup error. */
+  reloadProjectConfig() {
+    this.projectConfig.reload();
   }
 
   async getProjects(mineOnly?: unknown): Promise<ProjectSummary[]> {
