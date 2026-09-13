@@ -439,6 +439,130 @@ describe('Storyboard', () => {
     });
   });
 
+  it('does not attach a delayed preview to a newer reference upload', async () => {
+    const scene: GeneratedScene = {
+      id: 'delayed-reference-scene',
+      type: 'generated',
+      name: 'Delayed reference scene',
+      prompt: 'scene',
+      candidates: [],
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    component.selectScene(scene.id);
+    mockRemixEngineService.uploadMedia.mockImplementation((file: File) =>
+      Promise.resolve({
+        path: `source-${file.name}`,
+        url: `source-${file.name}`,
+      }),
+    );
+    let resolveFirstPreview!: (value: {
+      preview: {path: string; url: string};
+      widthPixels: number;
+      heightPixels: number;
+    }) => void;
+    mockImagePreviewService.create.mockImplementation((file: File) =>
+      file.name === 'first.jpeg'
+        ? new Promise(resolve => {
+            resolveFirstPreview = resolve;
+          })
+        : Promise.resolve({
+            preview: {path: 'preview-second.jpg', url: 'preview-second-url'},
+            widthPixels: 100,
+            heightPixels: 100,
+          }),
+    );
+    const clientMedia = TestBed.inject(ClientMediaService);
+    const lowQuality = vi
+      .spyOn(clientMedia, 'generateLowQualityThumbnail')
+      .mockResolvedValue(new Blob(['low'], {type: 'image/jpeg'}));
+    const toBase64 = vi
+      .spyOn(clientMedia, 'toBase64')
+      .mockResolvedValue('data:image/jpeg;base64,low');
+
+    try {
+      const firstUpload = component.uploadImage(
+        new File(['first'], 'first.jpeg', {type: 'image/jpeg'}),
+      );
+      await vi.waitFor(() => {
+        expect(scene.referenceImage?.path).toBe('source-first.jpeg');
+      });
+      await component.uploadImage(
+        new File(['second'], 'second.jpeg', {type: 'image/jpeg'}),
+      );
+      resolveFirstPreview({
+        preview: {path: 'preview-first.jpg', url: 'preview-first-url'},
+        widthPixels: 100,
+        heightPixels: 100,
+      });
+      await firstUpload;
+    } finally {
+      lowQuality.mockRestore();
+      toBase64.mockRestore();
+    }
+
+    expect(scene.referenceImage).toEqual({
+      path: 'source-second.jpeg',
+      url: 'source-second.jpeg',
+      preview: {path: 'preview-second.jpg', url: 'preview-second-url'},
+    });
+  });
+
+  it('does not attach a delayed preview after reference removal', async () => {
+    const scene: GeneratedScene = {
+      id: 'removed-reference-scene',
+      type: 'generated',
+      name: 'Removed reference scene',
+      prompt: 'scene',
+      candidates: [],
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    component.selectScene(scene.id);
+    mockRemixEngineService.uploadMedia.mockResolvedValue({
+      path: 'source-removed.jpeg',
+      url: 'source-removed.jpeg',
+    });
+    let resolvePreview!: (value: {
+      preview: {path: string; url: string};
+      widthPixels: number;
+      heightPixels: number;
+    }) => void;
+    mockImagePreviewService.create.mockReturnValue(
+      new Promise(resolve => {
+        resolvePreview = resolve;
+      }),
+    );
+    const clientMedia = TestBed.inject(ClientMediaService);
+    const lowQuality = vi
+      .spyOn(clientMedia, 'generateLowQualityThumbnail')
+      .mockResolvedValue(new Blob(['low'], {type: 'image/jpeg'}));
+    const toBase64 = vi
+      .spyOn(clientMedia, 'toBase64')
+      .mockResolvedValue('data:image/jpeg;base64,low');
+
+    try {
+      const upload = component.uploadImage(
+        new File(['removed'], 'removed.jpeg', {type: 'image/jpeg'}),
+      );
+      await vi.waitFor(() => {
+        expect(scene.referenceImage?.path).toBe('source-removed.jpeg');
+      });
+      component.removeReferenceImage();
+      resolvePreview({
+        preview: {path: 'preview-removed.jpg', url: 'preview-removed-url'},
+        widthPixels: 100,
+        heightPixels: 100,
+      });
+      await upload;
+    } finally {
+      lowQuality.mockRestore();
+      toBase64.mockRestore();
+    }
+
+    expect(
+      (projectConfigSignal().storyboard[0] as GeneratedScene).referenceImage,
+    ).toBeUndefined();
+  });
+
   it('loads the first filmstrip thumbnail when generation adds the first candidate', async () => {
     const scene: GeneratedScene = {
       id: 'first-candidate-scene',

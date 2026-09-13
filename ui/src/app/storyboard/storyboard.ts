@@ -140,6 +140,7 @@ export class Storyboard {
   private downloadEpoch = 0;
   private lastProjectId: string | undefined;
   private moveVisitEpoch = 0;
+  private referenceUploadEpoch = 0;
   readonly downloadInProgress = signal(false);
   /** Scene prompt revisions make Undo recovery safe across repeated text values. */
   readonly scenePromptRevisions = signal<Record<string, number>>({});
@@ -966,6 +967,7 @@ export class Storyboard {
   selectCandidate(scene: GeneratedScene, index: number) {
     const candidate = scene.candidates![index];
     const promptChanged = scene.prompt !== candidate.prompt;
+    this.referenceUploadEpoch++;
     scene.selectedCandidateIndex = index;
     scene.prompt = candidate.prompt;
     scene.referenceImage = candidate.referenceImage;
@@ -1294,8 +1296,28 @@ export class Storyboard {
   removeReferenceImage() {
     const scene = this.selectedScene();
     if (this.config.isGeneratedScene(scene)) {
+      this.referenceUploadEpoch++;
+      this.invalidateReferenceMedia(scene.referenceImage);
       delete scene.referenceImage;
+      delete scene.highQualityThumbnail;
+      delete scene.lowQualityThumbnail;
       this.updateScenes();
+    }
+  }
+
+  private invalidateReferenceMedia(
+    reference:
+      | {
+          path?: string;
+          preview?: {path?: string};
+        }
+      | undefined,
+  ): void {
+    const projectId = this.config.projectConfig.value().id;
+    if (!projectId || !reference) return;
+    const paths = new Set([reference.path, reference.preview?.path]);
+    for (const path of paths) {
+      if (path) void this.thumbnailCache.invalidateCandidate(projectId, path);
     }
   }
 
@@ -1376,6 +1398,7 @@ export class Storyboard {
     console.debug('Upload triggered for file:', file.name);
     const sceneId = this.selectedSceneId();
     if (this.config.isGeneratedScene(this.selectedScene()) && sceneId) {
+      const uploadEpoch = ++this.referenceUploadEpoch;
       if (
         file.type.startsWith('image/') &&
         !['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)
@@ -1396,7 +1419,12 @@ export class Storyboard {
       const scene = this.config.projectConfig
         .value()
         .storyboard.find(s => s.id === sceneId);
-      if (scene && this.config.isGeneratedScene(scene)) {
+      if (
+        scene &&
+        this.config.isGeneratedScene(scene) &&
+        uploadEpoch === this.referenceUploadEpoch
+      ) {
+        this.invalidateReferenceMedia(scene.referenceImage);
         scene.referenceImage = {path, url};
         try {
           const lowQualityThumbnail =
@@ -1404,14 +1432,21 @@ export class Storyboard {
               file,
               'image',
             );
-          scene.lowQualityThumbnail =
+          const lowQualityData =
             await this.clientMediaService.toBase64(lowQualityThumbnail);
+          if (uploadEpoch !== this.referenceUploadEpoch) return;
+          scene.lowQualityThumbnail = lowQualityData;
         } catch (error) {
           console.error(error);
         }
         try {
           const preview = await this.imagePreviewService.create(file);
-          if (preview) {
+          if (
+            preview &&
+            uploadEpoch === this.referenceUploadEpoch &&
+            scene.referenceImage?.path === path &&
+            scene.referenceImage.url === url
+          ) {
             scene.referenceImage.preview = preview.preview;
             scene.highQualityThumbnail = preview.preview;
           }
@@ -1419,7 +1454,9 @@ export class Storyboard {
           console.error(error);
         }
       }
-      this.updateScenes(scene);
+      if (uploadEpoch === this.referenceUploadEpoch) {
+        this.updateScenes(scene);
+      }
     }
   }
 

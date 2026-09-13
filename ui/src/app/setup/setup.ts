@@ -268,6 +268,22 @@ export class Setup {
     return ratio ? ratio.replace(':', '/') : '16/9';
   });
 
+  private aspectRatioDeviation(
+    width: number,
+    height: number,
+  ): number | undefined {
+    const aspectRatio = this.config.projectConfig.value().aspectRatio;
+    const targetAspectRatio =
+      aspectRatio === '16:9'
+        ? 16 / 9
+        : aspectRatio === '9:16'
+          ? 9 / 16
+          : undefined;
+    return targetAspectRatio
+      ? Math.abs(width / height / targetAspectRatio - 1)
+      : undefined;
+  }
+
   imageLoaded(event: Event, productId: number, imageIndex: number) {
     const img = event.target as HTMLImageElement;
     const width = img.naturalWidth;
@@ -356,6 +372,7 @@ export class Setup {
     files: FileList | File[],
     reportResult = true,
   ): Promise<FileProcessResult> {
+    const projectId = this.config.projectConfig.value().id;
     const fileArray = Array.from(files);
     const results = await Promise.allSettled(
       fileArray.map(async originalFile => {
@@ -399,6 +416,10 @@ export class Setup {
                 preview: preview.preview,
                 widthPixels: preview.widthPixels,
                 heightPixels: preview.heightPixels,
+                aspectRatioDeviation: this.aspectRatioDeviation(
+                  preview.widthPixels,
+                  preview.heightPixels,
+                ),
               }
             : {}),
         };
@@ -421,17 +442,20 @@ export class Setup {
       });
     });
 
+    const currentProject = this.config.projectConfig.value();
+    if (currentProject.id !== projectId || !currentProject.inputConfig) {
+      return {added: 0, failures};
+    }
+
     if (uploadedImages.length > 0) {
       this.config.updateProjectConfig({
         inputConfig: {
-          ...this.inputConfig(),
-          products: this.config.projectConfig
-            .value()
-            .inputConfig!.products.map(p =>
-              p.id === productId
-                ? {...p, images: [...p.images, ...uploadedImages]}
-                : p,
-            ),
+          ...currentProject.inputConfig,
+          products: currentProject.inputConfig.products.map(p =>
+            p.id === productId
+              ? {...p, images: [...p.images, ...uploadedImages]}
+              : p,
+          ),
         },
       });
       // Image upload is a discrete, expensive, irreversible event (bytes are
@@ -526,7 +550,11 @@ export class Setup {
     if (images.length === 0) {
       return;
     }
-    const products = this.inputConfig().products;
+    const inputConfig = this.config.projectConfig.value().inputConfig;
+    if (!inputConfig) {
+      return;
+    }
+    const products = inputConfig.products;
     if (products.length === 0) {
       return;
     }
