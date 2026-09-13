@@ -1199,7 +1199,12 @@ def _write_project_doc(
   _commit_in_batches(ui_db, ops)
 
 
-def _write_editor_project_doc(ui_db, doc_ref, payload, stored) -> None:
+def _write_editor_project_doc(
+    ui_db: firestore.Client,
+    doc_ref: firestore.DocumentReference,
+    payload: dict,
+    stored: dict,
+) -> None:
   """Writes editor fields while leaving Setup's inputConfig untouched.
 
   The root update is deliberately field-based: unlike a read-modify-write
