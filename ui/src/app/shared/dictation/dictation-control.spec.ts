@@ -508,7 +508,28 @@ describe('DictationControl', () => {
   });
 
   it('shows the transcription error without exposing a Retry action', async () => {
-    const request = await record();
+    const trigger = fixture.nativeElement.querySelector(
+      '[aria-label="Start dictation"]',
+    ) as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
+    await Promise.resolve();
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect(control.isRecording()).toBe(true);
+
+    (
+      fixture.nativeElement.querySelector(
+        '[aria-label="Stop recording"]',
+      ) as HTMLButtonElement
+    ).click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const request = http.expectOne('/api/transcribe');
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector('[aria-label="Cancel dictation"]'),
+    ).not.toBeNull();
     request.flush(
       {error: 'busy', code: 'quota'},
       {status: 429, statusText: 'Too Many Requests'},
@@ -516,12 +537,51 @@ describe('DictationControl', () => {
     fixture.detectChanges();
     expect(control.state().status).toBe('error');
     expect(document.body.textContent).toContain('Transcription failed');
+    expect(document.activeElement).toBe(
+      fixture.nativeElement.querySelector(
+        '.dictation-actions button[mat-button]',
+      ),
+    );
     expect(document.body.textContent).not.toContain('Retry');
     expect(
       fixture.nativeElement.querySelector(
         '[aria-label="Dismiss dictation message"]',
       ),
     ).toBeNull();
+  });
+
+  it('does not steal focus when the field is focused while transcription is pending', async () => {
+    const trigger = fixture.nativeElement.querySelector(
+      '[aria-label="Start dictation"]',
+    ) as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
+    await Promise.resolve();
+    await Promise.resolve();
+    fixture.detectChanges();
+    expect(control.isRecording()).toBe(true);
+
+    (
+      fixture.nativeElement.querySelector(
+        '[aria-label="Stop recording"]',
+      ) as HTMLButtonElement
+    ).click();
+    await Promise.resolve();
+    await Promise.resolve();
+    const request = http.expectOne('/api/transcribe');
+    fixture.detectChanges();
+
+    const textarea = fixture.nativeElement.querySelector(
+      'textarea',
+    ) as HTMLTextAreaElement;
+    textarea.focus();
+    request.flush(
+      {error: 'busy', code: 'quota'},
+      {status: 429, statusText: 'Too Many Requests'},
+    );
+    fixture.detectChanges();
+
+    expect(document.activeElement).toBe(textarea);
   });
 
   it('shows a recording overflow error before a deferred recorder stop', async () => {
