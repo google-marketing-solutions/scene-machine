@@ -618,6 +618,33 @@ describe('DictationControl', () => {
     http.expectOne('/api/transcribe');
   });
 
+  it('stops before the server hard cap and still uploads a delayed final chunk', async () => {
+    host.maxDurationSeconds = 120;
+    host.audioConfig = {
+      enabled: true,
+      maxAudioBytes: 4 * 1024 * 1024,
+      maxDurationSeconds: 120,
+      mimeTypes: DICTATION_MIME_TYPES,
+    };
+    fixture.componentRef.changeDetectorRef.detectChanges();
+    FakeRecorder.holdStop = true;
+    vi.useFakeTimers();
+    control.start();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(control.isRecording()).toBe(true);
+
+    vi.advanceTimersByTime(119_001);
+
+    expect(control.state().status).toBe('transcribing');
+    FakeRecorder.releaseStops();
+    const request = http.expectOne('/api/transcribe');
+    expect((request.request.body as FormData).get('audio')).toBeInstanceOf(
+      Blob,
+    );
+    request.flush({text: 'near-limit transcript'});
+  });
+
   it('invalidates Undo recovery on navigation, including a later A-to-B-to-A return', async () => {
     const request = await record();
     request.flush({text: 'spoken words'});
