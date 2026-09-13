@@ -1,3 +1,19 @@
+/**
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 import {
   provideHttpClient,
   withInterceptorsFromDi,
@@ -11,7 +27,7 @@ import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {MatDialog} from '@angular/material/dialog';
 import {MatSnackBar} from '@angular/material/snack-bar';
 import {provideRouter} from '@angular/router';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ClientMediaService} from '../services/client-media/client-media';
 import {ConfigService} from '../services/config/config';
 import {ImageImportService} from '../services/image-import/image-import';
@@ -26,6 +42,8 @@ describe('Storyboard project-load recovery (real ConfigService)', () => {
   let fixture: ComponentFixture<Storyboard>;
   let config: ConfigService;
   let http: HttpTestingController;
+
+  afterEach(() => http.verify());
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
@@ -80,10 +98,10 @@ describe('Storyboard project-load recovery (real ConfigService)', () => {
   });
 
   it('renders GET 500 recovery, then the successful retried project', async () => {
-    config.loadProjectConfig('project-1');
+    config.loadProjectConfig('project-1', 'editor');
     fixture.detectChanges();
     http
-      .expectOne('/api/projects/project-1')
+      .expectOne('/api/projects/project-1?view=editor')
       .flush({error: 'temporary outage'}, {status: 500, statusText: 'Server Error'});
     await fixture.whenStable();
     fixture.detectChanges();
@@ -99,7 +117,7 @@ describe('Storyboard project-load recovery (real ConfigService)', () => {
 
     retry.click();
     fixture.detectChanges();
-    const retryRequest = http.expectOne('/api/projects/project-1');
+    const retryRequest = http.expectOne('/api/projects/project-1?view=editor');
     retryRequest.flush({
       id: 'project-1',
       name: 'Loaded project',
@@ -110,7 +128,6 @@ describe('Storyboard project-load recovery (real ConfigService)', () => {
       generateAudio: false,
       numberOfCandidates: 1,
       model: 'veo',
-      inputConfig: {products: [], composition: ''},
       audioTracks: [],
       visualOverlays: [],
     });
@@ -119,6 +136,12 @@ describe('Storyboard project-load recovery (real ConfigService)', () => {
 
     expect(config.projectLoadError()).toBe(false);
     expect(config.projectConfig.value().id).toBe('project-1');
+    expect(config.projectConfig.value().inputConfig).toBeUndefined();
+    http.expectNone(
+      request =>
+        request.method === 'PATCH' &&
+        request.url === '/api/projects/project-1/editor',
+    );
     expect(fixture.nativeElement.querySelector('.loading-state')).toBeNull();
     expect(fixture.nativeElement.textContent).not.toContain(
       'Could not load this project',
