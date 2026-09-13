@@ -215,12 +215,14 @@
                               (click)="$event.stopPropagation()"
                             >
                               <img
-                                [src]="image | mediaSrc"
+                                [appThumbnailImage]="image.preview ?? image"
+                                [thumbnailCacheScope]="imageCacheScope()"
                                 (load)="
                                   (image.heightPixels === undefined ||
                                     image.widthPixels === undefined) &&
                                     imageLoaded($event, product.id, i)
                                 "
+                                alt="Product image"
                               />
                               <button
                                 class="remove-image-btn"

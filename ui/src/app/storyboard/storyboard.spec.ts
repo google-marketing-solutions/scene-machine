@@ -39,6 +39,8 @@ import {
   resolveSceneRenderClip,
 } from '../services/config/config';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
+import {ClientMediaService} from '../services/client-media/client-media';
+import {ImagePreviewService} from '../services/image-preview/image-preview';
 import {MediaService} from '../services/media/media';
 import {CandidateVideoCacheService} from '../services/media/candidate-video-cache';
 import {ThumbnailCacheService} from '../services/media/thumbnail-cache';
@@ -106,6 +108,9 @@ describe('Storyboard', () => {
     generatingSceneIds: signal(new Set()),
     editingSceneIds: signal(new Set()),
   };
+  let mockImagePreviewService = {
+    create: vi.fn(),
+  };
   let mockMatDialog = {
     open: vi.fn().mockReturnValue({
       afterClosed: () => of({type: 'generate'}),
@@ -166,6 +171,9 @@ describe('Storyboard', () => {
       generatingSceneIds: signal(new Set()),
       editingSceneIds: signal(new Set()),
     };
+    mockImagePreviewService = {
+      create: vi.fn().mockResolvedValue(undefined),
+    };
 
     mockMatDialog = {
       open: vi.fn().mockReturnValue({
@@ -193,6 +201,7 @@ describe('Storyboard', () => {
       providers: [
         {provide: ConfigService, useValue: mockConfigService},
         {provide: RemixEngineService, useValue: mockRemixEngineService},
+        {provide: ImagePreviewService, useValue: mockImagePreviewService},
         {provide: MediaService, useValue: mockMediaService},
         {provide: HttpClient, useValue: mockHttpClient},
         {provide: Router, useValue: {events: navigationEvents}},
@@ -343,6 +352,91 @@ describe('Storyboard', () => {
     fixture.detectChanges();
     await Promise.resolve();
     expect(image.src).toContain('blob:candidate-b.jpg');
+  });
+
+  it('uses a persisted reference preview for filmstrip fallback', () => {
+    const referenceImage = {
+      path: 'source.png',
+      url: 'source-url',
+      preview: {path: 'preview.jpg', url: 'preview-url'},
+    };
+
+    expect(component.getThumbnailData({referenceImage}).reference).toEqual(
+      referenceImage.preview,
+    );
+  });
+
+  it('binds a persisted reference preview in the editor', async () => {
+    const scene: GeneratedScene = {
+      id: 'reference-preview-scene',
+      type: 'generated',
+      name: 'Reference preview scene',
+      prompt: 'scene',
+      candidates: [],
+      referenceImage: {
+        path: 'source.png',
+        url: 'source-url',
+        preview: {path: 'preview.jpg', url: 'preview-url'},
+      },
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    component.selectScene(scene.id);
+    fixture.detectChanges();
+    await Promise.resolve();
+
+    const reference = fixture.nativeElement.querySelector(
+      '.reference-image-preview img',
+    ) as HTMLImageElement;
+    expect(reference).not.toBeNull();
+    expect(reference.src).toContain('blob:preview.jpg');
+  });
+
+  it('stores the persisted preview when a reference image is uploaded', async () => {
+    const scene: GeneratedScene = {
+      id: 'upload-reference-scene',
+      type: 'generated',
+      name: 'Upload reference scene',
+      prompt: 'scene',
+      candidates: [],
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    component.selectScene(scene.id);
+    mockRemixEngineService.uploadMedia.mockResolvedValue({
+      path: 'source.png',
+      url: 'source-url',
+    });
+    mockImagePreviewService.create.mockResolvedValue({
+      preview: {path: 'preview.jpg', url: 'preview-url'},
+      widthPixels: 1200,
+      heightPixels: 800,
+    });
+    const clientMedia = TestBed.inject(ClientMediaService);
+    const lowQuality = vi
+      .spyOn(clientMedia, 'generateLowQualityThumbnail')
+      .mockResolvedValue(new Blob(['low'], {type: 'image/jpeg'}));
+    const toBase64 = vi
+      .spyOn(clientMedia, 'toBase64')
+      .mockResolvedValue('data:image/jpeg;base64,low');
+
+    try {
+      await component.uploadImage(
+        new File(['image'], 'reference.png', {type: 'image/png'}),
+      );
+    } finally {
+      lowQuality.mockRestore();
+      toBase64.mockRestore();
+    }
+
+    const uploadedScene = projectConfigSignal().storyboard[0] as GeneratedScene;
+    expect(uploadedScene.referenceImage).toEqual({
+      path: 'source.png',
+      url: 'source-url',
+      preview: {path: 'preview.jpg', url: 'preview-url'},
+    });
+    expect(uploadedScene.highQualityThumbnail).toEqual({
+      path: 'preview.jpg',
+      url: 'preview-url',
+    });
   });
 
   it('loads the first filmstrip thumbnail when generation adds the first candidate', async () => {
