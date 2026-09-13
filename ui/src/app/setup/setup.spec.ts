@@ -295,6 +295,60 @@ describe('Setup image upload', () => {
     expect(image.aspectRatioDeviation).toBeGreaterThan(0);
   });
 
+  it('calculates every pending upload against the latest aspect ratio', async () => {
+    let resolveFirst!: (value: {
+      preview: {path: string; url: string};
+      widthPixels: number;
+      heightPixels: number;
+    }) => void;
+    let resolveSecond!: (value: {
+      preview: {path: string; url: string};
+      widthPixels: number;
+      heightPixels: number;
+    }) => void;
+    imagePreviewMock.create.mockImplementation((file: File) => {
+      return new Promise(resolve => {
+        if (file.name === 'first.jpeg') {
+          resolveFirst = resolve;
+        } else {
+          resolveSecond = resolve;
+        }
+      });
+    });
+    const files = [
+      new File(['first'], 'first.jpeg', {type: 'image/jpeg'}),
+      new File(['second'], 'second.jpeg', {type: 'image/jpeg'}),
+    ];
+
+    const completion = component.processFiles(1, files);
+    await vi.waitFor(() => {
+      expect(imagePreviewMock.create).toHaveBeenCalledTimes(2);
+    });
+    resolveFirst({
+      preview: {path: 'thumbnail/first.jpg', url: 'first-url'},
+      widthPixels: 1600,
+      heightPixels: 900,
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    configMock.projectConfig.value.update(current => ({
+      ...current,
+      aspectRatio: '9:16',
+    }));
+    resolveSecond({
+      preview: {path: 'thumbnail/second.jpg', url: 'second-url'},
+      widthPixels: 1600,
+      heightPixels: 900,
+    });
+
+    await completion;
+
+    const images = configMock.projectConfig.value().inputConfig?.products[0].images;
+    expect(images).toHaveLength(2);
+    const expectedDeviation = Math.abs((1600 / 900) / (9 / 16) - 1);
+    expect(images?.[0].aspectRatioDeviation).toBeCloseTo(expectedDeviation);
+    expect(images?.[1].aspectRatioDeviation).toBeCloseTo(expectedDeviation);
+  });
+
   it('keeps the original upload when preview creation fails', async () => {
     imagePreviewMock.create.mockRejectedValue(new Error('preview failed'));
     const file = new File([new Uint8Array([1, 2, 3])], 'pic.jpeg', {
