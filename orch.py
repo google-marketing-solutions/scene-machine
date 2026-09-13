@@ -1383,14 +1383,18 @@ def projects_handler() -> flask_response:
   return _json_response({'id': project_id})
 
 
-def project_detail_handler(project_id: str) -> flask_response:
+def project_detail_handler(
+    project_id: str, *, forced_view: str | None = None
+) -> flask_response:
   """Reads (GET), overwrites (PATCH) or deletes (DELETE) one project.
 
   The default PATCH is the faithful port of the UI's whole-document autosave:
   a full set() with createdBy stripped from the payload (immutable; the stored
   owner is preserved) and lastEdited refreshed server-side. PATCH
-  ?view=editor is the explicit exception: it uses field updates so the omitted
-  Setup inputConfig cannot be overwritten by a stale editor read.
+  ?view=editor is the legacy form of the explicit editor exception. The
+  dedicated PATCH /api/projects/<id>/editor route is the preferred form; both
+  use field updates so the omitted Setup inputConfig cannot be overwritten by
+  a stale editor read.
 
   SHARED-TEAM MODEL (intentional): there is deliberately NO per-user
   ownership check on any method. Every IAP-admitted user may read, edit and
@@ -1401,7 +1405,11 @@ def project_detail_handler(project_id: str) -> flask_response:
   ui_db = _get_ui_db()
   if ui_db is None:
     return _json_error('FIRESTORE_DB_UI not configured', 500)
-  view = flask_request.args.get('view')
+  view = (
+      forced_view
+      if forced_view is not None
+      else flask_request.args.get('view')
+  )
   if view not in (None, 'editor'):
     return _json_error("Unsupported project view (only 'editor')", 400)
   doc_ref = ui_db.collection('projects').document(project_id)
@@ -1444,6 +1452,11 @@ def project_detail_handler(project_id: str) -> flask_response:
   # user may delete any project (shared-team model; see the docstring above).
   _delete_project_doc(ui_db, doc_ref)
   return _json_response({'id': project_id})
+
+
+def project_editor_detail_handler(project_id: str) -> flask_response:
+  """Handles the protected, editor-scoped project PATCH endpoint."""
+  return project_detail_handler(project_id, forced_view='editor')
 
 
 def templates_handler() -> flask_response:
@@ -1618,6 +1631,11 @@ if _ROLE == 'app':
       '/api/projects/<project_id>',
       view_func=project_detail_handler,
       methods=['GET', 'PATCH', 'DELETE'],
+  )
+  app.add_url_rule(
+      '/api/projects/<project_id>/editor',
+      view_func=project_editor_detail_handler,
+      methods=['PATCH'],
   )
   app.add_url_rule(
       '/api/templates', view_func=templates_handler, methods=['GET', 'POST']

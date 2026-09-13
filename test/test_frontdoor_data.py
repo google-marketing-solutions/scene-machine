@@ -1330,6 +1330,47 @@ def test_editor_patch_preserves_setup_and_replaces_other_omitted_root_fields(
   assert fake_db.collection('projects').docs[project_id] == before
 
 
+def test_dedicated_editor_patch_preserves_setup_and_rejects_protected_fields(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project_id = 'dedicated-editor-patch'
+  project = {
+      'id': project_id,
+      'name': 'Before',
+      'inputConfig': {'brief': 'must survive'},
+      'legacyOnly': 'remove',
+      'storyboard': [],
+  }
+  assert client.post('/api/projects', json=project).status_code == 200
+
+  response = client.patch(
+      f'/api/projects/{project_id}/editor',
+      json={'id': project_id, 'name': 'After', 'storyboard': []},
+  )
+
+  assert response.status_code == 200
+  stored = fake_db.collection('projects').docs[project_id]
+  assert stored['inputConfig'] == project['inputConfig']
+  assert stored['name'] == 'After'
+  assert 'legacyOnly' not in stored
+
+  before = copy.deepcopy(stored)
+  assert client.patch(
+      f'/api/projects/{project_id}/editor',
+      json={'id': project_id, 'inputConfig': {'brief': 'overwrite'}},
+  ).status_code == 400
+  assert fake_db.collection('projects').docs[project_id] == before
+  assert client.get(
+      f'/api/projects/{project_id}/editor'
+  ).status_code in (404, 405)
+  assert client.post(
+      f'/api/projects/{project_id}/editor'
+  ).status_code in (404, 405)
+
+
 def test_editor_patch_does_not_overwrite_concurrent_setup_save(
     monkeypatch, orchestrator_module
 ):

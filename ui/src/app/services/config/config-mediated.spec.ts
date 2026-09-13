@@ -1019,9 +1019,60 @@ describe('ConfigService (mediated data plane)', () => {
       service.saveNow();
 
       expect(httpClientMock.patch).toHaveBeenCalledWith(
-        '/api/projects/proj-editor-save?view=editor',
+        '/api/projects/proj-editor-save/editor',
         expect.objectContaining({name: 'summary save', inputConfig: undefined}),
       );
+    });
+
+    it('keeps projected edits unsaved after editor endpoint failure and retries there', () => {
+      markPersisted('proj-editor-retry');
+      service.projectConfig.value.set({
+        ...service.projectConfig.value(),
+        id: 'proj-editor-retry',
+        inputConfig: undefined,
+      } as any);
+      const failedResponse = new Subject<unknown>();
+      const retryResponse = new Subject<unknown>();
+      const retryAction = new Subject<void>();
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      httpClientMock.patch
+        .mockReturnValueOnce(failedResponse)
+        .mockReturnValueOnce(retryResponse);
+      matSnackBarMock.open.mockReturnValue({onAction: () => retryAction});
+
+      service.updateProjectConfig({name: 'projected edit'});
+      service.saveNow();
+
+      expect(httpClientMock.patch).toHaveBeenCalledWith(
+        '/api/projects/proj-editor-retry/editor',
+        expect.objectContaining({
+          id: 'proj-editor-retry',
+          name: 'projected edit',
+          inputConfig: undefined,
+        }),
+      );
+      failedResponse.error(new HttpErrorResponse({status: 405}));
+      expect(service.projectConfig.value().name).toBe('projected edit');
+      expect(matSnackBarMock.open).toHaveBeenCalledWith(
+        'Unsaved changes — failed to save the project.',
+        'Retry',
+        {panelClass: ['error-snackbar']},
+      );
+
+      retryAction.next();
+
+      expect(httpClientMock.patch).toHaveBeenCalledTimes(2);
+      expect(httpClientMock.patch.mock.calls[1][0]).toBe(
+        '/api/projects/proj-editor-retry/editor',
+      );
+      expect(httpClientMock.patch.mock.calls[1][1]).toEqual(
+        expect.objectContaining({
+          name: 'projected edit',
+          inputConfig: undefined,
+        }),
+      );
+      retryResponse.next({});
+      errorSpy.mockRestore();
     });
 
     it('keeps a locally created full project ready after leaving another project', () => {
