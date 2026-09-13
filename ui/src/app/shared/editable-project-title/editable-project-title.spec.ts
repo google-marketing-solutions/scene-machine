@@ -59,6 +59,8 @@ describe('EditableProjectTitle', () => {
         isLoading: () => false,
         error: () => null,
       },
+      projectLoadError: signal(false),
+      reloadProjectConfig: vi.fn(),
       updateProjectConfig,
       saveNow,
     };
