@@ -177,6 +177,7 @@ export class Storyboard {
       this.pendingObjectUrlCleanups.clear();
       this.moveVisitEpoch++;
       this.preparedMove = undefined;
+      this.remixEngineService.clearForegroundScene();
     });
     this.router.events
       .pipe(filter(event => event instanceof NavigationStart))
@@ -201,6 +202,12 @@ export class Storyboard {
         this.downloadInProgress.set(false);
       }
       this.lastProjectId = projectId;
+    });
+    effect(() => {
+      this.remixEngineService.setForegroundScene(
+        this.config.projectConfig.value().id,
+        this.selectedSceneId(),
+      );
     });
   }
 
