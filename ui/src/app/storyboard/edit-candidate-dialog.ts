@@ -114,7 +114,13 @@ import {DictationConfig} from '../shared/dictation/dictation';
           flex: 1 1 auto;
           min-height: 0;
           overflow: auto;
+          padding-inline-end: 64px !important;
           scrollbar-gutter: stable;
+        }
+
+        &.dictation-enabled:has(app-dictation-control.dictation-open) textarea {
+          height: auto;
+          padding-block-end: 0 !important;
         }
 
         &.dictation-enabled ::ng-deep .mat-mdc-form-field-infix {
@@ -122,6 +128,21 @@ import {DictationConfig} from '../shared/dictation/dictation';
           flex-direction: column;
           height: 100%;
           min-height: 0;
+        }
+
+        &.dictation-enabled ::ng-deep app-dictation-control {
+          position: absolute;
+          inset-inline-end: 16px;
+          bottom: 4px;
+          z-index: 2;
+        }
+
+        &.dictation-enabled ::ng-deep app-dictation-control.dictation-open {
+          position: relative;
+          inset: auto;
+          width: 100%;
+          align-self: stretch;
+          flex: 0 0 auto;
         }
       }
 

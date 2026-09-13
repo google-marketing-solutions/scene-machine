@@ -269,8 +269,15 @@ so end users never need direct storage/database permissions.
 Dictation is included in the standard deployment. Users can speak into the
 microphone control in supported Setup, Storyboard and Edit candidate text
 fields, then review or undo the inserted text before submitting. Enabling the
-feature does not start recording: users must click the microphone and allow
-browser microphone access.
+feature does not start recording: click the bottom-right microphone to start,
+allowing browser microphone access when prompted. Text is inserted at the
+cursor or selection captured at that click, or appended if the text field was
+not focused. A compact strip inside the field shows recording and transcription
+status. Use the square **Stop** button to finish and transcribe, or **Cancel**
+(×) to discard unfinished dictation. After insertion, the strip stays visible
+with **Undo**; closing it leaves the inserted text intact. When idle, only the
+microphone is shown, leaving the field available for text.
+The Storyboard Prompt can be resized vertically without moving the trim controls.
 
 Recordings are sent to Gemini for transcription through the deployment's
 Google Cloud project; usage can incur model charges and consume quota. The

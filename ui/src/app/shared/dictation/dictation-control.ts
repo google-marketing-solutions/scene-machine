@@ -18,6 +18,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
+  afterRenderEffect,
   effect,
   EventEmitter,
   inject,
@@ -48,61 +49,120 @@ import {
 @Component({
   selector: 'app-dictation-control',
   standalone: true,
+  host: {
+    '[class.dictation-open]': 'panelOpen()',
+  },
   imports: [MatButtonModule, MatIconModule, MatDialogModule],
   template: `
     @if (enabled) {
       <div class="dictation-control" [class.busy]="isBusy()">
-        @if (overflowText() !== undefined) {
-          <span class="dictation-status" role="status"
-            >Transcript exceeds field limit.</span
+        @if (panelOpen()) {
+          <section
+            class="dictation-panel"
+            [id]="panelId()"
+            role="region"
+            aria-label="Dictation status"
           >
-          <button type="button" mat-button (click)="openRecoveryDetails()">
-            Details
+            <div class="dictation-statuses">
+              @if (overflowText() !== undefined) {
+                <span class="dictation-status" role="status"
+                  >Transcript exceeds field limit.</span
+                >
+              } @else if (failureMessage(); as message) {
+                <span class="dictation-status" role="status">{{
+                  message
+                }}</span>
+              }
+              @if (statusText(); as status) {
+                <span class="dictation-status" role="status">{{ status }}</span>
+              }
+              @if (insertedMessage(); as message) {
+                <span class="dictation-status" role="status">{{
+                  message
+                }}</span>
+              }
+            </div>
+            <div class="dictation-actions">
+              @if (isRecording()) {
+                <button
+                  type="button"
+                  mat-icon-button
+                  aria-label="Stop recording"
+                  (click)="stop()"
+                >
+                  <mat-icon aria-hidden="true">stop</mat-icon>
+                </button>
+                <button
+                  type="button"
+                  mat-icon-button
+                  aria-label="Cancel dictation"
+                  (click)="cancel()"
+                >
+                  <mat-icon aria-hidden="true">close</mat-icon>
+                </button>
+              } @else if (isCancelable()) {
+                <button
+                  type="button"
+                  mat-icon-button
+                  aria-label="Cancel dictation"
+                  (click)="cancel()"
+                >
+                  <mat-icon aria-hidden="true">close</mat-icon>
+                </button>
+              } @else if (hasRecoverableError()) {
+                <button
+                  type="button"
+                  mat-button
+                  (click)="openRecoveryDetails()"
+                >
+                  Details
+                </button>
+                <button
+                  type="button"
+                  mat-icon-button
+                  aria-label="Close dictation message"
+                  (click)="closePanel()"
+                >
+                  <mat-icon aria-hidden="true">close</mat-icon>
+                </button>
+              } @else {
+                @if (canUndo()) {
+                  <button
+                    type="button"
+                    mat-button
+                    aria-label="Undo inserted transcript"
+                    (click)="undo()"
+                  >
+                    Undo
+                  </button>
+                }
+                @if (insertedMessage()) {
+                  <button
+                    type="button"
+                    mat-icon-button
+                    aria-label="Close dictation message"
+                    (click)="closePanel()"
+                  >
+                    <mat-icon aria-hidden="true">close</mat-icon>
+                  </button>
+                }
+              }
+            </div>
+          </section>
+        }
+        @if (!panelOpen()) {
+          <button
+            class="dictation-trigger"
+            type="button"
+            mat-icon-button
+            [attr.aria-label]="triggerLabel()"
+            [disabled]="isDisabled()"
+            (mousedown)="$event.preventDefault()"
+            (click)="handleTrigger()"
+          >
+            <mat-icon>mic</mat-icon>
           </button>
-        } @else if (failureMessage(); as message) {
-          <span class="dictation-status" role="status">{{ message }}</span>
-          <button type="button" mat-button (click)="openRecoveryDetails()">
-            Details
-          </button>
         }
-        @if (statusText(); as status) {
-          <span class="dictation-status" role="status">{{ status }}</span>
-        }
-        @if (insertedMessage(); as message) {
-          <span class="dictation-status" role="status">{{ message }}</span>
-          <div class="dictation-inline-actions">
-            @if (canUndo()) {
-              <button
-                type="button"
-                mat-icon-button
-                aria-label="Undo inserted transcript"
-                title="Undo inserted transcript"
-                [disabled]="isBusy()"
-                (click)="undo()"
-              >
-                <mat-icon>undo</mat-icon>
-              </button>
-            }
-          </div>
-        }
-        <button
-          type="button"
-          mat-icon-button
-          [attr.aria-label]="
-            isRecording()
-              ? 'Stop recording'
-              : isCancelable()
-                ? 'Cancel dictation'
-                : 'Start dictation'
-          "
-          [disabled]="isDisabled()"
-          (mousedown)="$event.preventDefault()"
-          (click)="isRecording() ? stop() : isCancelable() ? cancel() : start()"
-        >
-          <mat-icon>{{
-            isRecording() || isCancelable() ? 'stop' : 'mic'
-          }}</mat-icon>
-        </button>
       </div>
       <ng-template #recoveryDetails>
         <h2 mat-dialog-title>Dictation details</h2>
@@ -135,9 +195,9 @@ import {
       :host {
         position: relative;
         z-index: 1;
-        width: 100%;
+        width: auto;
         box-sizing: border-box;
-        padding: 0 8px 6px;
+        padding: 0;
         display: flex;
         justify-content: flex-end;
         pointer-events: none;
@@ -146,39 +206,48 @@ import {
         display: flex;
         align-items: center;
         gap: 4px;
-        min-height: 36px;
-        flex: 0 1 auto;
         min-width: 0;
         max-width: 100%;
+        min-height: 36px;
+        flex: 0 0 auto;
         box-sizing: border-box;
-        padding: 0 4px;
+        padding: 0 4px 4px 0;
         border-radius: 8px;
-        background: color-mix(
-          in srgb,
-          var(--mat-sys-surface-container-high) 94%,
-          transparent
-        );
+        background: transparent;
         pointer-events: auto;
       }
       .dictation-control > button[mat-icon-button] {
-        margin-left: auto;
+        margin: 0;
       }
       .dictation-control.busy {
         color: var(--mat-sys-primary);
       }
       .dictation-status {
         min-width: 0;
+        font-size: 0.8rem;
+        color: var(--mat-sys-on-surface-variant);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font-size: 0.8rem;
-        color: var(--mat-sys-on-surface-variant);
       }
-      .dictation-inline-actions {
+      .dictation-panel {
         display: flex;
         align-items: center;
-        gap: 2px;
-        margin-left: auto;
+        gap: 4px;
+        min-width: 0;
+        flex: 1 1 auto;
+        padding: 4px 0 4px 8px;
+        box-sizing: border-box;
+        border: 1px solid var(--mat-sys-outline-variant);
+        border-radius: 8px;
+        background: var(--mat-sys-surface-container);
+        color: var(--mat-sys-on-surface);
+        box-shadow: var(--mat-sys-level3);
+      }
+      .dictation-statuses {
+        min-width: 0;
+        flex: 1 1 auto;
+        overflow: hidden;
       }
       mat-dialog-content textarea {
         width: 100%;
@@ -189,9 +258,9 @@ import {
       }
       .dictation-actions {
         display: flex;
-        justify-content: flex-end;
+        align-items: center;
         gap: 4px;
-        margin-top: 4px;
+        flex: 0 0 auto;
       }
     `,
   ],
@@ -203,6 +272,8 @@ export class DictationControl implements OnChanges, OnDestroy {
   private readonly dialog = inject(MatDialog);
   private recoveryDialogRef: MatDialogRef<unknown> | undefined;
   @ViewChild('recoveryDetails') recoveryDetails!: TemplateRef<unknown>;
+
+  readonly panelOpen = signal(false);
 
   @Input() enabled = false;
   @Input() value = '';
@@ -243,6 +314,14 @@ export class DictationControl implements OnChanges, OnDestroy {
     if (current.status === 'transcribing') return 'Transcribing…';
     return undefined;
   };
+  readonly triggerLabel = () => {
+    if (this.panelOpen()) return 'Close dictation controls';
+    return this.isBusy() ? 'Open dictation controls' : 'Start dictation';
+  };
+  readonly hasRecoverableError = () =>
+    this.overflowText() !== undefined || this.failureMessage() !== undefined;
+  readonly panelId = () =>
+    `dictation-controls-${this.ownerKey.replace(/[^A-Za-z0-9_-]/g, '-')}`;
 
   private readonly recovery = signal<Recovery | undefined>(undefined);
   private handledEventId = 0;
@@ -257,8 +336,27 @@ export class DictationControl implements OnChanges, OnDestroy {
   private lastOwner = '';
   private lastValue = '';
   private lastRevision = 0;
+  private focusTarget: 'panel' | 'trigger' | undefined;
 
   constructor() {
+    afterRenderEffect({
+      read: () => {
+        const target = this.focusTarget;
+        const panelOpen = this.panelOpen();
+        const status = this.state().status;
+        if (!target) return;
+        const selector =
+          target === 'panel' ? '.dictation-panel button' : '.dictation-trigger';
+        const element = this.hostElement.nativeElement.querySelector(
+          selector,
+        ) as HTMLButtonElement | null;
+        if (!element || (target === 'panel' && !panelOpen)) return;
+        element.focus();
+        if (target === 'trigger' || status !== 'permission') {
+          this.focusTarget = undefined;
+        }
+      },
+    });
     effect(() => {
       const current = this.state();
       if (current.status === 'idle' && current.owner === this.ownerKey) {
@@ -268,6 +366,7 @@ export class DictationControl implements OnChanges, OnDestroy {
         this.recovery.set(undefined);
       }
       if (current.status === 'overflow') {
+        this.requestPanelFocusIfOwned();
         this.recovery.set({
           kind: 'failed',
           message: current.error ?? 'Recording exceeded the 4 MiB audio limit.',
@@ -286,6 +385,7 @@ export class DictationControl implements OnChanges, OnDestroy {
       if (current.eventId === this.handledEventId || current.status !== 'error')
         return;
       this.handledEventId = current.eventId;
+      this.requestPanelFocusIfOwned();
       this.recovery.set({
         kind: 'failed',
         message: current.error ?? 'Transcription failed. Please try again.',
@@ -311,6 +411,8 @@ export class DictationControl implements OnChanges, OnDestroy {
     const revisionChanged =
       changes['revision'] && !changes['revision'].firstChange;
     if (ownerChanged) {
+      this.panelOpen.set(false);
+      this.focusTarget = undefined;
       this.recoveryDialogRef?.close();
       this.recoveryDialogRef = undefined;
       this.recovery.set(undefined);
@@ -331,7 +433,13 @@ export class DictationControl implements OnChanges, OnDestroy {
         this.recovery.set(undefined);
         this.insertionSelection = undefined;
         this.service.dismiss(this.lastOwner || this.ownerKey);
+        this.panelOpen.set(false);
+        this.focusTarget = 'trigger';
       }
+    }
+    if (changes['enabled'] && !this.enabled) {
+      this.panelOpen.set(false);
+      this.focusTarget = undefined;
     }
     this.lastOwner = this.ownerKey;
     this.lastValue = this.value;
@@ -339,6 +447,7 @@ export class DictationControl implements OnChanges, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.panelOpen.set(false);
     this.recoveryDialogRef?.close();
     this.textareaWithListeners?.removeEventListener(
       'blur',
@@ -351,10 +460,32 @@ export class DictationControl implements OnChanges, OnDestroy {
   start(): void {
     this.recovery.set(undefined);
     this.insertionSelection = this.captureSelection();
+    this.panelOpen.set(true);
+    this.focusTarget = 'panel';
     this.service.start(this.ownerKey, this.config());
   }
 
+  handleTrigger(): void {
+    if (this.panelOpen()) {
+      this.closePanel();
+    } else {
+      if (!this.isBusy()) {
+        this.insertionSelection = this.captureSelection();
+        this.recovery.set(undefined);
+        this.service.start(this.ownerKey, this.config());
+      }
+      this.panelOpen.set(true);
+      this.focusTarget = 'panel';
+    }
+  }
+
+  closePanel(restoreFocus = true): void {
+    this.panelOpen.set(false);
+    if (restoreFocus) this.focusTarget = 'trigger';
+  }
+
   stop(): void {
+    this.focusTarget = 'panel';
     this.service.stop(this.ownerKey);
   }
 
@@ -362,6 +493,8 @@ export class DictationControl implements OnChanges, OnDestroy {
     this.recovery.set(undefined);
     this.insertionSelection = undefined;
     this.service.cancel(this.ownerKey);
+    this.panelOpen.set(false);
+    this.focusTarget = 'trigger';
   }
 
   undo(): void {
@@ -382,6 +515,8 @@ export class DictationControl implements OnChanges, OnDestroy {
     this.valueChange.emit(current.beforeValue);
     this.recovery.set(undefined);
     this.service.dismiss(this.ownerKey);
+    this.panelOpen.set(false);
+    this.focusTarget = 'trigger';
   }
 
   discard(): void {
@@ -390,6 +525,8 @@ export class DictationControl implements OnChanges, OnDestroy {
     this.recovery.set(undefined);
     this.insertionSelection = undefined;
     this.service.dismiss(this.ownerKey);
+    this.panelOpen.set(false);
+    this.focusTarget = 'trigger';
   }
 
   openRecoveryDetails(): void {
@@ -448,6 +585,7 @@ export class DictationControl implements OnChanges, OnDestroy {
   }
 
   private acceptTranscript(transcript: string): void {
+    this.requestPanelFocusIfOwned();
     const trimmed = transcript.trim();
     if (!trimmed) {
       this.recovery.set({
@@ -489,6 +627,16 @@ export class DictationControl implements OnChanges, OnDestroy {
       insertedValue,
       insertedRevision: beforeRevision + 1,
     });
+  }
+
+  private requestPanelFocusIfOwned(): void {
+    if (
+      this.panelOpen() &&
+      document.activeElement instanceof Node &&
+      this.hostElement.nativeElement.contains(document.activeElement)
+    ) {
+      this.focusTarget = 'panel';
+    }
   }
 
   private captureSelection():
