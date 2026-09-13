@@ -69,7 +69,12 @@ describe('Storyboard project-load recovery (real ConfigService)', () => {
         },
         {
           provide: ThumbnailCacheService,
-          useValue: {acquire: vi.fn().mockResolvedValue(null)},
+          useValue: {
+            acquire: vi.fn().mockResolvedValue({
+              url: 'blob:thumbnail-fixture',
+              release: vi.fn(),
+            }),
+          },
         },
         {
           provide: RemixEngineService,
@@ -97,7 +102,7 @@ describe('Storyboard project-load recovery (real ConfigService)', () => {
     await fixture.whenStable();
   });
 
-  it('renders GET 500 recovery, then the successful retried project', async () => {
+  it('renders editor GET 500 recovery, then the successful retried project', async () => {
     config.loadProjectConfig('project-1', 'editor');
     fixture.detectChanges();
     http
