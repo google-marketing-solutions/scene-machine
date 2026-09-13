@@ -163,10 +163,19 @@ describe('DictationControl', () => {
     vi.unstubAllGlobals();
   });
 
+  function clickStart(): void {
+    fixture.detectChanges();
+    const trigger = fixture.nativeElement.querySelector(
+      '.dictation-trigger',
+    ) as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
+  }
+
   async function record(): Promise<
     ReturnType<HttpTestingController['expectOne']>
   > {
-    control.start();
+    clickStart();
     await Promise.resolve();
     await Promise.resolve();
     expect(control.isRecording()).toBe(true);
@@ -593,7 +602,7 @@ describe('DictationControl', () => {
     };
     fixture.componentRef.changeDetectorRef.detectChanges();
     FakeRecorder.holdStop = true;
-    control.start();
+    clickStart();
     await Promise.resolve();
     await Promise.resolve();
     expect(control.isRecording()).toBe(true);
@@ -614,7 +623,7 @@ describe('DictationControl', () => {
   it('keeps a recording failure visible before a deferred recorder stop', async () => {
     FakeRecorder.holdStop = true;
     vi.useFakeTimers();
-    control.start();
+    clickStart();
     await Promise.resolve();
     await Promise.resolve();
     expect(control.isRecording()).toBe(true);
@@ -681,6 +690,7 @@ describe('DictationControl', () => {
     fixture.componentRef.changeDetectorRef.detectChanges();
 
     expect(request.cancelled).toBe(true);
+    expect(control.panelOpen()).toBe(false);
     expect(host.value).toBe('Changed by typing');
     http.expectNone('/api/transcribe');
   });
@@ -744,14 +754,14 @@ describe('DictationControl', () => {
       }),
     );
     FakeRecorder.holdStop = true;
-    control.start();
+    clickStart();
     await Promise.resolve();
     await Promise.resolve();
     expect(control.isRecording()).toBe(true);
 
     control.stop();
     control.cancel();
-    control.start();
+    clickStart();
     await Promise.resolve();
     await Promise.resolve();
 
@@ -767,7 +777,7 @@ describe('DictationControl', () => {
 
   it('reports unsupported formats instead of falling back to an unconfigured recorder', async () => {
     FakeRecorder.isTypeSupported.mockReturnValue(false);
-    control.start();
+    clickStart();
     await Promise.resolve();
     await Promise.resolve();
 
@@ -779,7 +789,7 @@ describe('DictationControl', () => {
 
   it('reports a useful error when MediaRecorder is unavailable after permission', async () => {
     vi.stubGlobal('MediaRecorder', undefined);
-    control.start();
+    clickStart();
     await Promise.resolve();
     await Promise.resolve();
 
@@ -793,7 +803,7 @@ describe('DictationControl', () => {
   it('clears the timer before a deferred recorder stop', async () => {
     FakeRecorder.holdStop = true;
     vi.useFakeTimers();
-    control.start();
+    clickStart();
     await Promise.resolve();
     await Promise.resolve();
     expect(control.isRecording()).toBe(true);
@@ -818,7 +828,7 @@ describe('DictationControl', () => {
     };
     fixture.componentRef.changeDetectorRef.detectChanges();
     vi.useFakeTimers();
-    control.start();
+    clickStart();
     await Promise.resolve();
     await Promise.resolve();
     expect(control.isRecording()).toBe(true);
@@ -840,7 +850,7 @@ describe('DictationControl', () => {
     fixture.componentRef.changeDetectorRef.detectChanges();
     FakeRecorder.holdStop = true;
     vi.useFakeTimers();
-    control.start();
+    clickStart();
     await Promise.resolve();
     await Promise.resolve();
     expect(control.isRecording()).toBe(true);

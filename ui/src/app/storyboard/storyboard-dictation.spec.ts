@@ -374,7 +374,11 @@ describe('Storyboard dictation with the real control', () => {
   async function startRecording(): Promise<DictationControl> {
     const control = fixture.debugElement.query(By.directive(DictationControl))
       .componentInstance as DictationControl;
-    control.start();
+    const trigger = fixture.debugElement.query(
+      By.css('[aria-label="Start dictation"]'),
+    ).nativeElement as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
     await Promise.resolve();
     await Promise.resolve();
     expect(control.isRecording()).toBe(true);

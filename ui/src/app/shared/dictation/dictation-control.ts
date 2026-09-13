@@ -457,14 +457,6 @@ export class DictationControl implements OnChanges, OnDestroy {
     this.service.dismiss(this.ownerKey);
   }
 
-  start(): void {
-    this.recovery.set(undefined);
-    this.insertionSelection = this.captureSelection();
-    this.panelOpen.set(true);
-    this.focusTarget = 'panel';
-    this.service.start(this.ownerKey, this.config());
-  }
-
   handleTrigger(): void {
     if (this.panelOpen()) {
       this.closePanel();
