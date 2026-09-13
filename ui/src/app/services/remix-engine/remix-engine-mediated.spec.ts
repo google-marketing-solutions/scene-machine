@@ -1782,6 +1782,88 @@ describe('RemixEngineService (mediated)', () => {
       runResumeScan();
       expect(pollSpy).toHaveBeenCalledWith('persisted-exec-id', 'project-1');
     });
+
+    it('resumes a large pending batch through the constructor effect within the polling budget', async () => {
+      vi.useFakeTimers();
+      const pendingCount = 104;
+      const storyboard = Array.from({length: pendingCount}, (_, index) => ({
+        id: `scene-${index}`,
+        type: 'generated',
+        prompt: `prompt-${index}`,
+        candidates: [],
+        pendingGeneration: {
+          ...persistedPending,
+          executionId: `execution-${index}`,
+        },
+      }));
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        storyboard,
+      });
+
+      const statusRequests: Array<Subject<any>> = [];
+      httpClientMock.get.mockImplementation(() => {
+        const status = new Subject<any>();
+        statusRequests.push(status);
+        return status.asObservable();
+      });
+
+      // This is the real constructor effect's input path, not a direct
+      // pollWorkflow call. Every pending scene is queued synchronously, while
+      // the scheduler owns the HTTP start and concurrency budget.
+      runResumeScan();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(statusRequests).toHaveLength(4);
+      expect(service.generatingSceneIds().size).toBe(pendingCount);
+
+      const completeBatch = (start: number, end: number) => {
+        for (const status of statusRequests.slice(start, end)) {
+          status.next({sink: {output: {'0': {video: []}}}});
+          status.complete();
+        }
+      };
+
+      // Keep the first four requests in flight across a full second: queued
+      // work must not replace or exceed the concurrency ceiling while they
+      // remain unresolved.
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(statusRequests).toHaveLength(4);
+
+      completeBatch(0, 4);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(configServiceMock.updateProjectConfig).toHaveBeenCalledTimes(4);
+      expect(service.generatingSceneIds().size).toBe(pendingCount - 4);
+      // The next four start in the next one-second window, while the rest
+      // remain queued.
+      expect(statusRequests).toHaveLength(8);
+
+      // Completing that batch must not let another four start in the same
+      // one-second window. The next starts become eligible at the boundary.
+      completeBatch(4, 8);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(statusRequests).toHaveLength(8);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(statusRequests).toHaveLength(8);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(statusRequests).toHaveLength(12);
+
+      // A project switch cancels both the active second batch and queued
+      // remainder. No subsequent scheduler wake may start more requests.
+      projectConfigSignal.set({
+        ...projectConfigSignal(),
+        id: 'project-2',
+        storyboard: [],
+      });
+      TestBed.tick();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(service.generatingSceneIds().size).toBe(0);
+      expect(statusRequests).toHaveLength(12);
+      expect(statusRequests.slice(8).every(status => !status.observed)).toBe(
+        true,
+      );
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(statusRequests).toHaveLength(12);
+    });
   });
 
   describe('resume of a persisted in-flight render', () => {
