@@ -278,9 +278,7 @@ describe('Storyboard', () => {
     expect(getComputedStyle(textarea).overflow).toBe('auto');
     expect(getComputedStyle(textarea).minHeight).toBe('136px');
     expect(
-      fixture.nativeElement.querySelector(
-        '[aria-label="Open dictation controls"]',
-      ),
+      fixture.nativeElement.querySelector('[aria-label="Start dictation"]'),
     ).not.toBeNull();
     expect(getComputedStyle(controlsArea).maxHeight).toBe('none');
     expect(getComputedStyle(controlsArea).flexGrow).toBe('0');
@@ -310,9 +308,7 @@ describe('Storyboard', () => {
     expect(getComputedStyle(textarea).resize).toBe('vertical');
     expect(getComputedStyle(textarea).minHeight).toBe('136px');
     expect(
-      fixture.nativeElement.querySelector(
-        '[aria-label="Open dictation controls"]',
-      ),
+      fixture.nativeElement.querySelector('[aria-label="Start dictation"]'),
     ).toBeNull();
   });
 

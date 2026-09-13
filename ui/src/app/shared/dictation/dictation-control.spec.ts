@@ -219,6 +219,9 @@ describe('DictationControl', () => {
     const request = http.expectOne('/api/transcribe');
     fixture.detectChanges();
     expect(document.body.textContent).toContain('Transcribing');
+    expect(
+      fixture.nativeElement.querySelector('[aria-label="Cancel dictation"]'),
+    ).not.toBeNull();
     request.flush({text: 'spoken words'});
     fixture.detectChanges();
 
@@ -646,10 +649,21 @@ describe('DictationControl', () => {
           resolvePermission = resolve;
         }),
     );
-    control.start();
+    const trigger = fixture.nativeElement.querySelector(
+      '[aria-label="Start dictation"]',
+    ) as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
     await Promise.resolve();
     expect(control.state().status).toBe('permission');
-    control.cancel();
+    expect(
+      fixture.nativeElement.querySelector('[aria-label="Cancel dictation"]'),
+    ).not.toBeNull();
+    (
+      fixture.nativeElement.querySelector(
+        '[aria-label="Cancel dictation"]',
+      ) as HTMLButtonElement
+    ).click();
 
     const lateTrack = new FakeTrack();
     resolvePermission({getTracks: () => [lateTrack]});
