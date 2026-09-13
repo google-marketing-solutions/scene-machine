@@ -366,6 +366,7 @@ export class DictationControl implements OnChanges, OnDestroy {
         this.recovery.set(undefined);
       }
       if (current.status === 'overflow') {
+        this.requestPanelFocusIfOwned();
         this.recovery.set({
           kind: 'failed',
           message: current.error ?? 'Recording exceeded the 4 MiB audio limit.',
@@ -384,6 +385,7 @@ export class DictationControl implements OnChanges, OnDestroy {
       if (current.eventId === this.handledEventId || current.status !== 'error')
         return;
       this.handledEventId = current.eventId;
+      this.requestPanelFocusIfOwned();
       this.recovery.set({
         kind: 'failed',
         message: current.error ?? 'Transcription failed. Please try again.',
@@ -583,11 +585,7 @@ export class DictationControl implements OnChanges, OnDestroy {
   }
 
   private acceptTranscript(transcript: string): void {
-    const restorePanelFocus =
-      this.panelOpen() &&
-      document.activeElement instanceof Node &&
-      this.hostElement.nativeElement.contains(document.activeElement);
-    if (restorePanelFocus) this.focusTarget = 'panel';
+    this.requestPanelFocusIfOwned();
     const trimmed = transcript.trim();
     if (!trimmed) {
       this.recovery.set({
@@ -629,6 +627,16 @@ export class DictationControl implements OnChanges, OnDestroy {
       insertedValue,
       insertedRevision: beforeRevision + 1,
     });
+  }
+
+  private requestPanelFocusIfOwned(): void {
+    if (
+      this.panelOpen() &&
+      document.activeElement instanceof Node &&
+      this.hostElement.nativeElement.contains(document.activeElement)
+    ) {
+      this.focusTarget = 'panel';
+    }
   }
 
   private captureSelection():
