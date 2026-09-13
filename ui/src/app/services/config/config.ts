@@ -106,9 +106,16 @@ function nearestAllowed(allowed: number[], value: number): number {
 /**
  * Represents a file stored in Google Cloud Storage.
  */
+export interface ImagePreviewRef {
+  path: string;
+  url: string;
+}
+
 export interface GcsFile {
   path: string; // GCS path, starting after gcs://
   url: string; // signed GCS URL with token, starting with https://
+  /** Optional bounded display preview; the original ref remains authoritative. */
+  preview?: ImagePreviewRef;
 }
 
 /**

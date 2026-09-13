@@ -42,12 +42,12 @@ import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {MatTooltipModule} from '@angular/material/tooltip';
 import {ActivatedRoute, Router, RouterLink} from '@angular/router';
 import {ClientMediaService} from '../services/client-media/client-media';
+import {ImagePreviewService} from '../services/image-preview/image-preview';
 import {
   ImageImportService,
   ImportFailure,
   MAX_IMAGE_UPLOAD_MB,
 } from '../services/image-import/image-import';
-import {MediaSrcPipe} from '../services/media/media-src.pipe';
 import {
   ASPECT_RATIO_DEVIATION_THRESHOLD,
   AspectRatio,
@@ -64,6 +64,7 @@ import {TemplateCard} from '../templates/template-card/template-card';
 import {ConfirmTemplateDialog} from './confirm-template-dialog/confirm-template-dialog';
 import {GenerateStoryboardDialog} from './generate-storyboard-dialog/generate-storyboard-dialog';
 import {DictationControl} from '../shared/dictation/dictation-control';
+import {ThumbnailImageDirective} from '../shared/thumbnail-image/thumbnail-image.directive';
 
 interface FileProcessResult {
   added: number;
@@ -94,10 +95,10 @@ interface FileProcessResult {
     MatExpansionModule,
     MatTooltipModule,
     MatDialogModule,
-    MediaSrcPipe,
     TemplateCard,
     RouterLink,
     DictationControl,
+    ThumbnailImageDirective,
   ],
   templateUrl: './setup.html',
   styleUrl: './setup.scss',
@@ -111,6 +112,7 @@ export class Setup {
   private readonly snackBar = inject(MatSnackBar);
   readonly config = inject(ConfigService);
   readonly clientMediaService = inject(ClientMediaService);
+  private readonly imagePreviewService = inject(ImagePreviewService);
   private readonly imageImport = inject(ImageImportService);
   readonly templatesService = inject(TemplatesService);
 
@@ -131,6 +133,12 @@ export class Setup {
       this.config.setupInputsLoaded() &&
       this.config.projectConfig.value().inputConfig !== undefined,
   );
+
+  readonly imageCacheScope = computed(() => {
+    const projectId = this.config.projectConfig.value().id;
+    const bucket = this.config.globalConfig.value()?.gcsBucket;
+    return bucket && projectId ? {bucket, projectId} : null;
+  });
 
   /** Per-product: true while that product's links are being fetched. */
   importingLinks = signal<Record<number, boolean>>({});
@@ -374,10 +382,23 @@ export class Setup {
         }
         const {path, url} =
           await this.remixEngineService.uploadMedia(uploadFile);
+        let preview;
+        try {
+          preview = await this.imagePreviewService.create(uploadFile);
+        } catch {
+          // Preview creation is optional; keep the original image usable.
+        }
         return {
           path,
           url,
           name: uploadFile.name,
+          ...(preview
+            ? {
+                preview: preview.preview,
+                widthPixels: preview.widthPixels,
+                heightPixels: preview.heightPixels,
+              }
+            : {}),
         };
       }),
     );

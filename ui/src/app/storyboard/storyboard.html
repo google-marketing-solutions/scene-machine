@@ -879,7 +879,12 @@
                     >
                       @if (scene.referenceImage) {
                         <div class="reference-image-preview">
-                          <img [src]="scene.referenceImage | mediaSrc" alt="Reference Image" />
+                          <img
+                            [appThumbnailImage]="scene.referenceImage.preview ?? scene.referenceImage"
+                            [thumbnailCacheScope]="candidateCacheScope()"
+                            [thumbnailImagePersist]="thumbnailPersistForScene(scene)"
+                            alt="Reference Image"
+                          />
                           <button
                             mat-icon-button
                             class="remove-image-btn"

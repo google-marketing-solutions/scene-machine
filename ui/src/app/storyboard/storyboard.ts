@@ -52,6 +52,7 @@ import {MatSliderModule} from '@angular/material/slider';
 import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
 import {MatTooltipModule} from '@angular/material/tooltip';
 import {ClientMediaService} from '../services/client-media/client-media';
+import {ImagePreviewService} from '../services/image-preview/image-preview';
 import {
   Candidate,
   ConfigService,
@@ -122,6 +123,7 @@ export class Storyboard {
   protected remixEngineService = inject(RemixEngineService);
   private dialog = inject(MatDialog);
   private clientMediaService = inject(ClientMediaService);
+  private imagePreviewService = inject(ImagePreviewService);
   private imageImport = inject(ImageImportService);
   private snackBar = inject(MatSnackBar);
   private httpClient = inject(HttpClient);
@@ -414,8 +416,16 @@ export class Storyboard {
 
   getThumbnailData(item: {
     lowQualityThumbnail?: string;
-    highQualityThumbnail?: {path?: string; url?: string};
-    referenceImage?: {path?: string; url?: string};
+    highQualityThumbnail?: {
+      path?: string;
+      url?: string;
+      preview?: {path?: string; url?: string};
+    };
+    referenceImage?: {
+      path?: string;
+      url?: string;
+      preview?: {path?: string; url?: string};
+    };
   }) {
     const hasLowQualityThumbnail = !!item.lowQualityThumbnail;
     const hasHighQualityThumbnail = !!(
@@ -432,7 +442,9 @@ export class Storyboard {
       highQuality: hasHighQualityThumbnail
         ? item.highQualityThumbnail
         : undefined,
-      reference: hasReferenceImage ? item.referenceImage : undefined,
+      reference: hasReferenceImage
+        ? (item.referenceImage?.preview ?? item.referenceImage)
+        : undefined,
       showReference: !hasThumbnail && hasReferenceImage,
       showIcon: !hasThumbnail && !hasReferenceImage,
     };
@@ -1387,24 +1399,22 @@ export class Storyboard {
       if (scene && this.config.isGeneratedScene(scene)) {
         scene.referenceImage = {path, url};
         try {
-          const [lowQualityThumbnail, highQualityThumbnail] = await Promise.all(
-            [
-              this.clientMediaService.generateLowQualityThumbnail(
-                file,
-                'image',
-              ),
-              this.clientMediaService.generateHighQualityThumbnail(
-                file,
-                'image',
-              ),
-            ],
-          );
+          const lowQualityThumbnail =
+            await this.clientMediaService.generateLowQualityThumbnail(
+              file,
+              'image',
+            );
           scene.lowQualityThumbnail =
             await this.clientMediaService.toBase64(lowQualityThumbnail);
-          scene.highQualityThumbnail =
-            await this.remixEngineService.uploadThumbnail(
-              this.clientMediaService.toFile(highQualityThumbnail),
-            );
+        } catch (error) {
+          console.error(error);
+        }
+        try {
+          const preview = await this.imagePreviewService.create(file);
+          if (preview) {
+            scene.referenceImage.preview = preview.preview;
+            scene.highQualityThumbnail = preview.preview;
+          }
         } catch (error) {
           console.error(error);
         }

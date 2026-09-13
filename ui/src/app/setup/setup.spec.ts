@@ -29,6 +29,7 @@ import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {routes} from '../app.routes';
 import {ClientMediaService} from '../services/client-media/client-media';
 import {ConfigService, ProjectConfig} from '../services/config/config';
+import {ImagePreviewService} from '../services/image-preview/image-preview';
 import {ImageImportService} from '../services/image-import/image-import';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {TemplatesService} from '../services/templates/templates';
@@ -66,6 +67,7 @@ describe('Setup image upload', () => {
   };
   let remixMock: {uploadMedia: ReturnType<typeof vi.fn>};
   let clientMediaMock: {convertImage: ReturnType<typeof vi.fn>};
+  let imagePreviewMock: {create: ReturnType<typeof vi.fn>};
   let imageImportMock: {
     importText: ReturnType<typeof vi.fn>;
     imageFilesFromDataTransfer: ReturnType<typeof vi.fn>;
@@ -110,6 +112,9 @@ describe('Setup image upload', () => {
         }),
       ),
     };
+    imagePreviewMock = {
+      create: vi.fn().mockResolvedValue(undefined),
+    };
     imageImportMock = {
       importText: vi.fn().mockResolvedValue({files: [], failures: []}),
       imageFilesFromDataTransfer: vi.fn().mockReturnValue([]),
@@ -125,6 +130,7 @@ describe('Setup image upload', () => {
         {provide: ConfigService, useValue: configMock},
         {provide: RemixEngineService, useValue: remixMock},
         {provide: ClientMediaService, useValue: clientMediaMock},
+        {provide: ImagePreviewService, useValue: imagePreviewMock},
         {provide: ImageImportService, useValue: imageImportMock},
       ],
     });
@@ -162,6 +168,48 @@ describe('Setup image upload', () => {
       configMock.updateProjectConfig.mock.invocationCallOrder[0],
     );
     expect(result).toEqual({added: 1, failures: []});
+  });
+
+  it('persists a bounded preview while retaining original dimensions and ref', async () => {
+    imagePreviewMock.create.mockResolvedValue({
+      preview: {path: 'thumbnail/pic.jpg', url: 'https://thumbnail/pic.jpg'},
+      widthPixels: 1600,
+      heightPixels: 900,
+    });
+    const file = new File([new Uint8Array([1, 2, 3])], 'pic.jpeg', {
+      type: 'image/jpeg',
+    });
+
+    await component.processFiles(1, [file] as unknown as FileList);
+
+    expect(
+      configMock.projectConfig.value().inputConfig?.products[0].images,
+    ).toEqual([
+      {
+        path: 'remix-input/x',
+        url: 'https://x',
+        name: 'pic.jpeg',
+        preview: {
+          path: 'thumbnail/pic.jpg',
+          url: 'https://thumbnail/pic.jpg',
+        },
+        widthPixels: 1600,
+        heightPixels: 900,
+      },
+    ]);
+  });
+
+  it('keeps the original upload when preview creation fails', async () => {
+    imagePreviewMock.create.mockRejectedValue(new Error('preview failed'));
+    const file = new File([new Uint8Array([1, 2, 3])], 'pic.jpeg', {
+      type: 'image/jpeg',
+    });
+
+    await component.processFiles(1, [file] as unknown as FileList);
+
+    expect(
+      configMock.projectConfig.value().inputConfig?.products[0].images,
+    ).toEqual([{path: 'remix-input/x', url: 'https://x', name: 'pic.jpeg'}]);
   });
 
   it('keeps successful uploads in input order when a sibling upload fails', async () => {
