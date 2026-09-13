@@ -78,6 +78,8 @@ describe('Storyboard project-load recovery (real ConfigService)', () => {
           useValue: {
             generatingSceneIds: signal(new Set<string>()),
             editingSceneIds: signal(new Set<string>()),
+            setForegroundScene: vi.fn(),
+            clearForegroundScene: vi.fn(),
           },
         },
         {
