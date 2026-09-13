@@ -797,6 +797,90 @@ describe('ConfigService (mediated data plane)', () => {
   });
 
   describe('route-scoped project loading', () => {
+    it('does not surface a late stale-load error after a newer same-route load succeeds', async () => {
+      const firstA = new Subject<any>();
+      const secondA = new Subject<any>();
+      const project = {
+        ...service.projectConfig.value(),
+        id: 'project-a',
+        inputConfig: {products: [], composition: 'a'},
+      };
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') return of({});
+        if (url === '/api/projects/project-a') {
+          return httpClientMock.get.mock.calls.filter(
+            ([calledUrl]: [string]) => calledUrl === url,
+          ).length === 1
+            ? firstA
+            : secondA;
+        }
+        return of({...project, id: 'project-b', name: 'B'});
+      });
+
+      service.loadProjectConfig('project-a', 'full');
+      await vi.waitFor(() => {
+        expect(httpClientMock.get).toHaveBeenCalledWith(
+          '/api/projects/project-a',
+        );
+      });
+      service.loadProjectConfig('project-b', 'full');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().id).toBe('project-b');
+      });
+      service.loadProjectConfig('project-a', 'full');
+      await vi.waitFor(() => {
+        expect(httpClientMock.get).toHaveBeenCalledTimes(4);
+      });
+
+      secondA.next({...project, name: 'new A'});
+      secondA.complete();
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().name).toBe('new A');
+        expect(service.setupInputsError()).toBe(false);
+      });
+
+      firstA.error(new HttpErrorResponse({status: 500}));
+      await vi.waitFor(() => {
+        expect(service.setupInputsError()).toBe(false);
+      });
+    });
+
+    it('does not mark a recreated project persisted from a stale load success', async () => {
+      const firstA = new Subject<any>();
+      const secondA = new Subject<any>();
+      const project = {
+        ...service.projectConfig.value(),
+        id: 'project-a',
+        inputConfig: {products: [], composition: 'a'},
+      };
+      let aRequestCount = 0;
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') return of({});
+        if (url === '/api/projects/project-a') {
+          aRequestCount += 1;
+          return aRequestCount === 1 ? firstA : secondA;
+        }
+        return of({...project, id: 'project-b', name: 'B'});
+      });
+
+      service.loadProjectConfig('project-a', 'full');
+      await vi.waitFor(() => expect(aRequestCount).toBe(1));
+      service.loadProjectConfig('project-b', 'full');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().id).toBe('project-b');
+      });
+      service.setNewProject('project-a');
+      service.loadProjectConfig('project-a', 'full');
+      await vi.waitFor(() => expect(aRequestCount).toBe(2));
+
+      firstA.next({...project, name: 'stale A'});
+      firstA.complete();
+      await Promise.resolve();
+      expect((service as any).persistedProjectIds.has('project-a')).toBe(false);
+      secondA.next({...project, name: 'new A'});
+      secondA.complete();
+    });
+
     it('requests the editor projection and hydrates Setup with the full route', async () => {
       const project = {
         ...service.projectConfig.value(),

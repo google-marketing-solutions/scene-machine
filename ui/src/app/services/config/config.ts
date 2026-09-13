@@ -927,12 +927,13 @@ export class ConfigService {
 
   projectConfig = resource({
     params: () => ({projectId: this.projectId(), view: this.projectView()}),
-    loader: async ({params}) => {
+    loader: async ({params, abortSignal}) => {
       if (params.projectId === null) {
         this.projectLoadError.set(undefined);
         return {...this.DEFAULT_PROJECT_CONFIG()};
       }
       const isCurrentLoad = () =>
+        !abortSignal.aborted &&
         this.projectId() === params.projectId &&
         this.projectView() === params.view;
       if (isCurrentLoad()) {
@@ -949,8 +950,8 @@ export class ConfigService {
         );
         if (isCurrentLoad()) {
           this.projectLoadError.set(undefined);
+          this.persistedProjectIds.add(params.projectId);
         }
-        this.persistedProjectIds.add(params.projectId);
         if (localProjectAtLoad) {
           const latest =
             this.projectSaveStates.get(params.projectId)?.latestSource ??
