@@ -1396,6 +1396,7 @@ export class Storyboard {
 
   async uploadImage(file: File) {
     console.debug('Upload triggered for file:', file.name);
+    const projectId = this.config.projectConfig.value().id;
     const sceneId = this.selectedSceneId();
     if (this.config.isGeneratedScene(this.selectedScene()) && sceneId) {
       const uploadEpoch = ++this.referenceUploadEpoch;
@@ -1422,7 +1423,8 @@ export class Storyboard {
       if (
         scene &&
         this.config.isGeneratedScene(scene) &&
-        uploadEpoch === this.referenceUploadEpoch
+        uploadEpoch === this.referenceUploadEpoch &&
+        this.config.projectConfig.value().id === projectId
       ) {
         this.invalidateReferenceMedia(scene.referenceImage);
         scene.referenceImage = {path, url};
@@ -1434,7 +1436,11 @@ export class Storyboard {
             );
           const lowQualityData =
             await this.clientMediaService.toBase64(lowQualityThumbnail);
-          if (uploadEpoch !== this.referenceUploadEpoch) return;
+          if (
+            uploadEpoch !== this.referenceUploadEpoch ||
+            this.config.projectConfig.value().id !== projectId
+          )
+            return;
           scene.lowQualityThumbnail = lowQualityData;
         } catch (error) {
           console.error(error);
@@ -1444,6 +1450,7 @@ export class Storyboard {
           if (
             preview &&
             uploadEpoch === this.referenceUploadEpoch &&
+            this.config.projectConfig.value().id === projectId &&
             scene.referenceImage?.path === path &&
             scene.referenceImage.url === url
           ) {
@@ -1454,7 +1461,10 @@ export class Storyboard {
           console.error(error);
         }
       }
-      if (uploadEpoch === this.referenceUploadEpoch) {
+      if (
+        uploadEpoch === this.referenceUploadEpoch &&
+        this.config.projectConfig.value().id === projectId
+      ) {
         this.updateScenes(scene);
       }
     }
