@@ -342,9 +342,10 @@ describe('Setup image upload', () => {
 
     await completion;
 
-    const images = configMock.projectConfig.value().inputConfig?.products[0].images;
+    const images =
+      configMock.projectConfig.value().inputConfig?.products[0].images;
     expect(images).toHaveLength(2);
-    const expectedDeviation = Math.abs((1600 / 900) / (9 / 16) - 1);
+    const expectedDeviation = Math.abs(1600 / 900 / (9 / 16) - 1);
     expect(images?.[0].aspectRatioDeviation).toBeCloseTo(expectedDeviation);
     expect(images?.[1].aspectRatioDeviation).toBeCloseTo(expectedDeviation);
   });

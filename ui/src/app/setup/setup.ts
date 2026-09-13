@@ -445,7 +445,10 @@ export class Setup {
 
     if (uploadedImages.length > 0) {
       const currentAspectImages = uploadedImages.map(image => {
-        if (image.widthPixels === undefined || image.heightPixels === undefined) {
+        if (
+          image.widthPixels === undefined ||
+          image.heightPixels === undefined
+        ) {
           return image;
         }
         const aspectRatioDeviation = this.aspectRatioDeviation(
