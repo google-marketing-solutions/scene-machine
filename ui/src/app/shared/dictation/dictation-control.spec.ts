@@ -176,23 +176,28 @@ describe('DictationControl', () => {
     return http.expectOne('/api/transcribe');
   }
 
-  it('opens compact controls without starting dictation', async () => {
+  it('starts dictation from the first mic click', async () => {
     const trigger = fixture.nativeElement.querySelector(
-      '[aria-label="Open dictation controls"]',
+      '[aria-label="Start dictation"]',
     ) as HTMLButtonElement;
     expect(trigger).not.toBeNull();
 
     trigger.click();
     fixture.detectChanges();
-    await fixture.whenStable();
+    await Promise.resolve();
+    await Promise.resolve();
+    fixture.detectChanges();
 
-    expect(control.state().status).toBe('idle');
-    expect(document.body.textContent).toContain('Start recording');
-    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(control.state().status).toBe('recording');
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(
+      document.querySelector('[aria-label="Stop recording"]'),
+    );
     http.expectNone('/api/transcribe');
+    control.cancel();
   });
 
-  it('keeps the opening caret through panel focus and collapses after insertion', async () => {
+  it('keeps the opening caret through immediate recording and shows the result', async () => {
     const textarea = fixture.nativeElement.querySelector(
       'textarea',
     ) as HTMLTextAreaElement;
@@ -200,19 +205,10 @@ describe('DictationControl', () => {
     textarea.setSelectionRange(2, 2);
 
     const trigger = fixture.nativeElement.querySelector(
-      '[aria-label="Open dictation controls"]',
+      '[aria-label="Start dictation"]',
     ) as HTMLButtonElement;
     trigger.click();
     fixture.detectChanges();
-    await fixture.whenStable();
-
-    const start = Array.from(
-      document.querySelectorAll('.dictation-panel button'),
-    ).find(button => button.textContent?.trim() === 'Start recording') as
-      | HTMLButtonElement
-      | undefined;
-    expect(start).not.toBeUndefined();
-    start?.click();
     await Promise.resolve();
     await Promise.resolve();
     expect(control.isRecording()).toBe(true);
@@ -221,44 +217,43 @@ describe('DictationControl', () => {
     await Promise.resolve();
     await Promise.resolve();
     const request = http.expectOne('/api/transcribe');
+    fixture.detectChanges();
+    expect(document.body.textContent).toContain('Transcribing');
     request.flush({text: 'spoken words'});
     fixture.detectChanges();
 
     expect(host.value).toBe('Exspoken wordsisting');
-    expect(control.panelOpen()).toBe(false);
+    expect(control.panelOpen()).toBe(true);
 
-    const reopenedTrigger = fixture.nativeElement.querySelector(
-      '[aria-label="Open dictation controls"]',
-    ) as HTMLButtonElement;
-    reopenedTrigger.click();
-    fixture.detectChanges();
-    await fixture.whenStable();
     expect(document.body.textContent).toContain('Undo');
-    expect(document.body.textContent).toContain('Start recording');
+    expect(document.activeElement).toBe(
+      fixture.nativeElement.querySelector(
+        '[aria-label="Undo inserted transcript"]',
+      ),
+    );
+    const close = fixture.nativeElement.querySelector(
+      '[aria-label="Close dictation message"]',
+    ) as HTMLButtonElement;
+    close.click();
+    fixture.detectChanges();
+    expect(control.panelOpen()).toBe(false);
+    await Promise.resolve();
+    expect(document.activeElement).toBe(
+      fixture.nativeElement.querySelector('[aria-label="Start dictation"]'),
+    );
   });
 
   it('closes the panel without cancelling an active recording', async () => {
     const trigger = fixture.nativeElement.querySelector(
-      '[aria-label="Open dictation controls"]',
+      '[aria-label="Start dictation"]',
     ) as HTMLButtonElement;
     trigger.click();
     fixture.detectChanges();
-    await fixture.whenStable();
-
-    const start = Array.from(
-      document.querySelectorAll('.dictation-panel button'),
-    ).find(button => button.textContent?.trim() === 'Start recording') as
-      | HTMLButtonElement
-      | undefined;
-    start?.click();
     await Promise.resolve();
     await Promise.resolve();
     expect(control.isRecording()).toBe(true);
 
-    const backdrop = document.querySelector(
-      '.cdk-overlay-backdrop',
-    ) as HTMLElement;
-    backdrop.click();
+    control.closePanel();
     fixture.detectChanges();
 
     expect(control.panelOpen()).toBe(false);
@@ -269,16 +264,39 @@ describe('DictationControl', () => {
     ) as HTMLButtonElement;
     reopen.click();
     fixture.detectChanges();
-    await fixture.whenStable();
-    expect(document.body.textContent).toContain('Stop recording');
+    await Promise.resolve();
+    expect(
+      document.querySelector('[aria-label="Stop recording"]'),
+    ).not.toBeNull();
 
     const stop = Array.from(
       document.querySelectorAll('.dictation-panel button'),
-    ).find(button => button.textContent?.trim() === 'Stop recording') as
+    ).find(button => button.getAttribute('aria-label') === 'Stop recording') as
       | HTMLButtonElement
       | undefined;
     stop?.click();
     control.cancel();
+  });
+
+  it('cancels an active recording from the compact close action', async () => {
+    const trigger = fixture.nativeElement.querySelector(
+      '[aria-label="Start dictation"]',
+    ) as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(control.isRecording()).toBe(true);
+
+    const cancel = fixture.nativeElement.querySelector(
+      '[aria-label="Cancel dictation"]',
+    ) as HTMLButtonElement;
+    cancel.click();
+    fixture.detectChanges();
+
+    expect(control.panelOpen()).toBe(false);
+    expect(control.state().status).toBe('idle');
+    expect(track.stopped).toBe(true);
   });
 
   it('inserts the returned transcript at the textarea end without submitting', async () => {
@@ -308,8 +326,13 @@ describe('DictationControl', () => {
     ).toBeNull();
 
     control.undo();
+    fixture.detectChanges();
     expect(host.value).toBe('Existing');
     expect(control.canUndo()).toBe(false);
+    expect(control.panelOpen()).toBe(false);
+    expect(
+      fixture.nativeElement.querySelector('[aria-label="Start dictation"]'),
+    ).not.toBeNull();
   });
 
   it('falls back to the end when the textarea has never been focused', async () => {
@@ -345,7 +368,7 @@ describe('DictationControl', () => {
     textarea.focus();
     textarea.setSelectionRange(2, 2);
     const mic = fixture.nativeElement.querySelector(
-      '[aria-label="Open dictation controls"]',
+      '[aria-label="Start dictation"]',
     ) as HTMLButtonElement;
     mic.focus();
 
