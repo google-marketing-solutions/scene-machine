@@ -14,10 +14,7 @@
  * limitations under the License.
  */
 
-import {
-  provideHttpClient,
-  withInterceptorsFromDi,
-} from '@angular/common/http';
+import {provideHttpClient, withInterceptorsFromDi} from '@angular/common/http';
 import {
   HttpTestingController,
   provideHttpClientTesting,
@@ -107,7 +104,10 @@ describe('Storyboard project-load recovery (real ConfigService)', () => {
     fixture.detectChanges();
     http
       .expectOne('/api/projects/project-1?view=editor')
-      .flush({error: 'temporary outage'}, {status: 500, statusText: 'Server Error'});
+      .flush(
+        {error: 'temporary outage'},
+        {status: 500, statusText: 'Server Error'},
+      );
     await fixture.whenStable();
     fixture.detectChanges();
 
