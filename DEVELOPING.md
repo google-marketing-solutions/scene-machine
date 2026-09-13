@@ -189,6 +189,34 @@ complete cold download. Release leases when switching sources or leaving the
 page. Filmstrip cards use actual clip thumbnails when present; legacy clips
 without thumbnails retain their video-frame preview.
 
+### Workflow status polling
+
+`RemixEngineService` shares one status-request budget per browser tab: at most
+four request starts in a rolling second and four requests in flight. Each
+execution polls sequentially; a slow response is not canceled by the next tick.
+New executions first become eligible after three seconds. Resuming a persisted
+execution can check immediately, but still uses the same budget. After a
+healthy non-terminal response, the next check waits at least three seconds.
+
+The selected Storyboard scene gets priority; remaining work uses FIFO order.
+Small active sets therefore retain the three-second cadence, while large
+batches spread their status requests across time. This changes observation,
+not Cloud Tasks concurrency or generation speed. The limits are per tab, not
+an account-wide/server-wide quota. Multiple users or tabs each have a budget.
+
+Errors back off exponentially with a small deterministic jitter, up to about
+30 seconds unless the server asks for a longer `Retry-After`. Project changes
+cancel queued requests, active requests and retry delays. The existing
+ten-minute overall timeout still preserves pending markers for reopening;
+IAP expiry retains the existing single refresh-tab episode. There is no
+provider-duration prediction, status batch endpoint, or background worker.
+
+Regression coverage is in `remix-engine-polling.spec.ts` and the existing
+mediated RemixEngine tests. Use fake time and the HTTP boundary for budget,
+slow-response, navigation and error tests; do not invoke paid generation to
+verify this client-side policy. Synthetic request counts are not production
+completion-latency measurements.
+
 ### Page-scoped project data
 
 Fetch only the data a page needs; do not treat a homepage card as an editable
