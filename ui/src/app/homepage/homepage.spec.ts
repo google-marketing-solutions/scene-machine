@@ -231,6 +231,37 @@ describe('Homepage', () => {
     },
   );
 
+  it('shows a placeholder for a reference-only project while config loads', async () => {
+    mockConfigService.globalConfig.isLoading = () => true;
+    const project = {
+      id: 'reference-only-project',
+      name: 'Reference only',
+      aspectRatio: '16:9',
+      storyboard: [
+        {
+          id: 'scene-a',
+          name: 'Scene',
+          type: 'generated',
+          prompt: 'prompt',
+          selectedCandidateIndex: 0,
+          referenceImage: {path: 'reference.jpg', url: 'reference-url'},
+          candidates: [],
+        },
+      ],
+    } as unknown as ProjectConfig;
+    mockConfigService.getProjects.mockResolvedValueOnce([project]);
+
+    component.fetchProjects();
+    await Promise.resolve();
+    await Promise.resolve();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.project-thumbnail');
+    expect(card.querySelector('img')).toBeNull();
+    expect(card.querySelector('.placeholder-thumbnail')).not.toBeNull();
+  });
+
   it('renders only the selected candidate thumbnail when a reference fallback exists', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const project = {

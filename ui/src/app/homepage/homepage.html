@@ -84,7 +84,7 @@
               }
 
               <!-- Fallback: Placeholder -->
-              @if (thumb.showPlaceholder) {
+              @if (thumb.showPlaceholder || (thumb.showReference && !thumbnailImagesReady())) {
                 <div class="placeholder-thumbnail">
                   <mat-icon>movie</mat-icon>
                 </div>

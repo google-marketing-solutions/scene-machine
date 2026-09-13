@@ -361,6 +361,59 @@ describe('ThumbnailImageDirective', () => {
     ).toBe(false);
   });
 
+  it('retains the old lease through replacement recovery', async () => {
+    vi.useFakeTimers();
+    const release = vi.fn();
+    const replacementRelease = vi.fn();
+    acquire
+      .mockResolvedValueOnce({url: 'blob:unscoped', release})
+      .mockRejectedValueOnce(new Error('signing unavailable'))
+      .mockResolvedValueOnce({url: 'blob:scoped', release: replacementRelease});
+
+    directive.thumbnailCacheScope = null;
+    directive.ngOnChanges();
+    intersect(1);
+    await vi.advanceTimersByTimeAsync(0);
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
+    image.dispatchEvent(new Event('load'));
+    directive.thumbnailCacheScope = host.scope;
+    directive.ngOnChanges();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(image.src).toContain('blob:unscoped');
+    expect(release).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(250);
+    expect(image.src).toContain('blob:scoped');
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases both leases when destroyed during replacement', async () => {
+    let resolveReplacement!: (lease: {url: string; release(): void}) => void;
+    const release = vi.fn();
+    const replacementRelease = vi.fn();
+    acquire
+      .mockResolvedValueOnce({url: 'blob:unscoped', release})
+      .mockReturnValueOnce(
+        new Promise(resolve => {
+          resolveReplacement = resolve;
+        }),
+      );
+
+    directive.thumbnailCacheScope = null;
+    directive.ngOnChanges();
+    intersect(1);
+    await Promise.resolve();
+    directive.thumbnailCacheScope = host.scope;
+    directive.ngOnChanges();
+    fixture.destroy();
+    resolveReplacement({url: 'blob:scoped', release: replacementRelease});
+    await Promise.resolve();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(replacementRelease).toHaveBeenCalledTimes(1);
+  });
+
   it('marks a loaded relative URL without comparing against the raw lease URL', async () => {
     const release = vi.fn();
     acquire.mockReset();
