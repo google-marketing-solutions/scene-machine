@@ -174,12 +174,54 @@ previews must use `thumbnailImagePersist=false`. The cache is an optional
 optimization, not an authorization boundary or an offline project store; see
 the [user-facing cache limits and caveats](README.md#local-media-cache).
 
+New Setup uploads and Storyboard reference uploads may carry an optional
+`preview: {path, url}` alongside the original image reference. Display the
+preview through `ThumbnailImageDirective`; keep the original `path` and original
+pixel dimensions for generation and crop/outpaint decisions. Preview creation
+is best-effort and capped at 1 MiB. Legacy images without a preview use their
+original display reference and the same cache limits; large legacy originals
+are not migrated or guaranteed to fit the byte cache.
+
 Composition uses `CandidateVideoCacheService.acquireCached` for its active clip:
 a warm hit returns an object-URL lease, while a miss keeps normal browser
 streaming. Do not replace this with unconditional `acquire`, which waits for a
 complete cold download. Release leases when switching sources or leaving the
 page. Filmstrip cards use actual clip thumbnails when present; legacy clips
 without thumbnails retain their video-frame preview.
+
+### Page-scoped project data
+
+Fetch only the data a page needs; do not treat a homepage card as an editable
+project or introduce a second, persistent project-data cache.
+
+| Consumer | Read contract | Contents |
+| --- | --- | --- |
+| Homepage | `GET /api/projects` (optionally `?createdBy=me`) | `ProjectSummary`: card metadata, resolved first-scene thumbnail materials and thumbnail persistence policy; no prompts, Setup inputs or candidate arrays. |
+| Storyboard, Composition, Output | `GET /api/projects/:id?view=editor` | Project settings and complete scenes/candidates; excludes Setup-only `inputConfig`. |
+| Setup | `GET /api/projects/:id` | Full project, including all Setup inputs. No per-field lazy loading. |
+
+The homepage query selects root document fields in Firestore and retains the
+batched first-scene lookup. Candidate arrays are still read on the server to
+resolve the selected thumbnail. Editor detail reads still fetch the root
+document, then omit `inputConfig` from the response. These are payload savings,
+not a claim that every Firestore read or document charge disappears.
+
+An absent `inputConfig` in an editor response means **not loaded**, not empty.
+Setup waits for the full load and offers Retry on failure before enabling its
+form. The active in-memory project may retain inputs already loaded in Setup;
+there is no cross-project data cache. Keep the per-project save queue and stale
+load protection when changing this flow.
+
+Editor saves without inputs use `PATCH /api/projects/:id?view=editor`. Its root
+field updates leave stored `inputConfig` untouched, including a concurrent
+Setup update. Do not copy an earlier Setup snapshot into a replacement write.
+Full GET/PATCH remains the Setup and legacy detail contract; full PATCH keeps
+its replacement semantics. All editor candidates remain available for counts,
+selection, generation and composition.
+
+Regression coverage lives in `test/test_frontdoor_data.py`,
+`config-mediated.spec.ts`, and the Homepage/Setup/Storyboard component specs.
+For a new project field, decide which page needs it before expanding a response.
 
 ### Response delivery
 
