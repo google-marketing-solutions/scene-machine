@@ -161,6 +161,60 @@ describe('RemixEngineService polling scheduler', () => {
     expect(started[started.length - 1].at - started[0].at).toBe(30000);
   });
 
+  it('drains a 122-job backlog before restoring three-second cadence', async () => {
+    vi.useFakeTimers();
+    const started: Array<{executionId: string; at: number}> = [];
+    const heldExecutions = new Set(['workflow-119', 'workflow-120', 'workflow-121']);
+    let allowTerminalResponses = false;
+    const origin = Date.now();
+    httpClientMock.get.mockImplementation((url: string) => {
+      const executionId = new URL(url, 'http://test').searchParams.get(
+        'executionId',
+      )!;
+      started.push({executionId, at: Date.now()});
+      const terminal = allowTerminalResponses && !heldExecutions.has(executionId);
+      return of(terminal ? {sink: {output: {done: true}}} : {sink: {}});
+    });
+
+    const polls = Array.from({length: 122}, (_, index) =>
+      service.pollWorkflow(`workflow-${index}`, 'project-1'),
+    );
+    await vi.advanceTimersByTimeAsync(180_000);
+    expect(started).toHaveLength(712);
+    expect(started[0].at - origin).toBe(3000);
+    expect(started[started.length - 1].at - origin).toBe(180_000);
+
+    let settled = 0;
+    for (const poll of polls) {
+      void poll.then(() => settled++);
+    }
+    allowTerminalResponses = true;
+    for (let seconds = 0; seconds < 180 && settled < 119; seconds++) {
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    expect(settled).toBe(119);
+
+    const drainAt = Date.now();
+    await vi.advanceTimersByTimeAsync(9000);
+    for (const executionId of heldExecutions) {
+      const times = started
+        .filter(item => item.executionId === executionId && item.at >= drainAt)
+        .map(item => item.at);
+      expect(times.length).toBeGreaterThanOrEqual(3);
+      expect(times[1] - times[0]).toBe(3000);
+      expect(times[2] - times[1]).toBe(3000);
+    }
+
+    allowTerminalResponses = true;
+    for (const executionId of heldExecutions) {
+      // The held executions are made terminal on their next request so all
+      // promises settle without extending the synthetic run.
+      heldExecutions.delete(executionId);
+    }
+    await vi.advanceTimersByTimeAsync(3000);
+    await Promise.all(polls);
+  });
+
   it('does not cancel and replace a slow status request', async () => {
     vi.useFakeTimers();
     const status = new Subject<{sink: {output: object}}>();
