@@ -30,6 +30,8 @@ import {
 import {ThumbnailCacheService} from '../../services/media/thumbnail-cache';
 import {MediaRef} from '../../services/media/media';
 
+const THUMBNAIL_RECOVERY_DELAYS_MS = [250, 1000, 4000] as const;
+
 /**
  * Loads a thumbnail only when its image is near the viewport, while allowing
  * the cache service to persist the downloaded bytes and share its lease.
@@ -52,6 +54,8 @@ export class ThumbnailImageDirective implements OnChanges, OnDestroy {
   private inputKey = '';
   private assignedSrc = '';
   private disposed = false;
+  private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  private recoveryAttempt = 0;
 
   ngOnChanges(): void {
     const key = JSON.stringify([
@@ -63,6 +67,8 @@ export class ThumbnailImageDirective implements OnChanges, OnDestroy {
     if (key === this.inputKey) return;
     this.inputKey = key;
     this.stopObserving();
+    this.cancelRecovery();
+    this.recoveryAttempt = 0;
     this.release(true);
     if (!this.media) return;
     this.observeOrAcquire();
@@ -71,6 +77,7 @@ export class ThumbnailImageDirective implements OnChanges, OnDestroy {
   ngOnDestroy(): void {
     this.disposed = true;
     this.stopObserving();
+    this.cancelRecovery();
     this.release(true);
   }
 
@@ -117,19 +124,53 @@ export class ThumbnailImageDirective implements OnChanges, OnDestroy {
   private async acquire(requestId: number): Promise<void> {
     const media = this.media;
     if (!media || this.disposed) return;
-    const lease = await this.cache.acquire(
-      this.thumbnailCacheScope ?? {bucket: '', projectId: ''},
-      media,
-      this.thumbnailImagePersist && !!this.thumbnailCacheScope,
-    );
-    if (this.disposed || requestId !== this.requestId) {
-      lease.release();
+    try {
+      const lease = await this.cache.acquire(
+        this.thumbnailCacheScope ?? {bucket: '', projectId: ''},
+        media,
+        this.thumbnailImagePersist && !!this.thumbnailCacheScope,
+      );
+      if (this.disposed || requestId !== this.requestId) {
+        lease?.release();
+        return;
+      }
+      if (!lease?.url) {
+        lease?.release();
+        this.scheduleRecovery(requestId);
+        return;
+      }
+      this.recoveryAttempt = 0;
+      this.lease = lease;
+      this.element.nativeElement.decoding = 'async';
+      this.element.nativeElement.src = lease.url;
+      this.assignedSrc = this.element.nativeElement.src;
+    } catch {
+      if (this.disposed || requestId !== this.requestId) return;
+      this.scheduleRecovery(requestId);
+    }
+  }
+
+  private scheduleRecovery(requestId: number): void {
+    if (
+      this.disposed ||
+      requestId !== this.requestId ||
+      this.recoveryTimer !== undefined ||
+      this.recoveryAttempt >= THUMBNAIL_RECOVERY_DELAYS_MS.length
+    ) {
       return;
     }
-    this.lease = lease;
-    this.element.nativeElement.decoding = 'async';
-    this.element.nativeElement.src = lease.url;
-    this.assignedSrc = this.element.nativeElement.src;
+    const delay = THUMBNAIL_RECOVERY_DELAYS_MS[this.recoveryAttempt++];
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = undefined;
+      if (this.disposed || requestId !== this.requestId) return;
+      void this.acquire(requestId);
+    }, delay);
+  }
+
+  private cancelRecovery(): void {
+    if (this.recoveryTimer === undefined) return;
+    clearTimeout(this.recoveryTimer);
+    this.recoveryTimer = undefined;
   }
 
   private release(clearElement: boolean): void {

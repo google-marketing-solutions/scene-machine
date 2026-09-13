@@ -103,6 +103,79 @@ describe('ThumbnailImageDirective', () => {
     expect(acquire).toHaveBeenCalledWith(host.scope, host.media, true);
   });
 
+  it('recovers a same-identity thumbnail after a transient acquisition failure', async () => {
+    vi.useFakeTimers();
+    const release = vi.fn();
+    acquire
+      .mockRejectedValueOnce(new Error('signing unavailable'))
+      .mockResolvedValueOnce({url: 'blob:recovered', release});
+
+    intersect(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(250);
+
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
+    expect(acquire).toHaveBeenCalledTimes(2);
+    expect(image.src).toContain('blob:recovered');
+  });
+
+  it('treats an empty lease as a recoverable acquisition failure', async () => {
+    vi.useFakeTimers();
+    const release = vi.fn();
+    acquire
+      .mockResolvedValueOnce({url: '', release})
+      .mockResolvedValueOnce({url: 'blob:recovered', release});
+
+    intersect(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(250);
+
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(acquire).toHaveBeenCalledTimes(2);
+    expect(image.src).toContain('blob:recovered');
+  });
+
+  it('cancels recovery when the media identity changes', async () => {
+    vi.useFakeTimers();
+    acquire.mockRejectedValueOnce(new Error('signing unavailable'));
+
+    intersect(0);
+    await vi.advanceTimersByTimeAsync(0);
+    directive.media = {path: 'thumbnail-b.jpg'};
+    directive.ngOnChanges();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(acquire).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels recovery when the directive is destroyed', async () => {
+    vi.useFakeTimers();
+    acquire.mockRejectedValueOnce(new Error('signing unavailable'));
+
+    intersect(0);
+    await vi.advanceTimersByTimeAsync(0);
+    fixture.destroy();
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(acquire).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds recovery attempts when acquisition remains unavailable', async () => {
+    vi.useFakeTimers();
+    acquire.mockRejectedValue(new Error('signing unavailable'));
+
+    intersect(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(250 + 1000 + 4000 + 5000);
+
+    expect(acquire).toHaveBeenCalledTimes(4);
+  });
+
   it('does not let an earlier media result replace a newer media result', async () => {
     let resolveA!: (lease: {url: string; release(): void}) => void;
     let resolveB!: (lease: {url: string; release(): void}) => void;
