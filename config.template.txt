@@ -50,9 +50,16 @@ export BACKEND_SERVICE_NAME=remix-engine-backend
 #   idle instance continuously. (Worker service is unaffected.)
 export APP_MIN_INSTANCES=0
 
+# Microphone dictation is enabled by default. Set to 0 to hide microphone
+# controls and reject transcription requests without calling the provider.
+export DICTATION_ENABLED=1
+
+# Gemini transcription mode. SMART is the default; VERBATIM preserves literal
+# speech. Only SMART and VERBATIM are valid values.
+export DICTATION_MODE=SMART
+
 # Optional: Custom domain for the application UI.
 # If you use a custom domain for the Scene Machine UI, uncomment the following
 # variable and update the value with your custom domain.
 # Do not add http:// or https:// prefix.
 # export CUSTOM_DOMAIN=scene-machine.my-company.com
-

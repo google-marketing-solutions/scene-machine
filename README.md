@@ -231,6 +231,49 @@ so end users never need direct storage/database permissions.
 > you are comfortable sharing all projects with, and run separate deployments
 > for groups whose data should stay separate.
 
+#### Microphone dictation (enabled by default)
+
+Dictation is included in the standard deployment. Users can speak into the
+microphone control in supported Setup, Storyboard and Edit candidate text
+fields, then review or undo the inserted text before submitting. Enabling the
+feature does not start recording: users must click the microphone and allow
+browser microphone access.
+
+Recordings are sent to Gemini for transcription through the deployment's
+Google Cloud project; usage can incur model charges and consume quota. The
+app uses `gemini-3.5-transcribe-preview` in `global`, so the project needs
+access to that preview model. Recordings are limited to 4 MiB and 120 seconds;
+Scene Machine does not store them durably and removes its temporary audio
+files after processing. Test microphone access and transcription on your
+instance before making it available to users.
+
+To disable dictation, set this in `config.txt` before deploying or redeploying:
+
+```bash
+export DICTATION_ENABLED=0
+```
+
+Use `1` to enable it again. New configurations and deployments that omit the
+flag default to enabled; an existing explicit `0` remains disabled on redeploy.
+This setting applies only to the app service, not the worker.
+
+Transcription defaults to `SMART` mode: Gemini removes fillers, formats text
+and applies spoken self-corrections. Review the result before submitting,
+because this is not a word-for-word transcript. To preserve spoken wording,
+set the following in `config.txt` before deploying or redeploying:
+
+```bash
+export DICTATION_MODE=VERBATIM
+```
+
+`DICTATION_MODE` accepts only `SMART` or `VERBATIM` (uppercase). Omitting it
+defaults to `SMART`. Keep `VERBATIM` explicit in `config.txt` to retain it on
+redeploy; deployment replaces any previous Cloud Run mode with this value.
+Empty or invalid values are rejected. Like `DICTATION_ENABLED`, this is an
+app-service setting, not a per-recording UI control. See Google's
+[transcription mode guide](https://ai.google.dev/gemini-api/docs/generate-content/transcribe#transcription-modes)
+for the mode behavior.
+
 #### Prerequisites
 
 -   **Google Cloud Project**: A project on Google Cloud Platform **with billing
@@ -307,6 +350,8 @@ gcloud auth application-default login   # 2. Application Default Credentials (AD
     `TASKS_QUEUE_PREFIX`   | Prefix for Cloud Task queue names.                         | Max lengths apply. Support letters, hyphen, numbers.
     `BACKEND_SERVICE_NAME` | Service name for the application backend on GCP.           | Defaults to `remix-engine-backend`.
     `APP_MIN_INSTANCES`    | App service warm instances: 0 = scale to zero (default), 1 = keep one warm. | `0` (cold-start) or `1` (no cold start)
+    `DICTATION_ENABLED`    | Microphone dictation in supported text fields.             | `1` (default); set `0` to disable before deploying. Existing explicit `0` values are preserved.
+    `DICTATION_MODE`       | Gemini transcription mode for dictation.                  | `SMART` (default) or `VERBATIM`; uppercase only. Empty or invalid values are rejected.
     `CUSTOM_DOMAIN`        | Custom domain for the application user interface.          | Optional. e.g., `scene-machine.my-company.com`
 
     -   **Important Notes for Configuration:**

@@ -168,7 +168,7 @@
 
       <div
         class="storyboard-columns"
-        [style.grid-template-columns]="sidebarTrackWidth() + 'px 1fr 320px'"
+        [style.--storyboard-left-track]="sidebarTrackWidth() + 'px'"
       >
         @if (selectedScene(); as scene) {
           <!-- Left Column: Scene List -->
@@ -381,12 +381,12 @@
                                   ></span>
                                   {{ runLabels().get(candidate) }}
                                 </div>
-                                @if (candidate.trim && candidate.trim.start !== undefined) {
+                                @if (isTrimmedRange(candidate.trim, candidate.durationSeconds)) {
                                   <div class="video-chip" matTooltip="Trimmed Duration">
                                     <mat-icon>content_cut</mat-icon>
                                     {{
-                                      (candidate.trim.end ?? candidate.durationSeconds) -
-                                        candidate.trim.start | number: '1.2-2'
+                                      (candidate.trim?.end ?? candidate.durationSeconds) -
+                                        (candidate.trim?.start ?? 0) | number: '1.2-2'
                                     }}s
                                   </div>
                                 }
@@ -520,12 +520,12 @@
                                     ></span>
                                     {{ runLabels().get(candidate) }}
                                   </div>
-                                  @if (candidate.trim && candidate.trim.start !== undefined) {
+                                  @if (isTrimmedRange(candidate.trim, candidate.durationSeconds)) {
                                     <div class="video-chip" matTooltip="Trimmed Duration">
                                       <mat-icon>content_cut</mat-icon>
                                       {{
-                                        (candidate.trim.end ?? candidate.durationSeconds) -
-                                          candidate.trim.start | number: '1.2-2'
+                                        (candidate.trim?.end ?? candidate.durationSeconds) -
+                                          (candidate.trim?.start ?? 0) | number: '1.2-2'
                                       }}s
                                     </div>
                                   }
@@ -571,7 +571,7 @@
                       class="preview-video"
                       [muted]="isMuted() || candidate.generateAudio === false"
                       [volume]="videoVolume()"
-                      loop
+                      [loop]="isVideoPlaying()"
                     ></video>
 
                     <div class="video-overlay" (click)="toggleVideoPlay()">
@@ -582,7 +582,7 @@
                           </button>
 
                           <div class="time-group">
-                            @if (trimBySceneType()) {
+                            @if (isTrimmedRange(trimBySceneType(), videoDuration())) {
                               <div class="trimmed-info">
                                 Trimmed: {{ trimmedDuration() | number: '1.2-2' }}s
                               </div>
@@ -679,7 +679,7 @@
                         (loadedmetadata)="onVideoLoadedMetadata()"
                         (ended)="onVideoEnded()"
                         class="preview-video"
-                        loop
+                        [loop]="isVideoPlaying()"
                       ></video>
 
                       <div class="video-overlay" (click)="toggleVideoPlay()">
@@ -690,7 +690,7 @@
                             </button>
 
                             <div class="time-group">
-                              @if (trimBySceneType()) {
+                              @if (isTrimmedRange(trimBySceneType(), videoDuration())) {
                                 <div class="trimmed-info">
                                   Trimmed: {{ trimmedDuration() | number: '1.2-2' }}s
                                 </div>
@@ -820,14 +820,31 @@
               @if (this.config.isGeneratedScene(scene)) {
                 <!-- Prompt Input -->
                 <div class="prompt-box">
-                  <mat-form-field appearance="outline">
+                  <mat-form-field
+                    appearance="outline"
+                    [class.dictation-enabled]="dictationEnabled()"
+                  >
                     <mat-label>Prompt</mat-label>
                     <textarea
+                      #scenePromptInput
                       matInput
                       placeholder="Describe your video..."
-                      [(ngModel)]="scene.prompt"
-                      (ngModelChange)="updateScenes()"
+                      [ngModel]="scene.prompt"
+                      (ngModelChange)="updateScenePrompt(scene, $event)"
                     ></textarea>
+                    <app-dictation-control
+                      [enabled]="dictationEnabled()"
+                      [audioConfig]="dictationConfig()"
+                      [value]="scene.prompt || ''"
+                      [revision]="scenePromptRevision(scene.id)"
+                      [ownerKey]="
+                        config.projectConfig.value().id +
+                        ':scene:' +
+                        scene.id
+                      "
+                      [textarea]="scenePromptInput"
+                      (valueChange)="updateScenePrompt(scene, $event)"
+                    ></app-dictation-control>
                   </mat-form-field>
                 </div>
               }
@@ -968,7 +985,7 @@
                   <div class="audio-toggle">
                     <div>
                       <mat-icon class="setting-icon">music_note</mat-icon>
-                      <span class="subtitle">Use clip audio</span>
+                      <span class="subtitle">Generate Audio</span>
                     </div>
                     <mat-slide-toggle
                       color="primary"

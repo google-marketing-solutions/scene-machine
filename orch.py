@@ -54,10 +54,13 @@ import uuid
 from common import ContentType
 from common import Key
 from flask import Flask
+from flask import Request
 from flask import g as flask_g
 from flask import request as flask_request
 from flask import Response as flask_response
 from flask import send_from_directory
+from werkzeug.exceptions import BadRequest
+from werkzeug.exceptions import RequestEntityTooLarge
 from flask_cors import CORS
 from google.api_core import exceptions as google_exceptions
 from google.auth import compute_engine
@@ -67,6 +70,7 @@ from google.cloud import firestore
 from google.cloud import storage
 from google.oauth2 import id_token as google_id_token
 import orchestrator
+import transcription
 from util import database as util_database
 from util import errors as util_errors
 from util import model_allowlist
@@ -121,6 +125,31 @@ _DEFINITIONS_DIR = _BASE_DIR / 'ui' / 'definitions'
 _STATUS_VIEWER_DIR = _BASE_DIR / 'ui' / 'remix-engine-status-viewer'
 _SPA_DIR = _BASE_DIR / 'ui' / 'dist' / 'ui' / 'browser'
 
+
+class _DictationRequest(Request):
+  """Applies strict parser limits only to the transcription endpoint."""
+
+  @property
+  def max_content_length(self):
+    if self.path == '/api/transcribe':
+      return transcription.MAX_BODY_BYTES
+    return super().max_content_length
+
+  @property
+  def max_form_memory_size(self):
+    if self.path == '/api/transcribe':
+      # Werkzeug applies this limit while buffering multipart input, including
+      # file chunks on some versions. The route enforces the 4 MiB file bound
+      # with its own bounded read; the request cap still bounds this parser.
+      return transcription.MAX_BODY_BYTES
+    return super().max_form_memory_size
+
+  @property
+  def max_form_parts(self):
+    if self.path == '/api/transcribe':
+      return 2
+    return super().max_form_parts
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -134,6 +163,7 @@ with open(orchestrator.CONFIG_JSON_PATH, 'r', encoding='utf-8') as file:
   config = json.load(file)
 
 app = Flask(__name__)
+app.request_class = _DictationRequest
 # Match Cloud Run's own 32 MiB request-body limit so an oversized body returns a
 # clean 413 here instead of a dropped connection at the edge.
 app.config['MAX_CONTENT_LENGTH'] = 32 * 1024 * 1024
@@ -183,6 +213,11 @@ def require_api_auth() -> flask_response | None:
   if _AUTH_MODE == 'iap':
     assertion = flask_request.headers.get('X-Goog-IAP-JWT-Assertion')
     if not assertion:
+      if flask_request.path == '/api/transcribe':
+        return _dictation_response(
+            {'error': 'Missing IAP JWT assertion', 'code': 'unauthorized'},
+            401,
+        )
       return _unauthorized('Missing IAP JWT assertion')
     try:
       flask_g.iap_claims = google_id_token.verify_token(
@@ -193,6 +228,11 @@ def require_api_auth() -> flask_response | None:
       )
     except Exception as e:  # pylint: disable=broad-exception-caught
       logger.warning('Rejected IAP JWT assertion: %s', e)
+      if flask_request.path == '/api/transcribe':
+        return _dictation_response(
+            {'error': 'Invalid IAP JWT assertion', 'code': 'unauthorized'},
+            401,
+        )
       return _unauthorized('Invalid IAP JWT assertion')
   return None
 
@@ -690,6 +730,100 @@ def _json_error(message: str, status: int) -> flask_response:
   return _json_response({'error': message}, status=status)
 
 
+def _dictation_response(payload: object, status: int = 200) -> flask_response:
+  """Builds a non-cacheable response for the transient dictation API."""
+  response = _json_response(payload, status)
+  response.headers['Cache-Control'] = 'no-store'
+  return response
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def request_entity_too_large_handler(_error) -> flask_response:
+  """Keeps parser-limit failures in the dictation error contract."""
+  if flask_request.path == '/api/transcribe':
+    return _dictation_response(
+        {'error': 'Request is too large', 'code': 'request_too_large'}, 413
+    )
+  return _error.get_response()
+
+
+@app.errorhandler(BadRequest)
+def bad_request_handler(_error) -> flask_response:
+  """Keeps malformed multipart parsing failures inside the API contract."""
+  if flask_request.path == '/api/transcribe':
+    return _dictation_response(
+        {'error': 'Malformed multipart request', 'code': 'invalid_multipart'},
+        400,
+    )
+  return _error.get_response()
+
+
+def transcribe_handler() -> flask_response:
+  """Accepts one bounded audio part and returns transient transcript text."""
+  if not transcription.enabled():
+    return _dictation_response(
+        {'error': 'Dictation is disabled', 'code': 'dictation_disabled'}, 503
+    )
+  project = config.get('gcpProject')
+  if not project:
+    return _dictation_response(
+        {
+            'error': 'Transcription is not configured',
+            'code': 'provider_not_configured',
+        },
+        503,
+    )
+  if flask_request.content_length is not None and (
+      flask_request.content_length > transcription.MAX_BODY_BYTES
+  ):
+    return _dictation_response(
+        {'error': 'Request is too large', 'code': 'request_too_large'}, 413
+    )
+  try:
+    # Accessing files/form is the first multipart parse. The request subclass
+    # above has already installed the body, field-count and part-count caps.
+    if flask_request.form:
+      raise transcription.TranscriptionError(
+          'unexpected_form_field', 400, 'Only the audio file is accepted'
+      )
+    if set(flask_request.files.keys()) != {'audio'}:
+      raise transcription.TranscriptionError(
+          'invalid_multipart', 400, 'Exactly one audio file is required'
+      )
+    audio_parts = flask_request.files.getlist('audio')
+    if len(audio_parts) != 1:
+      raise transcription.TranscriptionError(
+          'invalid_multipart', 400, 'Exactly one audio file is required'
+      )
+    stream = audio_parts[0].stream
+    audio = stream.read(transcription.MAX_AUDIO_BYTES + 1)
+    if len(audio) > transcription.MAX_AUDIO_BYTES:
+      raise transcription.TranscriptionError(
+          'audio_too_large', 413, 'Audio is too large'
+      )
+    text = transcription.transcribe_recording(audio, project)
+    return _dictation_response({'text': text})
+  except transcription.TranscriptionError as exc:
+    return _dictation_response(
+        {'error': exc.message, 'code': exc.code}, exc.status
+    )
+  except RequestEntityTooLarge:
+    return _dictation_response(
+        {'error': 'Request is too large', 'code': 'request_too_large'}, 413
+    )
+  except BadRequest:
+    return _dictation_response(
+        {'error': 'Malformed multipart request', 'code': 'invalid_multipart'},
+        400,
+    )
+  except Exception:  # pylint: disable=broad-except
+    # Do not expose parser/provider details, audio names, or transcript data.
+    logger.warning('Unexpected dictation request failure')
+    return _dictation_response(
+        {'error': 'Transcription failed', 'code': 'internal_error'}, 502
+    )
+
+
 def _valid_object_path(path: str) -> bool:
   """Validates a client-supplied GCS object path for signing."""
   if not path or path.startswith('/') or path.startswith('gs://'):
@@ -862,6 +996,12 @@ def ui_config_handler() -> flask_response:
   catalog, source = model_allowlist.load_allowlist_with_source()
   payload['modelCatalog'] = catalog
   payload['modelCatalogSource'] = source
+  payload['dictation'] = {
+      'enabled': transcription.enabled(),
+      'maxAudioBytes': transcription.MAX_AUDIO_BYTES,
+      'maxDurationSeconds': transcription.MAX_DURATION_SECONDS,
+      'mimeTypes': list(transcription.MIME_TYPES),
+  }
   return _json_response(payload)
 
 
@@ -1246,6 +1386,9 @@ if _ROLE == 'app':
   app.add_url_rule('/api/signUrl', view_func=sign_url_handler, methods=['GET'])
   app.add_url_rule('/api/config', view_func=ui_config_handler, methods=['GET'])
   app.add_url_rule(
+      '/api/transcribe', view_func=transcribe_handler, methods=['POST']
+  )
+  app.add_url_rule(
       '/api/projects', view_func=projects_handler, methods=['GET', 'POST']
   )
   app.add_url_rule(
@@ -1284,6 +1427,13 @@ if _ROLE == 'app':
       '/', defaults={'path': ''}, view_func=spa_handler, methods=['GET']
   )
   app.add_url_rule('/<path:path>', view_func=spa_handler, methods=['GET'])
+
+if _ROLE == 'all':
+  # Local development keeps the legacy root workflow routes while exposing
+  # the same transient API route without putting it on the worker service.
+  app.add_url_rule(
+      '/api/transcribe', view_func=transcribe_handler, methods=['POST']
+  )
 
 
 if __name__ == '__main__':

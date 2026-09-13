@@ -113,7 +113,7 @@
         </div>
 
         <div class="setting-item">
-          <span class="setting-label">Use clip audio</span>
+          <span class="setting-label">Generate Audio</span>
           <mat-slide-toggle
             [ngModel]="config.projectConfig.value().generateAudio"
             (ngModelChange)="config.updateProjectConfig({generateAudio: $event})"
@@ -314,14 +314,30 @@
                     <div class="subsection-header has-bottom-margin">
                       <span>Description (optional)</span>
                     </div>
-                    <mat-form-field appearance="outline" class="guidance-field">
+                    <mat-form-field
+                      appearance="outline"
+                      class="guidance-field"
+                      [class.dictation-enabled]="dictationEnabled()"
+                    >
                       <textarea
+                        #productDescriptionInput
                         matInput
                         placeholder="Description (USPs, materials, benefits, dimensions, etc.)"
                         [ngModel]="product.description"
                         (ngModelChange)="updateProductDescriptionText(product.id, $event)"
                         maxlength="{{ MAX_PRODUCT_DESCRIPTION_LENGTH }}"
                       ></textarea>
+                      <app-dictation-control
+                        [enabled]="dictationEnabled()"
+                        [audioConfig]="dictationConfig()"
+                        [value]="product.description || ''"
+                        [revision]="fieldRevision(productFieldKey(product.id))"
+                        [ownerKey]="config.projectConfig.value().id + ':product:' + product.id"
+                        [textarea]="productDescriptionInput"
+                        [maxDurationSeconds]="30"
+                        [maxChars]="MAX_PRODUCT_DESCRIPTION_LENGTH"
+                        (valueChange)="updateProductDescriptionText(product.id, $event)"
+                      ></app-dictation-control>
                     </mat-form-field>
                   </div>
                 </div>
@@ -350,13 +366,27 @@
           <h2><span class="optional-info">Optional</span><br />Audience & Market</h2>
         </div>
         <div class="section-content">
-          <mat-form-field appearance="outline" class="guidance-field">
+          <mat-form-field
+            appearance="outline"
+            class="guidance-field"
+            [class.dictation-enabled]="dictationEnabled()"
+          >
             <textarea
+              #audienceInput
               matInput
               placeholder="Audience, location, market, demographics, affinity groups, etc..."
               [ngModel]="config.projectConfig.value().inputConfig.audience"
               (ngModelChange)="updateInputConfig({audience: $event})"
             ></textarea>
+            <app-dictation-control
+              [enabled]="dictationEnabled()"
+              [audioConfig]="dictationConfig()"
+              [value]="config.projectConfig.value().inputConfig.audience || ''"
+              [revision]="fieldRevision('audience')"
+              [ownerKey]="config.projectConfig.value().id + ':audience'"
+              [textarea]="audienceInput"
+              (valueChange)="updateInputConfig({audience: $event})"
+            ></app-dictation-control>
           </mat-form-field>
         </div>
       </div>
@@ -367,13 +397,27 @@
           <h2><span class="optional-info">Optional</span><br />Style</h2>
         </div>
         <div class="section-content">
-          <mat-form-field appearance="outline" class="guidance-field">
+          <mat-form-field
+            appearance="outline"
+            class="guidance-field"
+            [class.dictation-enabled]="dictationEnabled()"
+          >
             <textarea
+              #styleInput
               matInput
               placeholder="Corporate Identity (CI) or brand guidance. Additional visual styles or color palettes can also be described..."
               [ngModel]="config.projectConfig.value().inputConfig.style"
               (ngModelChange)="updateInputConfig({style: $event})"
             ></textarea>
+            <app-dictation-control
+              [enabled]="dictationEnabled()"
+              [audioConfig]="dictationConfig()"
+              [value]="config.projectConfig.value().inputConfig.style || ''"
+              [revision]="fieldRevision('style')"
+              [ownerKey]="config.projectConfig.value().id + ':style'"
+              [textarea]="styleInput"
+              (valueChange)="updateInputConfig({style: $event})"
+            ></app-dictation-control>
           </mat-form-field>
         </div>
       </div>
@@ -438,14 +482,28 @@
 
         <mat-divider class="section-divider"></mat-divider>
 
-        <mat-form-field appearance="outline" class="guidance-field">
+        <mat-form-field
+          appearance="outline"
+          class="guidance-field"
+          [class.dictation-enabled]="dictationEnabled()"
+        >
           <textarea
+            #compositionInput
             matInput
             placeholder="Describe the style, mood, pacing, or specific elements you want to see in the video..."
             (input)="revertToCustomTemplate()"
             [ngModel]="config.projectConfig.value().inputConfig.composition"
             (ngModelChange)="updateInputConfig({composition: $event})"
           ></textarea>
+          <app-dictation-control
+            [enabled]="dictationEnabled()"
+            [audioConfig]="dictationConfig()"
+            [value]="config.projectConfig.value().inputConfig.composition || ''"
+            [revision]="fieldRevision('composition')"
+            [ownerKey]="config.projectConfig.value().id + ':composition'"
+            [textarea]="compositionInput"
+            (valueChange)="updateInputConfig({composition: $event})"
+          ></app-dictation-control>
         </mat-form-field>
       </div>
     }

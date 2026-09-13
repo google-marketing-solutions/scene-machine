@@ -102,6 +102,7 @@ describe('Storyboard', () => {
     uploadMedia: vi.fn(),
     editCandidate: vi.fn(),
     generatingSceneIds: signal(new Set()),
+    editingSceneIds: signal(new Set()),
   };
   let mockMatDialog = {
     open: vi.fn().mockReturnValue({
@@ -156,6 +157,7 @@ describe('Storyboard', () => {
       uploadMedia: vi.fn(),
       editCandidate: vi.fn(),
       generatingSceneIds: signal(new Set()),
+      editingSceneIds: signal(new Set()),
     };
 
     mockMatDialog = {
@@ -690,6 +692,11 @@ describe('Storyboard', () => {
 
     expect(toggle.checked).toBe(true);
     expect(toggle.disabled).toBe(false);
+    expect(
+      fixture.nativeElement
+        .querySelector('.audio-toggle .subtitle')
+        ?.textContent.trim(),
+    ).toBe('Generate Audio');
   });
 
   it('mutes an audio-off selected candidate and disables its preview volume controls', () => {
@@ -872,6 +879,142 @@ describe('Storyboard', () => {
     // Test with dragging
     component.draggingTrim.set({start: 3, end: 7});
     expect(component.trimmedDuration()).toBe(4);
+  });
+
+  it('does not show a trimmed-duration chip for the full source span', () => {
+    const candidate: Candidate = {
+      video: {url: 'http://test.mp4', path: 'test/path'},
+      runNumber: 1,
+      durationSeconds: 4,
+      trim: {start: 0, end: 4},
+      prompt: 'test prompt',
+      model: 'test-model',
+      generateAudio: false,
+      resolution: '1080p',
+    };
+    const archivedCandidate: Candidate = {
+      ...candidate,
+      video: {url: 'http://archived.mp4', path: 'archived/path'},
+      isArchived: true,
+    };
+    const scene: GeneratedScene = {
+      id: '1',
+      type: 'generated',
+      name: 'Scene 1',
+      prompt: 'test prompt',
+      candidates: [candidate, archivedCandidate],
+      selectedCandidateIndex: 0,
+    };
+
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    component.selectScene(scene.id);
+    component.videoDuration.set(4);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.trimmed-info')).toBeNull();
+    expect(
+      fixture.nativeElement.querySelectorAll('.archived-panel .video-item'),
+    ).toHaveLength(1);
+    expect(
+      fixture.nativeElement.querySelectorAll('.video-info mat-icon'),
+    ).toHaveLength(0);
+    expect(component.isTrimmedRange({end: 3}, 4)).toBe(true);
+    expect(component.isTrimmedRange({start: 0, end: 4.01}, 4)).toBe(false);
+    expect(component.isTrimmedRange({start: 0, end: 4}, 4.01)).toBe(true);
+  });
+
+  it('disables native looping while scrubbing a paused preview at the right edge', () => {
+    const candidate: Candidate = {
+      video: {url: 'http://test.mp4', path: 'test/path'},
+      runNumber: 1,
+      durationSeconds: 4,
+      trim: {start: 0, end: 4},
+      prompt: 'test prompt',
+      model: 'test-model',
+      generateAudio: false,
+      resolution: '1080p',
+    };
+    const scene: GeneratedScene = {
+      id: '1',
+      type: 'generated',
+      name: 'Scene 1',
+      prompt: 'test prompt',
+      candidates: [candidate],
+      selectedCandidateIndex: 0,
+    };
+
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    component.selectScene(scene.id);
+    component.videoDuration.set(4);
+    fixture.detectChanges();
+
+    const video = fixture.nativeElement.querySelector(
+      'video.preview-video',
+    ) as HTMLVideoElement;
+    Object.defineProperty(video, 'paused', {configurable: true, value: true});
+    Object.defineProperty(video, 'currentTime', {
+      configurable: true,
+      value: 3.999,
+      writable: true,
+    });
+    component.isVideoPlaying.set(true);
+    fixture.detectChanges();
+    expect(video.loop).toBe(true);
+
+    component.startDraggingTrim(new MouseEvent('mousedown'), 'end');
+    component.onVideoTimeUpdate();
+
+    expect(component.isVideoPlaying()).toBe(false);
+    expect(video.loop).toBe(false);
+    expect(component.currentPlaybackTime()).toBe(3.999);
+    expect(candidate.trim).toEqual({start: 0, end: 4});
+
+    component.stopDraggingTrim();
+  });
+
+  it('keeps native looping enabled when normal preview playback starts', () => {
+    const candidate: Candidate = {
+      video: {url: 'http://test.mp4', path: 'test/path'},
+      runNumber: 1,
+      durationSeconds: 4,
+      prompt: 'test prompt',
+      model: 'test-model',
+      generateAudio: false,
+      resolution: '1080p',
+    };
+    const scene: GeneratedScene = {
+      id: '1',
+      type: 'generated',
+      name: 'Scene 1',
+      prompt: 'test prompt',
+      candidates: [candidate],
+      selectedCandidateIndex: 0,
+    };
+
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    component.selectScene(scene.id);
+    fixture.detectChanges();
+
+    const video = fixture.nativeElement.querySelector(
+      'video.preview-video',
+    ) as HTMLVideoElement;
+    Object.defineProperty(video, 'paused', {configurable: true, value: true});
+    vi.spyOn(video, 'play').mockResolvedValue(undefined);
+
+    component.toggleVideoPlay();
+
+    expect(component.isVideoPlaying()).toBe(true);
+    expect(video.loop).toBe(true);
+
+    vi.spyOn(video, 'pause').mockImplementation(() => undefined);
+    Object.defineProperty(video, 'paused', {
+      configurable: true,
+      value: false,
+    });
+    component.toggleVideoPlay();
+
+    expect(component.isVideoPlaying()).toBe(false);
+    expect(video.loop).toBe(false);
   });
 
   it('keeps at least one 24fps frame when trim start crosses trim end', () => {

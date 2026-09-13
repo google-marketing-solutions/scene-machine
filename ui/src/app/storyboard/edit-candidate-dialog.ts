@@ -20,6 +20,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import {MAT_DIALOG_DATA} from '@angular/material/dialog';
 import {FormsModule} from '@angular/forms';
 import {MatButtonModule} from '@angular/material/button';
 import {
@@ -31,9 +32,11 @@ import {
 } from '@angular/material/dialog';
 import {MatFormFieldModule} from '@angular/material/form-field';
 import {MatInputModule} from '@angular/material/input';
+import {DictationControl} from '../shared/dictation/dictation-control';
+import {DictationConfig} from '../shared/dictation/dictation';
 
 /**
- * Dialog for entering the text instruction that drives the Edit button.
+ * Dialog for entering the text instruction that drives the Generate button.
  * Closes with the trimmed instruction, or undefined on cancel.
  */
 @Component({
@@ -47,21 +50,36 @@ import {MatInputModule} from '@angular/material/input';
     MatDialogClose,
     MatFormFieldModule,
     MatInputModule,
+    DictationControl,
   ],
   template: `
     <div class="dialog-container">
       <h2 mat-dialog-title>Edit candidate</h2>
       <mat-dialog-content>
-        <mat-form-field appearance="outline">
-          <mat-label>What should change?</mat-label>
+        <mat-form-field
+          appearance="outline"
+          [class.dictation-enabled]="dictationEnabled"
+        >
+          <mat-label>Describe your edit</mat-label>
           <textarea
+            #editPromptInput
             matInput
             rows="3"
+            style="resize: none"
             placeholder="e.g., Make the sky purple"
             [ngModel]="editPrompt()"
-            (ngModelChange)="editPrompt.set($event)"
+            (ngModelChange)="updateEditPrompt($event)"
             cdkFocusInitial
           ></textarea>
+          <app-dictation-control
+            [enabled]="dictationEnabled"
+            [audioConfig]="dictationConfig"
+            [value]="editPrompt()"
+            [revision]="editPromptRevision()"
+            [ownerKey]="ownerKey"
+            [textarea]="editPromptInput"
+            (valueChange)="updateEditPrompt($event)"
+          ></app-dictation-control>
         </mat-form-field>
       </mat-dialog-content>
       <mat-dialog-actions align="end">
@@ -72,7 +90,7 @@ import {MatInputModule} from '@angular/material/input';
           [disabled]="!editPrompt().trim()"
           [mat-dialog-close]="editPrompt().trim()"
         >
-          Edit
+          Generate
         </button>
       </mat-dialog-actions>
     </div>
@@ -90,6 +108,25 @@ import {MatInputModule} from '@angular/material/input';
 
       mat-form-field {
         width: 100%;
+        position: relative;
+
+        &.dictation-enabled textarea {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow: auto;
+          scrollbar-gutter: stable;
+        }
+
+        &.dictation-enabled ::ng-deep .mat-mdc-form-field-infix {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          min-height: 0;
+        }
+      }
+
+      :host textarea {
+        resize: none !important;
       }
     `,
   ],
@@ -97,5 +134,22 @@ import {MatInputModule} from '@angular/material/input';
 })
 export class EditCandidateDialog {
   readonly dialogRef = inject(MatDialogRef<EditCandidateDialog>);
+  private readonly data = inject<{
+    dictationEnabled?: boolean;
+    dictationConfig?: DictationConfig;
+  }>(MAT_DIALOG_DATA, {
+    optional: true,
+  });
   readonly editPrompt = signal('');
+  readonly editPromptRevision = signal(0);
+  readonly dictationEnabled = this.data?.dictationEnabled === true;
+  readonly dictationConfig = this.data?.dictationConfig;
+  readonly ownerKey = `edit-dialog-${++dialogOwnerCounter}`;
+
+  updateEditPrompt(value: string): void {
+    this.editPrompt.set(value);
+    this.editPromptRevision.update(revision => revision + 1);
+  }
 }
+
+let dialogOwnerCounter = 0;
