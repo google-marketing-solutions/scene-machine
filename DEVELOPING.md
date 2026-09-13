@@ -153,6 +153,22 @@ A full `./deploy.sh` stays the safe default and is what you should run for a rel
 - **`--skip-ui-build` / `--use-existing-ui-dist`** reuses the existing `ui/dist` instead of rebuilding the UI. Good for backend-only changes. It reuses the config already baked into that build, so use it when redeploying the **same** project. The deploy refuses a `ui/dist` that was built for local dev (sign-in disabled).
 - **`--no-build-cache`** forces a clean cold image build, for a release or a dependency refresh.
 
+### Thumbnail cache identity
+
+Homepage and storyboard image previews use `ThumbnailCacheService` with a
+separate Cache Storage budget from candidate videos. Keep thumbnail object
+paths immutable: `uploadThumbnail` includes a content hash in the filename,
+so changed bytes get a new path. Cache identity is bucket + project + path;
+rotating a signed URL does not invalidate unchanged image bytes. Do not start
+overwriting existing thumbnail paths without also adding an explicit revision
+to cache identity.
+
+When adding a preview, use `ThumbnailImageDirective` so near-viewport loading,
+stale-request fencing and object-URL cleanup stay consistent. Archived candidate
+previews must use `thumbnailImagePersist=false`. The cache is an optional
+optimization, not an authorization boundary or an offline project store; see
+the [user-facing cache limits and caveats](README.md#local-media-cache).
+
 ### Dictation feature flag
 
 Microphone dictation is included in deployment and enabled by default. The

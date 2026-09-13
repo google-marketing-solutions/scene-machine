@@ -64,34 +64,26 @@
 
               @if (thumb.highQualityThumbnail) {
                 <img
-                  [src]="thumb.highQualityThumbnail | mediaSrc"
+                  [appThumbnailImage]="thumb.highQualityThumbnail"
+                  [thumbnailCacheScope]="getThumbnailCacheScope(project)"
+                  [thumbnailImagePersist]="thumbnailPersistForProject(project)"
+                  [thumbnailImageContainer]="projectThumbnail"
                   class="high-res-img"
-                  #highResImg
-                  (load)="
-                    highResImg.classList.add('loaded');
-                    projectThumbnail.classList.add('high-res-loaded')
-                  "
                   alt="Thumbnail"
                 />
               }
 
               <!-- Fallback 1: Reference image -->
               @if (thumb.showReference) {
-                <img [src]="thumb.referenceImage | mediaSrc" alt="Thumbnail" />
+                <img
+                  [appThumbnailImage]="thumb.referenceImage"
+                  [thumbnailCacheScope]="getThumbnailCacheScope(project)"
+                  [thumbnailImagePersist]="thumbnailPersistForProject(project)"
+                  alt="Thumbnail"
+                />
               }
 
-              <!-- Fallback 2: Video -->
-              @if (thumb.showVideo) {
-                <video
-                  [src]="thumb.videoUrl | mediaSrc"
-                  muted
-                  loop
-                  onmouseover="this.play()"
-                  onmouseout="this.pause()"
-                ></video>
-              }
-
-              <!-- Fallback 3: Placeholder -->
+              <!-- Fallback: Placeholder -->
               @if (thumb.showPlaceholder) {
                 <div class="placeholder-thumbnail">
                   <mat-icon>movie</mat-icon>

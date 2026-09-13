@@ -376,6 +376,42 @@ describe('CandidateVideoCacheService', () => {
 
   it('enforces the total-byte bound using stored metadata', async () => {
     const now = Date.now();
+    for (let index = 0; index < 8; index++) {
+      cache.values.set(
+        `http://localhost:3000/__scene_machine_candidate_video_cache__/v1/bucket-a/project-a/${index}.mp4`,
+        new Response(new Uint8Array([index]), {
+          status: 200,
+          headers: {
+            'content-length': String(MAX_ENTRY_BYTES),
+            'x-scene-machine-cached-at': String(now - (8 - index)),
+            'x-scene-machine-cached-size': String(MAX_ENTRY_BYTES),
+          },
+        }),
+      );
+    }
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/new');
+    fetchMock.mockResolvedValue(
+      new Response(new Uint8Array([1]), {status: 200}),
+    );
+
+    const lease = await service.acquire(
+      {bucket: 'bucket-a', projectId: 'project-a'},
+      {path: 'new.mp4'},
+      true,
+    );
+
+    expect(cache.values.size).toBe(8);
+    expect([...cache.values.keys()].some(key => key.endsWith('/0.mp4'))).toBe(
+      false,
+    );
+    expect([...cache.values.keys()].some(key => key.endsWith('/new.mp4'))).toBe(
+      true,
+    );
+    lease.release();
+  });
+
+  it('does not evict above 256 MiB while the 512 MiB video budget has room', async () => {
+    const now = Date.now();
     for (let index = 0; index < 4; index++) {
       cache.values.set(
         `http://localhost:3000/__scene_machine_candidate_video_cache__/v1/bucket-a/project-a/${index}.mp4`,
@@ -400,11 +436,42 @@ describe('CandidateVideoCacheService', () => {
       true,
     );
 
-    expect(cache.values.size).toBe(4);
+    expect(cache.values.size).toBe(5);
     expect([...cache.values.keys()].some(key => key.endsWith('/0.mp4'))).toBe(
-      false,
+      true,
     );
-    expect([...cache.values.keys()].some(key => key.endsWith('/new.mp4'))).toBe(
+    lease.release();
+  });
+
+  it('retains an entry that brings stored metadata exactly to 512 MiB', async () => {
+    const now = Date.now();
+    for (let index = 0; index < 8; index++) {
+      const size = index === 0 ? MAX_ENTRY_BYTES - 1 : MAX_ENTRY_BYTES;
+      cache.values.set(
+        `http://localhost:3000/__scene_machine_candidate_video_cache__/v1/bucket-a/project-a/${index}.mp4`,
+        new Response(new Uint8Array([index]), {
+          status: 200,
+          headers: {
+            'content-length': String(size),
+            'x-scene-machine-cached-at': String(now - (8 - index)),
+            'x-scene-machine-cached-size': String(size),
+          },
+        }),
+      );
+    }
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/new');
+    fetchMock.mockResolvedValue(
+      new Response(new Uint8Array([1]), {status: 200}),
+    );
+
+    const lease = await service.acquire(
+      {bucket: 'bucket-a', projectId: 'project-a'},
+      {path: 'new.mp4'},
+      true,
+    );
+
+    expect(cache.values.size).toBe(9);
+    expect([...cache.values.keys()].some(key => key.endsWith('/0.mp4'))).toBe(
       true,
     );
     lease.release();

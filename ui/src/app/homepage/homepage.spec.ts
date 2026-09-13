@@ -23,7 +23,13 @@ import {provideRouter} from '@angular/router';
 import {of} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {env} from '../../env';
-import {ConfigService} from '../services/config/config';
+import {
+  ConfigService,
+  GeneratedScene,
+  ProjectConfig,
+} from '../services/config/config';
+import {MediaService} from '../services/media/media';
+import {ThumbnailCacheService} from '../services/media/thumbnail-cache';
 import {Homepage} from './homepage';
 
 describe('Homepage', () => {
@@ -35,10 +41,15 @@ describe('Homepage', () => {
     deleteProject: vi.fn().mockResolvedValue(undefined),
     theme: signal('light-mode'),
     primaryColor: signal('theme-azure'),
+    globalConfig: {value: () => ({gcsBucket: 'bucket-a'})},
+    isGeneratedScene: (scene: GeneratedScene) => scene.type === 'generated',
+    isProvidedVideoScene: (scene: GeneratedScene) => scene.type === 'video',
   };
   let mockMatDialog = {
     open: vi.fn().mockReturnValue({afterClosed: () => of(true)}),
   };
+  let mockMediaService: {signUrls: ReturnType<typeof vi.fn>};
+  let mockThumbnailCache: {acquire: ReturnType<typeof vi.fn>};
   // Restore controlPlaneMode after tests that mutate it, so the rendered env.ts
   // value (which varies by environment) is not leaked between specs.
   const initialControlPlaneMode = env.controlPlaneMode;
@@ -61,9 +72,23 @@ describe('Homepage', () => {
       deleteProject: vi.fn().mockResolvedValue(undefined),
       theme: signal('light-mode'),
       primaryColor: signal('theme-azure'),
+      globalConfig: {value: () => ({gcsBucket: 'bucket-a'})},
+      isGeneratedScene: (scene: GeneratedScene) => scene.type === 'generated',
+      isProvidedVideoScene: (scene: GeneratedScene) => scene.type === 'video',
     };
     mockMatDialog = {
       open: vi.fn().mockReturnValue({afterClosed: () => of(true)}),
+    };
+    mockMediaService = {signUrls: vi.fn().mockResolvedValue(new Map())};
+    mockThumbnailCache = {
+      acquire: vi
+        .fn()
+        .mockImplementation((_scope: unknown, file: {path?: string}) =>
+          Promise.resolve({
+            url: `blob:${file.path ?? 'empty'}`,
+            release: vi.fn(),
+          }),
+        ),
     };
 
     await TestBed.configureTestingModule({
@@ -73,6 +98,8 @@ describe('Homepage', () => {
         provideHttpClient(),
         provideHttpClientTesting(),
         {provide: ConfigService, useValue: mockConfigService},
+        {provide: MediaService, useValue: mockMediaService},
+        {provide: ThumbnailCacheService, useValue: mockThumbnailCache},
       ],
     })
       .overrideComponent(Homepage, {
@@ -85,6 +112,7 @@ describe('Homepage', () => {
 
   afterEach(() => {
     env.controlPlaneMode = initialControlPlaneMode;
+    vi.unstubAllGlobals();
   });
 
   it('should create', () => {
@@ -122,6 +150,153 @@ describe('Homepage', () => {
     component.toggleFilter(false);
     expect(mockConfigService.getProjects).toHaveBeenCalledWith(undefined);
   });
+
+  it('uses the selected candidate thumbnail without rendering its reference fallback', () => {
+    const project = {
+      id: 'project-a',
+      name: 'Project',
+      aspectRatio: '16:9',
+      storyboard: [
+        {
+          id: 'scene-a',
+          name: 'Scene',
+          type: 'generated',
+          prompt: 'prompt',
+          selectedCandidateIndex: 1,
+          referenceImage: {path: 'reference.jpg', url: 'reference-url'},
+          candidates: [
+            {
+              runNumber: 1,
+              durationSeconds: 4,
+              model: 'model',
+              prompt: 'prompt',
+              generateAudio: false,
+              resolution: '1080p',
+              highQualityThumbnail: {path: 'candidate-a.jpg'},
+            },
+            {
+              runNumber: 2,
+              durationSeconds: 4,
+              model: 'model',
+              prompt: 'prompt',
+              generateAudio: false,
+              resolution: '1080p',
+              highQualityThumbnail: {path: 'candidate-b.jpg'},
+            },
+          ],
+        },
+      ],
+    } as unknown as ProjectConfig;
+
+    const data = component.getThumbnailData(project);
+    expect(data.highQualityThumbnail?.path).toBe('candidate-b.jpg');
+    expect(data.showReference).toBe(false);
+    (project.storyboard[0] as GeneratedScene).candidates![1].isArchived = true;
+    expect(component.thumbnailPersistForProject(project)).toBe(false);
+  });
+
+  it('renders only the selected candidate thumbnail when a reference fallback exists', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const project = {
+      id: 'project-a',
+      name: 'Project',
+      aspectRatio: '16:9',
+      storyboard: [
+        {
+          id: 'scene-a',
+          name: 'Scene',
+          type: 'generated',
+          prompt: 'prompt',
+          selectedCandidateIndex: 0,
+          referenceImage: {path: 'reference.jpg', url: 'reference-url'},
+          candidates: [
+            {
+              runNumber: 1,
+              durationSeconds: 4,
+              model: 'model',
+              prompt: 'prompt',
+              generateAudio: false,
+              resolution: '1080p',
+              highQualityThumbnail: {
+                path: 'candidate.jpg',
+                url: 'candidate-url',
+              },
+            },
+          ],
+        },
+      ],
+    } as unknown as ProjectConfig;
+    mockConfigService.getProjects.mockResolvedValueOnce([project]);
+
+    component.fetchProjects();
+    await Promise.resolve();
+    await Promise.resolve();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.project-thumbnail');
+    expect(card.querySelectorAll('img')).toHaveLength(1);
+    expect(card.querySelector('.high-res-img').src).toContain(
+      'blob:candidate.jpg',
+    );
+    expect(mockMediaService.signUrls).toHaveBeenCalledWith(['candidate.jpg']);
+  });
+
+  it.each([
+    {
+      label: 'a provided video scene',
+      scene: {
+        id: 'scene-a',
+        name: 'Scene',
+        type: 'video',
+        video: {path: 'scene.mp4', url: 'scene-url'},
+      },
+    },
+    {
+      label: 'a generated scene with a video-only candidate',
+      scene: {
+        id: 'scene-a',
+        name: 'Scene',
+        type: 'generated',
+        selectedCandidateIndex: 0,
+        candidates: [
+          {
+            runNumber: 1,
+            durationSeconds: 4,
+            model: 'model',
+            prompt: 'prompt',
+            generateAudio: false,
+            resolution: '1080p',
+            video: {path: 'candidate.mp4', url: 'candidate-url'},
+          },
+        ],
+      },
+    },
+  ])(
+    'renders a placeholder for $label without a hover video',
+    async ({scene}) => {
+      const project = {
+        id: 'video-project',
+        name: 'Video project',
+        aspectRatio: '16:9',
+        storyboard: [scene],
+      } as unknown as ProjectConfig;
+      mockConfigService.getProjects.mockResolvedValueOnce([project]);
+
+      component.fetchProjects();
+      await Promise.resolve();
+      await Promise.resolve();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const card = fixture.nativeElement.querySelector('.project-thumbnail');
+      expect(card.querySelector('video')).toBeNull();
+      expect(card.querySelector('.placeholder-thumbnail')).not.toBeNull();
+      card.dispatchEvent(new MouseEvent('mouseenter', {bubbles: true}));
+      await fixture.whenStable();
+      expect(card.querySelector('video')).toBeNull();
+    },
+  );
 
   it('does not refetch the project list until the server delete resolves', async () => {
     // Let the constructor's synchronous fetch settle before measuring.

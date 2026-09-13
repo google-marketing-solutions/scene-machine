@@ -93,12 +93,22 @@ preserves all older rendered versions, enabling users to maintain and compare
 multiple creative variants (e.g., short vs. long versions) within the same
 project.
 
-### Local candidate-video cache
+<a id="local-candidate-video-cache"></a>
+### Local media cache
 
 The browser may cache selected or hovered candidate videos locally for up to
-seven days to make scene switching faster. This is bounded, best-effort browser
-storage: browsers may evict it earlier, it does not provide offline project
-access, and it is not a remote security purge. Archive and project-delete
+seven days to make scene switching faster: up to 64 MiB per video and 512 MiB
+total (at most 64 videos). Homepage and storyboard thumbnails
+use a separate cache: up to 1 MiB per image and 64 MiB total (at most 1,024
+images), with the same seven-day expiry. Images near the visible area load
+ahead; offscreen images wait until needed. The homepage shows images only,
+with a static placeholder when no image is available; it never loads videos.
+Changing the selected candidate uses its own thumbnail, not the old selection's
+cached image. Oversized images still display using their original URL.
+
+This is bounded, best-effort browser storage: browsers may evict it earlier,
+it does not provide offline project access, and it is not a remote security
+purge. Archive and project-delete
 actions invalidate matching entries from the current page. In-flight writes
 are fenced only within that page: another open tab can finish a pending fetch
 and cache the same bytes again. Other browsers or offline devices may also
