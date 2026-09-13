@@ -152,8 +152,10 @@ describe('ThumbnailImageDirective', () => {
 
     intersect(0);
     await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(1);
     directive.media = {path: 'thumbnail-b.jpg'};
     directive.ngOnChanges();
+    expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(5000);
 
     expect(acquire).toHaveBeenCalledTimes(1);
