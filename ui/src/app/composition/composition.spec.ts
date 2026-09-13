@@ -26,6 +26,7 @@ import {
   ProvidedVideoScene,
 } from '../services/config/config';
 import {MediaService} from '../services/media/media';
+import {CandidateVideoCacheService} from '../services/media/candidate-video-cache';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {Composition} from './composition';
 
@@ -40,6 +41,9 @@ describe('CompositionComponent', () => {
     signUrls: ReturnType<typeof vi.fn>;
     upload: ReturnType<typeof vi.fn>;
     getBlob: ReturnType<typeof vi.fn>;
+  };
+  let mockCandidateVideoCache: {
+    acquireCached: ReturnType<typeof vi.fn>;
   };
   let projectConfigSignal: WritableSignal<ProjectConfig>;
 
@@ -63,6 +67,9 @@ describe('CompositionComponent', () => {
       projectConfig: {
         value: projectConfigSignal,
         isLoading: signal(false),
+      },
+      globalConfig: {
+        value: () => ({gcsBucket: 'bucket-a'}),
       },
       updateProjectConfig: vi.fn(),
       isGeneratedScene: (
@@ -92,12 +99,19 @@ describe('CompositionComponent', () => {
       upload: vi.fn(),
       getBlob: vi.fn(),
     };
+    mockCandidateVideoCache = {
+      acquireCached: vi.fn().mockResolvedValue(null),
+    };
 
     await TestBed.configureTestingModule({
       imports: [Composition, MatSnackBarModule],
       providers: [
         {provide: ConfigService, useValue: mockConfigService},
         {provide: MediaService, useValue: mockMediaService},
+        {
+          provide: CandidateVideoCacheService,
+          useValue: mockCandidateVideoCache,
+        },
         {provide: RemixEngineService, useValue: mockRemixEngineService},
       ],
     }).compileComponents();
@@ -720,19 +734,50 @@ describe('CompositionComponent', () => {
       fixture.detectChanges();
     }
 
-    it('pre-signs every playlist entry path in one batch when the playlist computes', () => {
+    it('uses a warm candidate cache lease for the active clip', async () => {
+      const release = vi.fn();
+      mockCandidateVideoCache.acquireCached.mockResolvedValue({
+        url: 'blob:cached-clip1',
+        release,
+      });
+
       loadTwoClipStoryboard();
 
-      expect(mockMediaService.signUrls).toHaveBeenCalledWith([
-        'videos/clip1.mp4',
-        'videos/clip2.mp4',
-      ]);
+      await vi.waitFor(() =>
+        expect(component.heldVideoSrc()).toBe('blob:cached-clip1'),
+      );
+      expect(mockCandidateVideoCache.acquireCached).toHaveBeenCalledWith(
+        {bucket: 'bucket-a', projectId: 'test-project'},
+        expect.objectContaining({path: 'videos/clip1.mp4'}),
+      );
+      expect(mockMediaService.signUrls).not.toHaveBeenCalled();
+      expect(release).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the direct URL without waiting for a full cache download', async () => {
+      mockCandidateVideoCache.acquireCached.mockResolvedValue(null);
+      mockMediaService.getCachedUrl.mockReturnValue('https://signed/warm-url');
+      mockMediaService.resolve.mockResolvedValue('https://signed/clip1');
+
+      loadTwoClipStoryboard();
+
+      await vi.waitFor(() =>
+        expect(component.heldVideoSrc()).toBe('https://signed/clip1'),
+      );
+      expect(mockCandidateVideoCache.acquireCached).toHaveBeenCalled();
+      expect(mockMediaService.resolve).toHaveBeenCalledWith(
+        expect.objectContaining({path: 'videos/clip1.mp4'}),
+      );
     });
 
     it('holds the previous src (never null) across a cross-clip seek while the new URL resolves', async () => {
-      mockMediaService.getCachedUrl.mockImplementation((path: string) =>
-        path === 'videos/clip1.mp4' ? 'https://signed/clip1' : undefined,
+      mockCandidateVideoCache.acquireCached.mockImplementation(
+        (_scope: unknown, file: {path?: string}) =>
+          file.path === 'videos/clip1.mp4'
+            ? Promise.resolve({url: 'https://signed/clip1', release: vi.fn()})
+            : Promise.resolve(null),
       );
+      mockMediaService.getCachedUrl.mockReturnValue('https://signed/warm-url');
       // resolve() backs both the filmstrip thumbnail pipe (cold clip-2
       // thumbnail at load) and the held-src cache-miss fallback (clip 2 at
       // seek); the overwrite capture keeps the latest resolver — the
@@ -746,16 +791,20 @@ describe('CompositionComponent', () => {
       );
 
       loadTwoClipStoryboard();
-      expect(component.heldVideoSrc()).toBe('https://signed/clip1');
+      await vi.waitFor(() =>
+        expect(component.heldVideoSrc()).toBe('https://signed/clip1'),
+      );
 
       seekTo(12); // Lands in clip 2 (10-15s).
 
       expect(component.currentPlaylistIndex()).toBe(1);
+      await vi.waitFor(() =>
+        expect(mockMediaService.resolve).toHaveBeenCalledWith(
+          expect.objectContaining({path: 'videos/clip2.mp4'}),
+        ),
+      );
       // Cache misses go through MediaService.resolve — the per-mode shim —
       // never directly through the mediated-plane signUrl.
-      expect(mockMediaService.resolve).toHaveBeenCalledWith(
-        expect.objectContaining({path: 'videos/clip2.mp4'}),
-      );
       expect(mockMediaService.signUrl).not.toHaveBeenCalled();
       // The new clip's URL is still in flight: the bound src must hold the
       // previous URL instead of transitioning to null.
@@ -769,9 +818,13 @@ describe('CompositionComponent', () => {
     });
 
     it('becomes ready after a cache-miss resolve so an audio-enabled clip unmutes', async () => {
-      mockMediaService.getCachedUrl.mockImplementation((path: string) =>
-        path === 'videos/clip1.mp4' ? 'https://signed/clip1' : undefined,
+      mockCandidateVideoCache.acquireCached.mockImplementation(
+        (_scope: unknown, file: {path?: string}) =>
+          file.path === 'videos/clip1.mp4'
+            ? Promise.resolve({url: 'https://signed/clip1', release: vi.fn()})
+            : Promise.resolve(null),
       );
+      mockMediaService.getCachedUrl.mockReturnValue('https://signed/warm-url');
       let resolveClip2!: (url: string) => void;
       mockMediaService.resolve.mockImplementation(
         () => new Promise<string>(resolve => (resolveClip2 = resolve)),
@@ -816,17 +869,16 @@ describe('CompositionComponent', () => {
       ];
       projectConfigSignal.set({...projectConfigSignal(), storyboard: scenes});
       fixture.detectChanges();
+      await vi.waitFor(() =>
+        expect(component.heldVideoSrc()).toBe('https://signed/clip1'),
+      );
       component.seek({target: {value: '12'}} as unknown as Event);
       fixture.detectChanges();
       expect(component.heldVideoSrc()).toBe('https://signed/clip1');
       expect(component.currentClipSourceReady()).toBe(false);
 
+      await vi.waitFor(() => expect(resolveClip2).toBeTypeOf('function'));
       resolveClip2('https://signed/clip2');
-      mockMediaService.getCachedUrl.mockImplementation((path: string) =>
-        path === 'videos/clip1.mp4'
-          ? 'https://signed/clip1'
-          : 'https://signed/clip2',
-      );
       await vi.waitFor(() =>
         expect(component.heldVideoSrc()).toBe('https://signed/clip2'),
       );
@@ -841,38 +893,125 @@ describe('CompositionComponent', () => {
       ).toBe(false);
     });
 
-    it('swaps the src synchronously on a cross-clip seek when the URL is cached', () => {
-      mockMediaService.getCachedUrl.mockImplementation((path: string) =>
-        path === 'videos/clip1.mp4'
-          ? 'https://signed/clip1'
-          : 'https://signed/clip2',
+    it('swaps the src after cache-only lookup on a cross-clip seek when the URL is cached', async () => {
+      mockCandidateVideoCache.acquireCached.mockImplementation(
+        (_scope: unknown, file: {path?: string}) =>
+          Promise.resolve({
+            url:
+              file.path === 'videos/clip1.mp4'
+                ? 'https://signed/clip1'
+                : 'https://signed/clip2',
+            release: vi.fn(),
+          }),
       );
+      mockMediaService.getCachedUrl.mockReturnValue('https://signed/warm-url');
 
       loadTwoClipStoryboard();
-      expect(component.heldVideoSrc()).toBe('https://signed/clip1');
+      await vi.waitFor(() =>
+        expect(component.heldVideoSrc()).toBe('https://signed/clip1'),
+      );
 
       seekTo(12);
 
-      expect(component.heldVideoSrc()).toBe('https://signed/clip2');
+      await vi.waitFor(() =>
+        expect(component.heldVideoSrc()).toBe('https://signed/clip2'),
+      );
       expect(mockMediaService.signUrl).not.toHaveBeenCalled();
       expect(mockMediaService.resolve).not.toHaveBeenCalled();
     });
 
-    it('resolves the src in the same pass the playlist computes (no one-tick null binding)', () => {
-      mockMediaService.getCachedUrl.mockImplementation((path: string) =>
-        path === 'videos/clip1.mp4' ? 'https://signed/clip1' : undefined,
-      );
+    it('waits for cache-only lookup before assigning the first src', async () => {
+      mockCandidateVideoCache.acquireCached.mockResolvedValue({
+        url: 'https://signed/clip1',
+        release: vi.fn(),
+      });
 
       projectConfigSignal.set({
         ...projectConfigSignal(),
         storyboard: structuredClone(twoClipStoryboard),
       });
 
-      // Read synchronously, before any change detection or effect flush:
-      // the src must already be the cached URL — the same-pass timing the
-      // impure mediaSrc pipe gave this binding at baseline, so the <video>
-      // element never sees an interim null src.
-      expect(component.heldVideoSrc()).toBe('https://signed/clip1');
+      await vi.waitFor(() =>
+        expect(component.heldVideoSrc()).toBe('https://signed/clip1'),
+      );
+    });
+
+    it('keeps one shared source lease while applying different trims and audio intent', async () => {
+      const release = vi.fn();
+      mockMediaService.getCachedUrl.mockReturnValue('https://signed/warm-url');
+      mockCandidateVideoCache.acquireCached.mockResolvedValue({
+        url: 'blob:shared-source',
+        release,
+      });
+      const sharedVideo = {url: '', path: 'videos/shared.mp4'};
+      const scenes: GeneratedScene[] = [
+        {
+          id: 's1',
+          type: 'generated',
+          name: 'First trim',
+          prompt: 'one',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {
+              video: sharedVideo,
+              durationSeconds: 10,
+              trim: {start: 1, end: 5},
+              generateAudio: false,
+              runNumber: 1,
+              prompt: 'one',
+              model: 'm',
+              resolution: '1080p',
+            },
+          ],
+        },
+        {
+          id: 's2',
+          type: 'generated',
+          name: 'Second trim',
+          prompt: 'two',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {
+              video: sharedVideo,
+              durationSeconds: 10,
+              trim: {start: 2, end: 6},
+              generateAudio: true,
+              runNumber: 1,
+              prompt: 'two',
+              model: 'm',
+              resolution: '1080p',
+            },
+          ],
+        },
+      ];
+      projectConfigSignal.set({...projectConfigSignal(), storyboard: scenes});
+      fixture.detectChanges();
+      await vi.waitFor(() =>
+        expect(component.heldVideoSrc()).toBe('blob:shared-source'),
+      );
+
+      const video = fixture.nativeElement.querySelector(
+        '.preview-video',
+      ) as HTMLVideoElement;
+      Object.defineProperty(video, 'currentTime', {
+        configurable: true,
+        writable: true,
+        value: 1,
+      });
+      component.seek({target: {value: '4.1'}} as unknown as Event);
+      fixture.detectChanges();
+
+      expect(component.currentPlaylistIndex()).toBe(1);
+      expect(video.currentTime).toBeCloseTo(2.1);
+      expect(component.currentClipIncludesAudio()).toBe(true);
+      expect(mockCandidateVideoCache.acquireCached).toHaveBeenCalledTimes(1);
+      expect(release).not.toHaveBeenCalled();
+
+      // Automatic advancement must reposition a same-source trim directly;
+      // no src change means the browser emits no new metadata event.
+      component.playNext();
+      expect(component.currentPlaylistIndex()).toBe(0);
+      expect(video.currentTime).toBe(1);
     });
 
     it('keeps a null src while the playlist is empty', () => {
@@ -880,6 +1019,25 @@ describe('CompositionComponent', () => {
 
       expect(component.heldVideoSrc()).toBeNull();
       expect(mockMediaService.signUrls).not.toHaveBeenCalled();
+    });
+
+    it('releases a warm lease when the active playlist is removed', async () => {
+      const release = vi.fn();
+      mockCandidateVideoCache.acquireCached.mockResolvedValue({
+        url: 'blob:removed-source',
+        release,
+      });
+      loadTwoClipStoryboard();
+      await vi.waitFor(() =>
+        expect(component.heldVideoSrc()).toBe('blob:removed-source'),
+      );
+
+      projectConfigSignal.update(config => ({...config, storyboard: []}));
+      fixture.detectChanges();
+
+      expect(release).toHaveBeenCalledTimes(1);
+      fixture.destroy();
+      expect(release).toHaveBeenCalledTimes(1);
     });
   });
 

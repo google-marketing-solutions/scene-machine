@@ -48,6 +48,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import sys
 import uuid
 
@@ -59,6 +60,7 @@ from flask import g as flask_g
 from flask import request as flask_request
 from flask import Response as flask_response
 from flask import send_from_directory
+from flask_compress import Compress
 from werkzeug.exceptions import BadRequest
 from werkzeug.exceptions import RequestEntityTooLarge
 from flask_cors import CORS
@@ -187,6 +189,61 @@ CORS(
         'http://localhost:4200',
     ],
 )
+
+# Compression is deliberately opt-in per endpoint. The project responses are
+# authenticated, user-specific JSON; control-plane and signed-URL routes must
+# never inherit a blanket compressor. Flask-Compress handles negotiation and
+# validator updates once this hook has selected an eligible successful GET.
+app.config.update(
+    COMPRESS_REGISTER=False,
+    COMPRESS_ALGORITHM=['gzip'],
+    COMPRESS_MIMETYPES=[
+        'application/javascript',
+        'application/json',
+        'text/css',
+        'text/html',
+        'text/javascript',
+    ],
+    COMPRESS_MIN_SIZE=500,
+    # send_from_directory returns streamed responses. Keep gzip available for
+    # those allow-listed views, and let Flask-Compress re-evaluate validators
+    # after it has selected the representation.
+    COMPRESS_ALGORITHM_STREAMING=['gzip'],
+    COMPRESS_STREAMING_ENDPOINT_CONDITIONAL=[
+        'spa_handler',
+        'projects_handler',
+        'project_detail_handler',
+    ],
+)
+_compressor = Compress(app)
+_COMPRESS_GET_ENDPOINTS = frozenset({
+    'spa_handler',
+    'projects_handler',
+    'project_detail_handler',
+})
+
+
+@app.after_request
+def compress_selected_get(response: flask_response) -> flask_response:
+  """Compress only successful GETs from the explicitly allow-listed views."""
+  if (
+      flask_request.method != 'GET'
+      or flask_request.endpoint not in _COMPRESS_GET_ENDPOINTS
+      or not 200 <= response.status_code < 300
+  ):
+    return response
+  vary = response.headers.get('Vary')
+  if not vary:
+    response.headers['Vary'] = 'Accept-Encoding'
+  elif 'accept-encoding' not in vary.lower():
+    response.headers['Vary'] = f'{vary}, Accept-Encoding'
+  if (
+      response.status_code == 206
+      or 'Content-Range' in response.headers
+      or flask_request.accept_encodings.quality('gzip') <= 0
+  ):
+    return response
+  return _compressor.after_request(response)
 
 
 def _unauthorized(message: str) -> flask_response:
@@ -1136,16 +1193,14 @@ def _write_project_doc(
   _commit_in_batches(ui_db, ops)
 
 
-def _read_project_doc(doc_ref, snapshot=None, *, first_scene_only=False):
+def _read_project_doc(doc_ref, snapshot=None):
   """Reassembles a project dict, restoring storyboard from the subcollection.
 
   Returns None when the project document does not exist. The optional
   snapshot lets callers that already fetched the root doc skip a re-read.
 
-  first_scene_only fetches just the first scene instead of streaming the whole
-  subcollection. The project list only needs storyboard[0] (for each card's
-  thumbnail), so listing N projects costs N+N reads rather than
-  N + total-scene-count, and returns far less data over the wire.
+  The project list uses _read_project_list_docs() to batch one first-scene read
+  for all returned projects; this detail reader still restores every scene.
   """
   if snapshot is None:
     snapshot = doc_ref.get()
@@ -1153,12 +1208,32 @@ def _read_project_doc(doc_ref, snapshot=None, *, first_scene_only=False):
     return None
   data = snapshot.to_dict()
   scenes_ref = doc_ref.collection(_SCENES_SUBCOLLECTION)
-  if first_scene_only:
-    first = scenes_ref.document(_scene_doc_id(0)).get()
-    data['storyboard'] = [first.to_dict()] if first.exists else []
-  else:
-    data['storyboard'] = [scene.to_dict() for scene in scenes_ref.stream()]
+  data['storyboard'] = [scene.to_dict() for scene in scenes_ref.stream()]
   return data
+
+
+def _read_project_list_docs(ui_db, collection, snapshots):
+  """Reassembles list projects with one batch for all first scenes."""
+  if not snapshots:
+    return []
+  scene_refs = [
+      collection.document(snapshot.id)
+      .collection(_SCENES_SUBCOLLECTION)
+      .document(_scene_doc_id(0))
+      for snapshot in snapshots
+  ]
+  scene_by_path = {
+      scene.reference.path: scene for scene in ui_db.get_all(scene_refs)
+  }
+  projects = []
+  for snapshot, scene_ref in zip(snapshots, scene_refs):
+    data = snapshot.to_dict()
+    first = scene_by_path.get(scene_ref.path)
+    data['storyboard'] = (
+        [first.to_dict()] if first is not None and first.exists else []
+    )
+    projects.append(data)
+  return projects
 
 
 def _delete_project_doc(ui_db, doc_ref) -> None:
@@ -1197,14 +1272,10 @@ def projects_handler() -> flask_response:
           filter=firestore.FieldFilter('createdBy', '==', identity)
       )
     projects = [
-        util_database.firestore_to_json_serialisable(
-            _read_project_doc(
-                collection.document(snapshot.id),
-                snapshot,
-                first_scene_only=True,
-            )
+        util_database.firestore_to_json_serialisable(project)
+        for project in _read_project_list_docs(
+            ui_db, collection, list(query.stream())
         )
-        for snapshot in query.stream()
     ]
     return _json_response({'projects': projects})
   # POST: full ProjectConfig, client uuid id accepted (setDoc parity).
@@ -1382,7 +1453,21 @@ def spa_handler(path: str = '') -> flask_response:
     )
   candidate = safe_join(str(_SPA_DIR), path) if path else None
   if candidate and os.path.isfile(candidate):
-    return send_from_directory(_SPA_DIR, path)
+    response = send_from_directory(_SPA_DIR, path)
+    # Angular's production application builder emits root-level assets as
+    # main-XXXXXXXX.js, chunk-XXXXXXXX.js, and styles-XXXXXXXX.css. Only these
+    # content-fingerprinted files are safe to cache for a year: the SPA entry
+    # point and other static paths must remain revalidated.
+    is_fingerprinted_asset = (
+        re.fullmatch(
+            r'(?:main|polyfills|chunk)-[A-Z0-9]{8}\.js|styles-[A-Z0-9]{8}\.css',
+            path,
+        )
+        is not None
+    )
+    if is_fingerprinted_asset:
+      response.headers['Cache-Control'] = 'private, max-age=31536000, immutable'
+    return response
   return send_from_directory(_SPA_DIR, 'index.html')
 
 

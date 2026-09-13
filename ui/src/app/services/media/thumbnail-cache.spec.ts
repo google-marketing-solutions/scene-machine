@@ -47,6 +47,7 @@ describe.sequential('MediaCacheEngine thumbnail policy', () => {
   let resolveMock: ReturnType<
     typeof vi.fn<(file: MediaRef | null | undefined) => Promise<string>>
   >;
+  let signUrlsMock: ReturnType<typeof vi.fn>;
   let service: ThumbnailCacheService;
 
   beforeEach(() => {
@@ -55,10 +56,18 @@ describe.sequential('MediaCacheEngine thumbnail policy', () => {
     resolveMock = vi
       .fn<(file: MediaRef | null | undefined) => Promise<string>>()
       .mockResolvedValue('https://signed.example/a.webp');
+    signUrlsMock = vi.fn().mockImplementation(async (paths: string[]) => {
+      return new Map(
+        paths.map(path => [path, 'https://signed.example/a.webp']),
+      );
+    });
     TestBed.configureTestingModule({
       providers: [
         ThumbnailCacheService,
-        {provide: MediaService, useValue: {resolve: resolveMock}},
+        {
+          provide: MediaService,
+          useValue: {resolve: resolveMock, signUrls: signUrlsMock},
+        },
       ],
     });
     vi.stubGlobal('caches', {open: vi.fn().mockResolvedValue(cache)});
@@ -89,14 +98,91 @@ describe.sequential('MediaCacheEngine thumbnail policy', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     first.release();
     resolveMock.mockClear();
+    signUrlsMock.mockClear();
     fetchMock.mockClear();
 
     const second = await service.acquire(scope, file);
 
     expect(resolveMock).not.toHaveBeenCalled();
+    expect(signUrlsMock).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(second.url).toBe('blob:thumbnail');
     second.release();
+  });
+
+  it('coalesces concurrent cold-miss signing after the cache probe', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      response(new Uint8Array([url.length])),
+    );
+
+    const first = service.acquire(scope, {path: 'thumbnails/first.webp'});
+    const second = service.acquire(scope, {path: 'thumbnails/second.webp'});
+    await Promise.all([first, second]);
+
+    expect(signUrlsMock).toHaveBeenCalledTimes(1);
+    expect(signUrlsMock).toHaveBeenCalledWith([
+      'thumbnails/first.webp',
+      'thumbnails/second.webp',
+    ]);
+  });
+
+  it('coalesces cache misses that finish on nearby task turns', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      response(new Uint8Array([url.length])),
+    );
+    vi.spyOn(cache, 'match').mockImplementation(async request => {
+      const delay = request.url.includes('second.webp') ? 5 : 0;
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return undefined;
+    });
+
+    const first = service.acquire(scope, {path: 'thumbnails/first.webp'});
+    const second = service.acquire(scope, {path: 'thumbnails/second.webp'});
+    await Promise.all([first, second]);
+
+    expect(signUrlsMock).toHaveBeenCalledTimes(1);
+    expect(signUrlsMock).toHaveBeenCalledWith([
+      'thumbnails/first.webp',
+      'thumbnails/second.webp',
+    ]);
+  });
+
+  it('splits a large cold-miss set at the signUrl endpoint limit', async () => {
+    fetchMock.mockImplementation(async (url: string) =>
+      response(new Uint8Array([url.length])),
+    );
+    const acquisitions = Array.from({length: 101}, (_, index) =>
+      service.acquire(scope, {path: `thumbnails/${index}.webp`}),
+    );
+
+    const leases = await Promise.all(acquisitions);
+
+    expect(signUrlsMock).toHaveBeenCalledTimes(2);
+    expect(signUrlsMock.mock.calls[0][0]).toHaveLength(100);
+    expect(signUrlsMock.mock.calls[1][0]).toHaveLength(1);
+    leases.forEach(lease => lease.release());
+  });
+
+  it('recovers from omitted paths and failed signUrl batches', async () => {
+    signUrlsMock.mockResolvedValueOnce(new Map());
+    const omitted = await service.acquire(scope, {
+      path: 'thumbnails/omitted.webp',
+    });
+    expect(omitted.url).toBe('https://signed.example/a.webp');
+    omitted.release();
+
+    signUrlsMock.mockRejectedValueOnce(new Error('temporary failure'));
+    const failed = await service.acquire(scope, {
+      path: 'thumbnails/failed.webp',
+    });
+    expect(failed.url).toBe('https://signed.example/a.webp');
+    failed.release();
+
+    const recovered = await service.acquire(scope, {
+      path: 'thumbnails/failed.webp',
+    });
+    expect(recovered.url).toBe('https://signed.example/a.webp');
+    recovered.release();
   });
 
   it('keeps bucket, project, and path keys isolated', async () => {
@@ -243,10 +329,14 @@ describe.sequential('MediaCacheEngine thumbnail policy', () => {
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
     fetchMock.mockResolvedValue(response(new Uint8Array([1])));
     const engine = createService();
-    const first = await engine.acquire(scope, file);
+    const firstPromise = engine.acquire(scope, file);
+    await vi.advanceTimersByTimeAsync(10);
+    const first = await firstPromise;
     first.release();
-    vi.setSystemTime(new Date('2026-01-08T00:00:00Z'));
-    const second = await engine.acquire(scope, file);
+    await vi.advanceTimersByTimeAsync(7 * 24 * 60 * 60 * 1000 + 1);
+    const secondPromise = engine.acquire(scope, file);
+    await vi.advanceTimersByTimeAsync(10);
+    const second = await secondPromise;
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     second.release();

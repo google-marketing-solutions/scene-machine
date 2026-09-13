@@ -15,10 +15,14 @@
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import {HttpClient} from '@angular/common/http';
+import {HttpClient, provideHttpClient} from '@angular/common/http';
+import {
+  HttpTestingController,
+  provideHttpClientTesting,
+} from '@angular/common/http/testing';
 import {TestBed} from '@angular/core/testing';
 import {of, Subject, throwError} from 'rxjs';
-import {beforeEach, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {MediaService} from './media';
 
 interface SignUrlResponse {
@@ -292,5 +296,225 @@ describe('MediaService', () => {
       await expect(service.resolve({})).resolves.toBe('');
       expect(httpClientMock.get).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('MediaService signUrls request-target bounds', () => {
+  let service: MediaService;
+  let http: HttpTestingController;
+
+  beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        MediaService,
+      ],
+    });
+    service = TestBed.inject(MediaService);
+    http = TestBed.inject(HttpTestingController);
+  });
+
+  afterEach(() => http.verify());
+
+  it('splits long escaped paths before the relative request URL exceeds 3500 chars', async () => {
+    const paths = Array.from(
+      {length: 4},
+      (_, index) =>
+        `remix-input/project-${index}/candidate/${'take '.repeat(120)}clip-${index}.mp4`,
+    );
+    const resultPromise = service.signUrls(paths);
+    const requests = http.match(request =>
+      request.urlWithParams.startsWith('/api/signUrl?'),
+    );
+
+    expect(requests.length).toBe(2);
+    for (const request of requests) {
+      expect(request.request.urlWithParams.length).toBeLessThanOrEqual(3500);
+      const requestPaths = new URL(
+        request.request.urlWithParams,
+        'https://test.invalid',
+      ).searchParams.getAll('path');
+      request.flush({
+        urls: Object.fromEntries(
+          requestPaths.map((path, index) => [
+            path,
+            `https://signed.test/${index}`,
+          ]),
+        ),
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+    }
+
+    const result = await resultPromise;
+    expect(result.size).toBe(paths.length);
+  });
+
+  it('limits each multi-path request to 100 paths', async () => {
+    const paths = Array.from(
+      {length: 101},
+      (_, index) => `videos/${index}.mp4`,
+    );
+    const resultPromise = service.signUrls(paths);
+    const requests = http.match(request =>
+      request.urlWithParams.startsWith('/api/signUrl?'),
+    );
+
+    expect(requests.length).toBe(2);
+    for (const request of requests) {
+      const requestPaths = new URL(
+        request.request.urlWithParams,
+        'https://test.invalid',
+      ).searchParams.getAll('path');
+      expect(requestPaths.length).toBeLessThanOrEqual(100);
+      request.flush({
+        urls: Object.fromEntries(
+          requestPaths.map(path => [path, `https://signed.test/${path}`]),
+        ),
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+    }
+
+    const result = await resultPromise;
+    expect(result.size).toBe(paths.length);
+  });
+
+  it('keeps one oversized path as a single request', async () => {
+    const path = `remix-input/project/candidate/${'take '.repeat(600)}clip.mp4`;
+    const resultPromise = service.signUrls([path]);
+    const request = http.expectOne(
+      '/api/signUrl?' + `path=${encodeURIComponent(path)}`,
+    );
+
+    expect(request.request.urlWithParams.length).toBeGreaterThan(3500);
+    request.flush({
+      urls: {[path]: 'https://signed.test/oversized'},
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    });
+
+    await expect(resultPromise).resolves.toEqual(
+      new Map([[path, 'https://signed.test/oversized']]),
+    );
+  });
+
+  it('round-trips Unicode object paths while enforcing the encoded URL bound', async () => {
+    const paths = Array.from(
+      {length: 3},
+      (_, index) =>
+        `remix-input/projekt-${index}/🎬/${'über café '.repeat(80)}clip-${index}.mp4`,
+    );
+    const resultPromise = service.signUrls(paths);
+    const requests = http.match(request =>
+      request.urlWithParams.startsWith('/api/signUrl?'),
+    );
+
+    expect(requests.length).toBe(3);
+    for (const path of paths) {
+      expect(new TextEncoder().encode(path).length).toBeLessThanOrEqual(1024);
+    }
+    const requestedPaths: string[] = [];
+    for (const request of requests) {
+      expect(request.request.urlWithParams.length).toBeLessThanOrEqual(3500);
+      const decodedPaths = new URL(
+        request.request.urlWithParams,
+        'https://test.invalid',
+      ).searchParams.getAll('path');
+      requestedPaths.push(...decodedPaths);
+      request.flush({
+        urls: Object.fromEntries(
+          decodedPaths.map(path => [path, `https://signed.test/${path}`]),
+        ),
+        expiresAt: '2099-01-01T00:00:00.000Z',
+      });
+    }
+
+    expect(requestedPaths).toEqual(paths);
+    const result = await resultPromise;
+    expect(result.size).toBe(paths.length);
+  });
+
+  it('joins signUrl to a later chunk and preserves omission as a per-path rejection', async () => {
+    const paths = Array.from(
+      {length: 101},
+      (_, index) => `videos/${index}.mp4`,
+    );
+    const batchPromise = service.signUrls(paths);
+    const requests = http.match(request =>
+      request.urlWithParams.startsWith('/api/signUrl?'),
+    );
+    expect(requests.length).toBe(2);
+    const laterPath = paths[100];
+    const joinedPromise = service.signUrl(laterPath);
+    const joinedRejection = expect(joinedPromise).rejects.toThrow(
+      `No signed URL returned for ${laterPath}`,
+    );
+
+    const firstPaths = new URL(
+      requests[0].request.urlWithParams,
+      'https://test.invalid',
+    ).searchParams.getAll('path');
+    requests[0].flush({
+      urls: Object.fromEntries(
+        firstPaths.map(path => [path, `https://signed.test/${path}`]),
+      ),
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    });
+    const laterRequestPaths = new URL(
+      requests[1].request.urlWithParams,
+      'https://test.invalid',
+    ).searchParams.getAll('path');
+    requests[1].flush({
+      urls: {},
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    });
+
+    const batchResult = await batchPromise;
+    expect(batchResult.size).toBe(100);
+    await joinedRejection;
+    expect(laterRequestPaths).toEqual([laterPath]);
+    expect(http.match(() => true)).toHaveLength(0);
+  });
+
+  it('cleans up a failed chunk so it can retry while a successful chunk stays cached', async () => {
+    const paths = Array.from(
+      {length: 101},
+      (_, index) => `videos/${index}.mp4`,
+    );
+    const batchPromise = service.signUrls(paths);
+    const requests = http.match(request =>
+      request.urlWithParams.startsWith('/api/signUrl?'),
+    );
+    expect(requests.length).toBe(2);
+    const firstPaths = new URL(
+      requests[0].request.urlWithParams,
+      'https://test.invalid',
+    ).searchParams.getAll('path');
+    requests[0].flush({
+      urls: Object.fromEntries(
+        firstPaths.map(path => [path, `https://signed.test/${path}`]),
+      ),
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    });
+    requests[1].flush('temporarily unavailable', {
+      status: 503,
+      statusText: 'Service Unavailable',
+    });
+
+    await expect(batchPromise).rejects.toThrow();
+    await expect(service.signUrl(paths[0])).resolves.toBe(
+      `https://signed.test/${paths[0]}`,
+    );
+
+    const retryPromise = service.signUrl(paths[100]);
+    const retryRequest = http.expectOne(
+      '/api/signUrl?' + `path=${encodeURIComponent(paths[100])}`,
+    );
+    retryRequest.flush({
+      urls: {[paths[100]]: `https://signed.test/${paths[100]}`},
+      expiresAt: '2099-01-01T00:00:00.000Z',
+    });
+    await expect(retryPromise).resolves.toBe(
+      `https://signed.test/${paths[100]}`,
+    );
   });
 });

@@ -98,13 +98,25 @@ project.
 
 The browser may cache selected or hovered candidate videos locally for up to
 seven days to make scene switching faster: up to 64 MiB per video and 512 MiB
-total (at most 64 videos). Homepage and storyboard thumbnails
+total (at most 64 videos). Composition reuses these cached clips when available;
+uncached clips still stream normally instead of waiting for a full download.
+Homepage, storyboard and composition thumbnails
 use a separate cache: up to 1 MiB per image and 64 MiB total (at most 1,024
 images), with the same seven-day expiry. Images near the visible area load
 ahead; offscreen images wait until needed. The homepage shows images only,
 with a static placeholder when no image is available; it never loads videos.
 Changing the selected candidate uses its own thumbnail, not the old selection's
 cached image. Oversized images still display using their original URL.
+Cached thumbnails do not need a new signed-URL request. Nearby images that
+are not cached share batched signing requests as they come into view.
+
+Versioned application JavaScript and CSS also use long-lived private browser
+caching. The HTML entry point remains revalidated so a reload discovers new
+application versions; project data and announcements keep their existing
+freshness policies.
+Successful project reads and text-based application assets support gzip
+compression to reduce transferred bytes; this does not make project data public
+or change when edits become visible.
 
 This is bounded, best-effort browser storage: browsers may evict it earlier,
 it does not provide offline project access, and it is not a remote security

@@ -141,6 +141,232 @@ describe('CandidateVideoCacheService', () => {
     second.release();
   });
 
+  it('returns a warm cached lease without resolving or fetching', async () => {
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
+    fetchMock.mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: {'content-type': 'video/mp4'},
+      }),
+    );
+    const scope = {bucket: 'bucket-a', projectId: 'project-a'};
+    const file = {path: 'videos/a.mp4'};
+    const first = await service.acquire(scope, file, true);
+    first.release();
+    mediaServiceMock.resolve.mockClear();
+    fetchMock.mockClear();
+
+    const cached = await service.acquireCached(scope, file);
+
+    expect(cached?.url).toBe('blob:lease');
+    expect(mediaServiceMock.resolve).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    cached?.release();
+  });
+
+  it('returns null for a missing or pathless reference without resolving or fetching', async () => {
+    const missing = await service.acquireCached(
+      {bucket: 'bucket-a', projectId: 'project-a'},
+      {path: 'videos/missing.mp4'},
+    );
+    const pathless = await service.acquireCached(
+      {bucket: 'bucket-a', projectId: 'project-a'},
+      {url: 'https://legacy.example/video.mp4'},
+    );
+
+    expect(missing).toBeNull();
+    expect(pathless).toBeNull();
+    expect(mediaServiceMock.resolve).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('does not wait for a cold acquisition already downloading the same path', async () => {
+    let releaseFetch!: (response: Response) => void;
+    fetchMock.mockReturnValue(
+      new Promise<Response>(resolve => (releaseFetch = resolve)),
+    );
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
+    const scope = {bucket: 'bucket-a', projectId: 'project-a'};
+    const file = {path: 'videos/a.mp4'};
+    const cold = service.acquire(scope, file, true);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    const cached = await service.acquireCached(scope, file);
+
+    expect(cached).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    releaseFetch(
+      new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: {'content-type': 'video/mp4'},
+      }),
+    );
+    (await cold).release();
+  });
+
+  it('returns null for an expired entry without refreshing it', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
+    fetchMock.mockResolvedValue(
+      new Response(new Uint8Array([1]), {status: 200}),
+    );
+    const scope = {bucket: 'bucket-a', projectId: 'project-a'};
+    const file = {path: 'videos/a.mp4'};
+    const first = await service.acquire(scope, file, true);
+    first.release();
+    mediaServiceMock.resolve.mockClear();
+    fetchMock.mockClear();
+    vi.setSystemTime(new Date(Date.now() + CACHE_TTL_MS));
+
+    const cached = await service.acquireCached(scope, file);
+
+    expect(cached).toBeNull();
+    expect(mediaServiceMock.resolve).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns null for a corrupt cached response without resolving or fetching', async () => {
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
+    fetchMock.mockResolvedValue(
+      new Response(new Uint8Array([1]), {status: 200}),
+    );
+    const scope = {bucket: 'bucket-a', projectId: 'project-a'};
+    const file = {path: 'videos/a.mp4'};
+    const first = await service.acquire(scope, file, true);
+    first.release();
+    const key = [...cache.values.keys()][0];
+    cache.values.set(
+      key,
+      new Response(new Uint8Array([1]), {
+        status: 200,
+        headers: {
+          'content-length': '1',
+          'x-scene-machine-cached-at': 'not-a-timestamp',
+          'x-scene-machine-cached-size': '1',
+        },
+      }),
+    );
+    mediaServiceMock.resolve.mockClear();
+    fetchMock.mockClear();
+
+    const cached = await service.acquireCached(scope, file);
+
+    expect(cached).toBeNull();
+    expect(mediaServiceMock.resolve).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns null for a non-complete cached response without resolving or fetching', async () => {
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
+    fetchMock.mockResolvedValue(
+      new Response(new Uint8Array([1]), {status: 200}),
+    );
+    const scope = {bucket: 'bucket-a', projectId: 'project-a'};
+    const file = {path: 'videos/a.mp4'};
+    const first = await service.acquire(scope, file, true);
+    first.release();
+    const key = [...cache.values.keys()][0];
+    cache.values.set(
+      key,
+      new Response(new Uint8Array([1]), {
+        status: 206,
+        headers: {
+          'content-length': '1',
+          'x-scene-machine-cached-at': String(Date.now()),
+          'x-scene-machine-cached-size': '1',
+        },
+      }),
+    );
+    mediaServiceMock.resolve.mockClear();
+    fetchMock.mockClear();
+
+    const cached = await service.acquireCached(scope, file);
+
+    expect(cached).toBeNull();
+    expect(mediaServiceMock.resolve).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns null when Cache Storage is unavailable', async () => {
+    vi.stubGlobal('caches', {
+      open: vi.fn().mockRejectedValue(new Error('unavailable')),
+    });
+    mediaServiceMock.resolve.mockClear();
+    fetchMock.mockClear();
+
+    const cached = await service.acquireCached(
+      {bucket: 'bucket-a', projectId: 'project-a'},
+      {path: 'videos/a.mp4'},
+    );
+
+    expect(cached).toBeNull();
+    expect(mediaServiceMock.resolve).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a cached read that becomes stale during the await', async () => {
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
+    fetchMock.mockResolvedValue(
+      new Response(new Uint8Array([1]), {status: 200}),
+    );
+    const scope = {bucket: 'bucket-a', projectId: 'project-a'};
+    const file = {path: 'videos/a.mp4'};
+    const first = await service.acquire(scope, file, true);
+    first.release();
+    const originalMatch = cache.match.bind(cache);
+    let releaseMatch!: () => void;
+    const matchGate = new Promise<void>(resolve => (releaseMatch = resolve));
+    vi.spyOn(cache, 'match').mockImplementation(async request => {
+      await matchGate;
+      return originalMatch(request);
+    });
+
+    const cachedPromise = service.acquireCached(scope, file);
+    await vi.waitFor(() => expect(cache.match).toHaveBeenCalled());
+    const invalidation = service.invalidateCandidate(
+      scope.projectId,
+      file.path,
+    );
+    releaseMatch();
+
+    expect(await cachedPromise).toBeNull();
+    await invalidation;
+  });
+
+  it('shares a warm cached lease across concurrent lookups and revokes after both releases', async () => {
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
+    fetchMock.mockResolvedValue(
+      new Response(new Uint8Array([1]), {status: 200}),
+    );
+    const scope = {bucket: 'bucket-a', projectId: 'project-a'};
+    const file = {path: 'videos/a.mp4'};
+    const first = await service.acquire(scope, file, true);
+    first.release();
+    fetchMock.mockClear();
+    mediaServiceMock.resolve.mockClear();
+    vi.mocked(URL.createObjectURL).mockClear();
+    vi.mocked(URL.revokeObjectURL).mockClear();
+
+    const otherService = TestBed.runInInjectionContext(
+      () => new CandidateVideoCacheService(),
+    );
+    const [firstCached, secondCached] = await Promise.all([
+      otherService.acquireCached(scope, file),
+      otherService.acquireCached(scope, file),
+    ]);
+
+    expect(firstCached?.url).toBe('blob:lease');
+    expect(secondCached?.url).toBe('blob:lease');
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mediaServiceMock.resolve).not.toHaveBeenCalled();
+    firstCached?.release();
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    secondCached?.release();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:lease');
+  });
+
   it('discards cache entries with invalid metadata before fetching fresh bytes', async () => {
     cache.values.set(
       'http://localhost:3000/__scene_machine_candidate_video_cache__/v1/bucket-a/project-a/videos/a.mp4',

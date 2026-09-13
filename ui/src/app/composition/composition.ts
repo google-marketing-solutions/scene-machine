@@ -19,8 +19,10 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
   effect,
   ElementRef,
+  afterRenderEffect,
   inject,
   linkedSignal,
   signal,
@@ -44,8 +46,14 @@ import {
 } from '../services/config/config';
 import {MediaRef, MediaService} from '../services/media/media';
 import {MediaSrcPipe} from '../services/media/media-src.pipe';
+import {
+  CandidateCacheScope,
+  CandidateVideoCacheService,
+  CandidateVideoLease,
+} from '../services/media/candidate-video-cache';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {EditableProjectTitle} from '../shared/editable-project-title/editable-project-title';
+import {ThumbnailImageDirective} from '../shared/thumbnail-image/thumbnail-image.directive';
 import {AudioUploadDialog} from './audio-upload-dialog/audio-upload-dialog';
 import {ImageUploadDialog} from './image-upload-dialog/image-upload-dialog';
 import {TransitionModal} from './transition-modal/transition-modal';
@@ -77,6 +85,7 @@ export interface SceneTiming {
     MatSliderModule,
     MatTooltipModule,
     MediaSrcPipe,
+    ThumbnailImageDirective,
     TransitionModal,
     EditableProjectTitle,
   ],
@@ -88,6 +97,8 @@ export class Composition {
   configService = inject(ConfigService);
   private remixEngineService = inject(RemixEngineService);
   private mediaService = inject(MediaService);
+  private candidateVideoCache = inject(CandidateVideoCacheService);
+  private destroyRef = inject(DestroyRef);
   private dialog = inject(MatDialog);
 
   combiningScenes = this.remixEngineService.combiningScenes;
@@ -227,90 +238,70 @@ export class Composition {
   );
 
   currentClipSourceReady = computed(() => {
-    const ref = this.currentVideoSrc();
-    if (!ref) return false;
-    const resolved = this.syncVideoSrc(ref);
-    const heldSrc = this.heldVideoSrc();
-    return resolved !== undefined && heldSrc === resolved;
+    return this.sourceReady() && !!this.heldVideoSrc();
   });
 
-  // The URL string bound to the player's [src]. Computed synchronously
-  // whenever the URL needs no I/O (a warm signed-URL cache hit), so it is
-  // available in the same
-  // change-detection pass that computes the playlist — the exact timing the
-  // impure mediaSrc pipe gave this binding at baseline. On a cache miss the
-  // previous URL is held (never reset to null; stale-while-revalidate)
-  // while the constructor effect below resolves the new one, so cross-clip
-  // seeks never tear the <video> element down mid-resolve. Scoped to the
-  // composition player only — the mediaSrc pipe used elsewhere is
-  // unchanged.
+  // The URL string bound to the player's [src]. The active cache-only lookup
+  // resolves asynchronously; while it is pending, the previous URL is held
+  // (never reset to null; stale-while-revalidate) so cross-clip seeks do not
+  // tear the <video> element down mid-resolve. Scoped to the Composition
+  // player only — the mediaSrc pipe used elsewhere is unchanged.
   heldVideoSrc = linkedSignal<MediaRef | '' | undefined, string | null>({
     source: () => this.currentVideoSrc(),
     computation: (ref, previous) => {
       if (!ref) {
         return null;
       }
-      const synchronous = this.syncVideoSrc(ref);
-      if (synchronous !== undefined) {
-        return synchronous;
-      }
       // Cache miss: hold the previous src while the constructor effect
-      // resolves the new one.
+      // resolves the new one. Path-less legacy refs are still assigned by the
+      // source effect below, preserving their direct-URL behavior.
       return previous?.value ?? null;
     },
   });
 
-  /**
-   * Resolves a media ref to a player src without I/O where that is possible:
-   * the cached signed URL for the path, or the stored URL for path-less
-   * legacy refs. Returns undefined when only `MediaService.resolve`'s async
-   * fetch (signing the path via /api/signUrl) can produce the URL.
-   */
-  private syncVideoSrc(ref: MediaRef): string | null | undefined {
-    if (!ref.path) {
-      // Path-less legacy ref: fall back to the stored URL.
-      return ref.url ?? null;
-    }
-    return this.mediaService.getCachedUrl(ref.path);
-  }
+  private sourceReady = signal(false);
+  private sourceEpoch = 0;
+  private activeSourceKey = '';
+  private activeVideoLease: CandidateVideoLease | undefined;
+  private retiringVideoLeases = new Set<CandidateVideoLease>();
 
   constructor() {
-    // Pre-warm the signed-URL cache for every playlist entry with one batch
-    // request, so cross-clip seeks resolve the new src synchronously from
-    // the cache in the same change-detection pass.
-    effect(() => {
-      const paths = this.playlist()
-        .map(item => item.video?.path)
-        .filter((path): path is string => !!path);
-      if (paths.length === 0) {
-        return;
-      }
-      void this.mediaService.signUrls(paths).catch((error: unknown) => {
-        // Best-effort: the held-src effect below re-signs the current clip
-        // on demand, so playback recovers per clip.
-        console.error('Failed to pre-sign playlist video URLs', error);
-      });
+    afterRenderEffect({
+      read: () => {
+        // Track both signals: a source can change while the old URL is held,
+        // and a cache lease can resolve to the same URL as its predecessor.
+        this.heldVideoSrc();
+        this.sourceReady();
+        this.releaseRetiringLeasesAfterRender();
+      },
     });
 
-    // Resolve current-clip cache misses (heldVideoSrc holds the previous
-    // src meanwhile). Delegates to MediaService.resolve, which signs the path
-    // via /api/signUrl (deduped against the pre-warm batch above).
+    // Resolve only the active clip. A cache miss falls back to the existing
+    // signed URL so the browser can stream instead of waiting for a complete
+    // video download before first play.
     effect(() => {
       const ref = this.currentVideoSrc();
-      if (!ref || this.syncVideoSrc(ref) !== undefined) {
+      const scope = this.candidateCacheScope();
+      const key = this.sourceKey(scope, ref);
+      if (key === this.activeSourceKey) return;
+
+      this.activeSourceKey = key;
+      const epoch = ++this.sourceEpoch;
+      this.sourceReady.set(false);
+      if (!ref) {
+        this.retireVideoLease(this.activeVideoLease);
+        this.activeVideoLease = undefined;
+        this.heldVideoSrc.set(null);
         return;
       }
-      void this.mediaService
-        .resolve(ref)
-        .then(url => {
-          // Only apply if this clip is still the current one.
-          if (this.currentVideoSrc() === ref) {
-            this.heldVideoSrc.set(url || null);
-          }
-        })
-        .catch((error: unknown) => {
-          console.error(`Failed to resolve video src for ${ref.path}`, error);
-        });
+
+      this.retireVideoLease(this.activeVideoLease);
+      this.activeVideoLease = undefined;
+      if (!ref.path) {
+        this.setResolvedSource(epoch, key, ref.url ?? null);
+        return;
+      }
+      void this.resolveCurrentSource(epoch, key, scope, ref);
     });
 
     effect(() => {
@@ -318,7 +309,7 @@ export class Composition {
       const playing = this.isPlaying();
       const video = this.videoElement()?.nativeElement;
 
-      if (video && src) {
+      if (video && src && this.currentClipSourceReady()) {
         if (playing) {
           this.startPlaybackLoop();
           video.play().catch(err => {
@@ -331,9 +322,123 @@ export class Composition {
           this.stopPlaybackLoop();
           video.pause();
         }
+      } else if (video && !this.currentClipSourceReady()) {
+        this.stopPlaybackLoop();
+        video.pause();
       }
     });
+
+    this.destroyRef.onDestroy(() => {
+      this.destroyed = true;
+      this.sourceEpoch++;
+      this.activeSourceKey = '';
+      this.activeVideoLease?.release();
+      this.activeVideoLease = undefined;
+      for (const lease of this.retiringVideoLeases) {
+        lease.release();
+      }
+      this.retiringVideoLeases.clear();
+      this.stopPlaybackLoop();
+    });
   }
+
+  readonly candidateCacheScope = computed<CandidateCacheScope | null>(() => {
+    const projectId = this.configService.projectConfig.value().id;
+    const bucket = this.configService.globalConfig.value()?.gcsBucket;
+    return bucket && projectId ? {bucket, projectId} : null;
+  });
+
+  private sourceKey(
+    scope: CandidateCacheScope | null,
+    ref: MediaRef | '' | undefined,
+  ): string {
+    if (!ref) return '';
+    const identity = ref.path || ref.url || '';
+    return `${scope?.bucket || ''}\0${scope?.projectId || ''}\0${identity}`;
+  }
+
+  private async resolveCurrentSource(
+    epoch: number,
+    key: string,
+    scope: CandidateCacheScope | null,
+    ref: MediaRef,
+  ): Promise<void> {
+    if (scope) {
+      try {
+        const lease = await this.candidateVideoCache.acquireCached(scope, ref);
+        if (lease) {
+          if (!this.isCurrentSource(epoch, key)) {
+            lease.release();
+            return;
+          }
+          this.activeVideoLease = lease;
+          this.heldVideoSrc.set(lease.url);
+          this.sourceReady.set(true);
+          return;
+        }
+      } catch {
+        // Cache Storage is an optional optimization; continue with streaming.
+      }
+    }
+
+    try {
+      const url = await this.mediaService.resolve(ref);
+      this.setResolvedSource(epoch, key, url || null);
+    } catch (error: unknown) {
+      if (this.isCurrentSource(epoch, key)) {
+        console.error(`Failed to resolve video src for ${ref.path}`, error);
+      }
+    }
+  }
+
+  private setResolvedSource(
+    epoch: number,
+    key: string,
+    url: string | null,
+  ): void {
+    if (!this.isCurrentSource(epoch, key)) return;
+    this.heldVideoSrc.set(url);
+    this.sourceReady.set(!!url);
+  }
+
+  private retireVideoLease(lease: CandidateVideoLease | undefined): void {
+    if (!lease) return;
+    this.retiringVideoLeases.add(lease);
+  }
+
+  /** Release retired object URLs once the replacement is reflected in the DOM. */
+  private releaseRetiringLeasesAfterRender(): void {
+    if (this.destroyed || this.retiringVideoLeases.size === 0) return;
+    const video = this.videoElement()?.nativeElement;
+    if (!video) {
+      for (const lease of this.retiringVideoLeases) lease.release();
+      this.retiringVideoLeases.clear();
+      return;
+    }
+    // `src` reflects Angular's bound attribute even while the browser is still
+    // loading it; `currentSrc` can remain on the old resource until then.
+    const renderedSrc = video.src || '';
+    const activeLease = this.activeVideoLease;
+    for (const lease of this.retiringVideoLeases) {
+      const replaced = activeLease
+        ? activeLease !== lease && renderedSrc === activeLease.url
+        : renderedSrc !== lease.url;
+      if (replaced) {
+        lease.release();
+        this.retiringVideoLeases.delete(lease);
+      }
+    }
+  }
+
+  private isCurrentSource(epoch: number, key: string): boolean {
+    return (
+      !this.destroyed &&
+      epoch === this.sourceEpoch &&
+      key === this.activeSourceKey
+    );
+  }
+
+  private destroyed = false;
 
   private playbackFrameId: number | null = null;
 
@@ -408,24 +513,55 @@ export class Composition {
   }
 
   playNext(): void {
+    const previousItem = this.playlist()[this.currentPlaylistIndex()];
     const nextIndex = this.currentPlaylistIndex() + 1;
     if (nextIndex < this.playlist().length) {
       this.currentPlaylistIndex.set(nextIndex);
+      const nextItem = this.playlist()[nextIndex];
+      const video = this.videoElement()?.nativeElement;
+      if (
+        video &&
+        this.currentClipSourceReady() &&
+        this.haveSameSource(previousItem?.video, nextItem?.video)
+      ) {
+        // Advancing between trims of one source does not reload <video>, so
+        // there is no metadata event to move it to the next trim's start.
+        this.pendingSeekOffset = 0;
+        video.currentTime = nextItem.start;
+      }
     } else {
       // End of playlist
       this.isPlaying.set(false);
       this.currentPlaylistIndex.set(0); // Reset to start
       const video = this.videoElement()?.nativeElement;
-      if (video) video.pause();
+      if (video) {
+        video.pause();
+        const firstItem = this.playlist()[0];
+        if (
+          this.currentClipSourceReady() &&
+          this.haveSameSource(previousItem?.video, firstItem?.video)
+        ) {
+          this.pendingSeekOffset = 0;
+          video.currentTime = firstItem.start;
+        }
+      }
     }
   }
 
-  onTimeUpdate(): void {
+  onTimeUpdate(event?: Event): void {
     const video = this.videoElement()?.nativeElement;
     const currentIndex = this.currentPlaylistIndex();
 
     // Ignore updates if video is not ready, is seeking, or we've already moved on
-    if (!video || video.seeking || video.readyState < 2) return;
+    if (
+      !video ||
+      (event && event.target !== video) ||
+      !this.currentClipSourceReady() ||
+      !this.isActiveVideoElementSource(video) ||
+      video.seeking ||
+      video.readyState < 2
+    )
+      return;
 
     const currentItem = this.playlist()[currentIndex];
     if (!currentItem) return;
@@ -457,9 +593,15 @@ export class Composition {
    */
   private pendingSeekOffset = 0;
 
-  onVideoLoadedMetadata(): void {
+  onVideoLoadedMetadata(event?: Event): void {
     const video = this.videoElement()?.nativeElement;
-    if (!video) return;
+    if (
+      !video ||
+      (event && event.target !== video) ||
+      !this.currentClipSourceReady() ||
+      !this.isActiveVideoElementSource(video)
+    )
+      return;
 
     const playlist = this.playlist();
     const index = this.currentPlaylistIndex();
@@ -472,6 +614,13 @@ export class Composition {
         video.currentTime = target;
       }
     }
+  }
+
+  private isActiveVideoElementSource(video: HTMLVideoElement): boolean {
+    const expected = this.heldVideoSrc();
+    if (!expected) return false;
+    const actual = video.currentSrc || video.src;
+    return !actual || actual === expected;
   }
 
   seek(event: Event): void {
@@ -507,6 +656,16 @@ export class Composition {
           // Same clip already loaded: seek directly, no reload coming.
           this.pendingSeekOffset = 0;
           video.currentTime = item.start + timeInClip;
+        } else if (
+          this.currentClipSourceReady() &&
+          this.haveSameSource(this.playlist()[previousIndex]?.video, item.video)
+        ) {
+          // Two playlist entries can intentionally refer to the same source
+          // with different trims or audio intent. No src change means no
+          // metadata event will apply pendingSeekOffset; seek the shared
+          // element directly instead.
+          this.pendingSeekOffset = 0;
+          video.currentTime = item.start + timeInClip;
         } else {
           // Different clip: the [src] swap reloads the <video> and fires
           // onVideoLoadedMetadata; stash the within-clip offset so it restores
@@ -515,6 +674,16 @@ export class Composition {
         }
       }
     }
+  }
+
+  private haveSameSource(
+    first: MediaRef | undefined,
+    second: MediaRef | undefined,
+  ): boolean {
+    return (
+      this.sourceKey(this.candidateCacheScope(), first) ===
+      this.sourceKey(this.candidateCacheScope(), second)
+    );
   }
 
   /**
