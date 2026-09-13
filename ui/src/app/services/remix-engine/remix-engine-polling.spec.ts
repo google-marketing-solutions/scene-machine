@@ -164,7 +164,11 @@ describe('RemixEngineService polling scheduler', () => {
   it('drains a 122-job backlog before restoring three-second cadence', async () => {
     vi.useFakeTimers();
     const started: Array<{executionId: string; at: number}> = [];
-    const heldExecutions = new Set(['workflow-119', 'workflow-120', 'workflow-121']);
+    const heldExecutions = new Set([
+      'workflow-119',
+      'workflow-120',
+      'workflow-121',
+    ]);
     let allowTerminalResponses = false;
     const origin = Date.now();
     httpClientMock.get.mockImplementation((url: string) => {
@@ -172,7 +176,8 @@ describe('RemixEngineService polling scheduler', () => {
         'executionId',
       )!;
       started.push({executionId, at: Date.now()});
-      const terminal = allowTerminalResponses && !heldExecutions.has(executionId);
+      const terminal =
+        allowTerminalResponses && !heldExecutions.has(executionId);
       return of(terminal ? {sink: {output: {done: true}}} : {sink: {}});
     });
 
