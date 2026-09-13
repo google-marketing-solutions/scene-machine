@@ -1212,7 +1212,11 @@ def _read_project_doc(doc_ref, snapshot=None):
   return data
 
 
-def _read_project_list_docs(ui_db, collection, snapshots):
+def _read_project_list_docs(
+    ui_db: firestore.Client,
+    collection: firestore.CollectionReference,
+    snapshots: list[firestore.DocumentSnapshot],
+) -> list[dict]:
   """Reassembles list projects with one batch for all first scenes."""
   if not snapshots:
     return []
