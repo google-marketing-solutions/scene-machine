@@ -1133,6 +1133,9 @@ _SCENE_BATCH_LIMIT = 450
 # a later batch is known to succeed, so a mid-write failure and retry collides
 # with Firestore's not-exists precondition and 409s forever.
 _MAX_CREATE_SCENES = _SCENE_BATCH_LIMIT - 1
+_PROJECT_SUMMARY_FIELDS = [
+    'id', 'name', 'lastEdited', 'createdBy', 'aspectRatio'
+]
 
 
 def _scene_doc_id(index: int) -> str:
@@ -1153,6 +1156,8 @@ def _commit_in_batches(ui_db, ops) -> None:
         batch.create(ref, data)
       elif op == 'set':
         batch.set(ref, data)
+      elif op == 'update':
+        batch.update(ref, data)
       else:
         batch.delete(ref)
     batch.commit()
@@ -1193,6 +1198,35 @@ def _write_project_doc(
   _commit_in_batches(ui_db, ops)
 
 
+def _write_editor_project_doc(ui_db, doc_ref, payload, stored) -> None:
+  """Writes editor fields while leaving Setup's inputConfig untouched.
+
+  The root update is deliberately field-based: unlike a read-modify-write
+  replacement, it cannot copy a stale inputConfig snapshot over a concurrent
+  Setup save. Fields omitted by the editor payload retain the legacy full-save
+  replacement behavior through DELETE_FIELD updates.
+  """
+  root_updates = {
+      key: firestore.DELETE_FIELD
+      for key in stored
+      if key not in payload and key != 'inputConfig'
+  }
+  root_updates.update(payload)
+  scenes = payload.get('storyboard')
+  if not isinstance(scenes, list):
+    scenes = []
+  root_updates['storyboard'] = []
+  scenes_ref = doc_ref.collection(_SCENES_SUBCOLLECTION)
+  ops = [('update', doc_ref, root_updates)]
+  for index, scene in enumerate(scenes):
+    ops.append(('set', scenes_ref.document(_scene_doc_id(index)), scene))
+  keep_ids = {_scene_doc_id(i) for i in range(len(scenes))}
+  for snapshot in scenes_ref.stream():
+    if snapshot.id not in keep_ids:
+      ops.append(('delete', scenes_ref.document(snapshot.id), None))
+  _commit_in_batches(ui_db, ops)
+
+
 def _read_project_doc(doc_ref, snapshot=None):
   """Reassembles a project dict, restoring storyboard from the subcollection.
 
@@ -1213,7 +1247,7 @@ def _read_project_doc(doc_ref, snapshot=None):
 
 
 def _read_project_list_docs(ui_db, collection, snapshots):
-  """Reassembles list projects with one batch for all first scenes."""
+  """Builds page summaries with one batch for all first scenes."""
   if not snapshots:
     return []
   scene_refs = [
@@ -1229,10 +1263,46 @@ def _read_project_list_docs(ui_db, collection, snapshots):
   for snapshot, scene_ref in zip(snapshots, scene_refs):
     data = snapshot.to_dict()
     first = scene_by_path.get(scene_ref.path)
-    data['storyboard'] = (
-        [first.to_dict()] if first is not None and first.exists else []
-    )
-    projects.append(data)
+    scene = first.to_dict() if first is not None and first.exists else None
+    thumbnail = {}
+    thumbnail_persist = True
+    if isinstance(scene, dict):
+      low_quality = scene.get('lowQualityThumbnail')
+      high_quality = scene.get('highQualityThumbnail')
+      if scene.get('type') == 'generated':
+        candidates = scene.get('candidates')
+        selected_index = scene.get('selectedCandidateIndex')
+        if selected_index is None:
+          selected_index = 0
+        candidate = None
+        if (
+            isinstance(candidates, list)
+            and isinstance(selected_index, int)
+            and not isinstance(selected_index, bool)
+            and 0 <= selected_index < len(candidates)
+            and isinstance(candidates[selected_index], dict)
+        ):
+          candidate = candidates[selected_index]
+        if candidate is not None:
+          low_quality = candidate.get('lowQualityThumbnail') or low_quality
+          high_quality = (
+              candidate.get('highQualityThumbnail') or high_quality
+          )
+          thumbnail_persist = not bool(candidate.get('isArchived'))
+        reference_image = scene.get('referenceImage')
+        if reference_image is not None:
+          thumbnail['referenceImage'] = reference_image
+      if low_quality is not None:
+        thumbnail['lowQualityThumbnail'] = low_quality
+      if high_quality is not None:
+        thumbnail['highQualityThumbnail'] = high_quality
+    summary = {'id': snapshot.id}
+    for field in _PROJECT_SUMMARY_FIELDS:
+      if field != 'id' and field in data:
+        summary[field] = data[field]
+    summary['thumbnail'] = thumbnail
+    summary['thumbnailPersist'] = thumbnail_persist
+    projects.append(summary)
   return projects
 
 
@@ -1248,7 +1318,7 @@ def _delete_project_doc(ui_db, doc_ref) -> None:
 
 
 def projects_handler() -> flask_response:
-  """Lists (GET) or creates (POST) UI project documents.
+  """Lists page summaries (GET) or creates (POST) UI project documents.
 
   GET ?createdBy=me filters on the verified identity; the default
   unfiltered list preserves the shared-projects product behavior.
@@ -1271,6 +1341,7 @@ def projects_handler() -> flask_response:
       query = query.where(
           filter=firestore.FieldFilter('createdBy', '==', identity)
       )
+    query = query.select(_PROJECT_SUMMARY_FIELDS)
     projects = [
         util_database.firestore_to_json_serialisable(project)
         for project in _read_project_list_docs(
@@ -1311,9 +1382,11 @@ def projects_handler() -> flask_response:
 def project_detail_handler(project_id: str) -> flask_response:
   """Reads (GET), overwrites (PATCH) or deletes (DELETE) one project.
 
-  PATCH is the faithful port of the UI's whole-document autosave: a full
-  set() with createdBy stripped from the payload (immutable; the stored
-  owner is preserved) and lastEdited refreshed server-side.
+  The default PATCH is the faithful port of the UI's whole-document autosave:
+  a full set() with createdBy stripped from the payload (immutable; the stored
+  owner is preserved) and lastEdited refreshed server-side. PATCH
+  ?view=editor is the explicit exception: it uses field updates so the omitted
+  Setup inputConfig cannot be overwritten by a stale editor read.
 
   SHARED-TEAM MODEL (intentional): there is deliberately NO per-user
   ownership check on any method. Every IAP-admitted user may read, edit and
@@ -1324,15 +1397,19 @@ def project_detail_handler(project_id: str) -> flask_response:
   ui_db = _get_ui_db()
   if ui_db is None:
     return _json_error('FIRESTORE_DB_UI not configured', 500)
+  view = flask_request.args.get('view')
+  if view not in (None, 'editor'):
+    return _json_error("Unsupported project view (only 'editor')", 400)
   doc_ref = ui_db.collection('projects').document(project_id)
   snapshot = doc_ref.get()
   if flask_request.method == 'GET':
     if not snapshot.exists:
       return _json_error('Not found', 404)
+    project = _read_project_doc(doc_ref, snapshot)
+    if view == 'editor':
+      project.pop('inputConfig', None)
     return _json_response(
-        util_database.firestore_to_json_serialisable(
-            _read_project_doc(doc_ref, snapshot)
-        )
+        util_database.firestore_to_json_serialisable(project)
     )
   if flask_request.method == 'PATCH':
     if not snapshot.exists:
@@ -1341,13 +1418,23 @@ def project_detail_handler(project_id: str) -> flask_response:
     data = flask_request.get_json(silent=True)
     if not isinstance(data, dict):
       return _json_error('Malformed JSON body', 400)
+    if view == 'editor':
+      if 'inputConfig' in data:
+        return _json_error("Editor view cannot update 'inputConfig'", 400)
+      if any('.' in key or '`' in key for key in data):
+        return _json_error(
+            'Editor view accepts only top-level project fields', 400
+        )
     payload = copy.deepcopy(data)
     payload.pop('createdBy', None)
     payload['createdBy'] = stored.get('createdBy')
     payload['id'] = project_id
     _convert_project_dates(payload)
     payload['lastEdited'] = datetime.datetime.now(datetime.timezone.utc)
-    _write_project_doc(ui_db, doc_ref, payload)
+    if view == 'editor':
+      _write_editor_project_doc(ui_db, doc_ref, payload, stored)
+    else:
+      _write_project_doc(ui_db, doc_ref, payload)
     return _json_response({'id': project_id})
   # DELETE is idempotent: 200 whether or not the document exists. Any admitted
   # user may delete any project (shared-team model; see the docstring above).
