@@ -2039,6 +2039,132 @@ describe('RemixEngineService (mediated)', () => {
     });
   });
 
+  describe('generateStoryboard reference previews', () => {
+    it('carries a product preview when the workflow keeps the original path', async () => {
+      const preview = {
+        path: 'thumbnail/product.jpg',
+        url: 'https://signed.example/thumbnail/product.jpg',
+      };
+      const product = {
+        id: 1,
+        name: 'Product 1',
+        images: [
+          {
+            path: 'input/product.jpg',
+            url: 'https://signed.example/input/product.jpg',
+            preview,
+          },
+        ],
+      };
+      vi.spyOn(service, 'startStoryboardWorkflow').mockResolvedValue(
+        of({executionId: 'storyboard-exec'}) as any,
+      );
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {
+          output: {
+            '0': {
+              storyboard: [{file: 'storyboard.json'}],
+              outpainted_images: [
+                {product_id: 1, image_id: 1, file: 'input/product.jpg'},
+              ],
+            },
+          },
+        },
+      } as any);
+      mediaServiceMock.getBlob.mockResolvedValue({
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              storyboard: [
+                {
+                  product_id: 1,
+                  image_id: 1,
+                  scene_name: 'Scene 1',
+                  video_prompt: 'A product scene',
+                },
+              ],
+            }),
+          ),
+      });
+      mediaServiceMock.signUrl.mockResolvedValue(
+        'https://signed.example/input/product.jpg',
+      );
+
+      const result = await service.generateStoryboard(
+        [product as any],
+        'briefing',
+        'none',
+      );
+
+      expect(result?.[0].referenceImage).toEqual({
+        path: 'input/product.jpg',
+        url: 'https://signed.example/input/product.jpg',
+        preview,
+      });
+    });
+
+    it('does not carry a product preview when the workflow changes the path', async () => {
+      const product = {
+        id: 1,
+        name: 'Product 1',
+        images: [
+          {
+            path: 'input/product.jpg',
+            url: 'https://signed.example/input/product.jpg',
+            preview: {
+              path: 'thumbnail/product.jpg',
+              url: 'https://signed.example/thumbnail/product.jpg',
+            },
+          },
+        ],
+      };
+      vi.spyOn(service, 'startStoryboardWorkflow').mockResolvedValue(
+        of({executionId: 'storyboard-exec'}) as any,
+      );
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {
+          output: {
+            '0': {
+              storyboard: [{file: 'storyboard.json'}],
+              outpainted_images: [
+                {product_id: 1, image_id: 1, file: 'outpainted/product.jpg'},
+              ],
+            },
+          },
+        },
+      } as any);
+      mediaServiceMock.getBlob.mockResolvedValue({
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              storyboard: [
+                {
+                  product_id: 1,
+                  image_id: 1,
+                  scene_name: 'Scene 1',
+                  video_prompt: 'A product scene',
+                },
+              ],
+            }),
+          ),
+      });
+      mediaServiceMock.signUrl.mockResolvedValue(
+        'https://signed.example/outpainted/product.jpg',
+      );
+
+      const result = await service.generateStoryboard(
+        [product as any],
+        'briefing',
+        'outpaint',
+      );
+
+      expect(result?.[0].referenceImage).toEqual({
+        path: 'outpainted/product.jpg',
+        url: 'https://signed.example/outpainted/product.jpg',
+      });
+    });
+  });
+
   describe('global config guard (E1)', () => {
     // The workflow builders read globalConfig fields. If /api/config has not
     // loaded (value() is undefined), the generation paths must fail fast with a

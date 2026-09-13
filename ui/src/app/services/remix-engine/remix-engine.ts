@@ -1702,9 +1702,21 @@ export class RemixEngineService {
           if (!productsToOutpaintedImages[productId]) {
             productsToOutpaintedImages[productId] = {};
           }
+          const imageIndex = Number(image.image_id) - 1;
+          const inputImage = products.find(
+            product => String(product.id) === productId,
+          )?.images[imageIndex];
+          const preview =
+            Number.isInteger(imageIndex) &&
+            imageIndex >= 0 &&
+            inputImage &&
+            inputImage.path === imagePath
+              ? inputImage.preview
+              : undefined;
           productsToOutpaintedImages[productId][String(image.image_id)] = {
             url: await this.mediaService.signUrl(imagePath),
             path: imagePath,
+            ...(preview ? {preview} : {}),
           };
         }
       }
@@ -1728,6 +1740,9 @@ export class RemixEngineService {
           referenceImage: {
             url: referenceImage.url,
             path: referenceImage.path,
+            ...(referenceImage.preview
+              ? {preview: referenceImage.preview}
+              : {}),
           },
         } as GeneratedScene;
       });

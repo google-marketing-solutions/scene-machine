@@ -52,10 +52,10 @@ import {
   ASPECT_RATIO_DEVIATION_THRESHOLD,
   AspectRatio,
   ConfigService,
-  GcsFile,
   GeneratedScene,
   InputConfig,
   Product,
+  ProductImage,
 } from '../services/config/config';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {Template, TemplatesService} from '../services/templates/templates';
@@ -416,17 +416,13 @@ export class Setup {
                 preview: preview.preview,
                 widthPixels: preview.widthPixels,
                 heightPixels: preview.heightPixels,
-                aspectRatioDeviation: this.aspectRatioDeviation(
-                  preview.widthPixels,
-                  preview.heightPixels,
-                ),
               }
             : {}),
         };
       }),
     );
 
-    const uploadedImages: GcsFile[] = [];
+    const uploadedImages: ProductImage[] = [];
     const failures: ImportFailure[] = [];
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') {
@@ -448,12 +444,24 @@ export class Setup {
     }
 
     if (uploadedImages.length > 0) {
+      const currentAspectImages = uploadedImages.map(image => {
+        if (image.widthPixels === undefined || image.heightPixels === undefined) {
+          return image;
+        }
+        const aspectRatioDeviation = this.aspectRatioDeviation(
+          image.widthPixels,
+          image.heightPixels,
+        );
+        return aspectRatioDeviation === undefined
+          ? image
+          : {...image, aspectRatioDeviation};
+      });
       this.config.updateProjectConfig({
         inputConfig: {
           ...currentProject.inputConfig,
           products: currentProject.inputConfig.products.map(p =>
             p.id === productId
-              ? {...p, images: [...p.images, ...uploadedImages]}
+              ? {...p, images: [...p.images, ...currentAspectImages]}
               : p,
           ),
         },
