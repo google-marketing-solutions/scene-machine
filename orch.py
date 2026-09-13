@@ -69,6 +69,7 @@ from google.auth import compute_engine
 from google.auth import default as google_auth_default
 from google.auth.transport import requests as google_auth_requests
 from google.cloud import firestore
+from google.cloud.firestore_v1 import field_path
 from google.cloud import storage
 from google.oauth2 import id_token as google_id_token
 import orchestrator
@@ -1207,15 +1208,18 @@ def _write_editor_project_doc(ui_db, doc_ref, payload, stored) -> None:
   replacement behavior through DELETE_FIELD updates.
   """
   root_updates = {
-      key: firestore.DELETE_FIELD
+      field_path.FieldPath(key).to_api_repr(): firestore.DELETE_FIELD
       for key in stored
       if key not in payload and key != 'inputConfig'
   }
-  root_updates.update(payload)
+  root_updates.update({
+      field_path.FieldPath(key).to_api_repr(): value
+      for key, value in payload.items()
+  })
   scenes = payload.get('storyboard')
   if not isinstance(scenes, list):
     scenes = []
-  root_updates['storyboard'] = []
+  root_updates[field_path.FieldPath('storyboard').to_api_repr()] = []
   scenes_ref = doc_ref.collection(_SCENES_SUBCOLLECTION)
   ops = [('update', doc_ref, root_updates)]
   for index, scene in enumerate(scenes):

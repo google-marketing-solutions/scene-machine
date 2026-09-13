@@ -260,6 +260,8 @@ class FakeBatch:
   def commit(self):
     if self._db.commit_barrier is not None:
       self._db.commit_barrier.wait(timeout=5)
+    if self._db.commit_hook is not None:
+      self._db.commit_hook(self)
     with self._db.lock:
       for op, ref, _ in self._ops:
         if op == 'create' and ref.id in ref._collection.docs:
@@ -270,10 +272,19 @@ class FakeBatch:
         elif op == 'update':
           current = ref._collection.docs[ref.id]
           for field, value in data.items():
-            if value is firestore.DELETE_FIELD:
-              current.pop(field, None)
+            if field.startswith('`') and field.endswith('`'):
+              field_parts = [
+                  field[1:-1].replace('\\`', '`').replace('\\\\', '\\')
+              ]
             else:
-              current[field] = copy.deepcopy(value)
+              field_parts = field.split('.')
+            target = current
+            for field_part in field_parts[:-1]:
+              target = target.setdefault(field_part, {})
+            if value is firestore.DELETE_FIELD:
+              target.pop(field_parts[-1], None)
+            else:
+              target[field_parts[-1]] = copy.deepcopy(value)
         else:
           ref.delete()
       self._ops.clear()
@@ -286,6 +297,7 @@ class FakeUiDb:
     self._collections = {}
     self.lock = threading.Lock()
     self.commit_barrier = None
+    self.commit_hook = None
     self.get_all_calls = 0
     self.get_all_refs = []
     self.reverse_get_all = False
@@ -1343,14 +1355,16 @@ def test_editor_patch_does_not_overwrite_concurrent_setup_save(
       'model': 'veo-fast',
       'storyboard': [{'type': 'generated', 'prompt': 'new scene'}],
   }
-  fake_db.commit_barrier = threading.Barrier(2)
-  statuses = {}
+  editor_commit_entered = threading.Event()
+  allow_editor_commit = threading.Event()
 
-  def save_setup():
-    with orch.app.test_client() as setup_client:
-      statuses['setup'] = setup_client.patch(
-          f'/api/projects/{project_id}', json=setup_payload
-      ).status_code
+  def pause_editor_commit(batch):
+    if any(op == 'update' for op, _, _ in batch._ops):
+      editor_commit_entered.set()
+      assert allow_editor_commit.wait(timeout=5)
+
+  fake_db.commit_hook = pause_editor_commit
+  statuses = {}
 
   def save_editor():
     with orch.app.test_client() as editor_client:
@@ -1358,18 +1372,53 @@ def test_editor_patch_does_not_overwrite_concurrent_setup_save(
           f'/api/projects/{project_id}?view=editor', json=editor_payload
       ).status_code
 
-  threads = [
-      threading.Thread(target=save_setup),
-      threading.Thread(target=save_editor),
-  ]
-  for thread in threads:
-    thread.start()
-  for thread in threads:
-    thread.join(timeout=10)
-  assert not any(thread.is_alive() for thread in threads)
+  editor_thread = threading.Thread(target=save_editor)
+  editor_thread.start()
+  assert editor_commit_entered.wait(timeout=5)
+
+  # Force Setup's full replacement to commit while the editor update is paused.
+  with orch.app.test_client() as setup_client:
+    statuses['setup'] = setup_client.patch(
+        f'/api/projects/{project_id}', json=setup_payload
+    ).status_code
+  allow_editor_commit.set()
+  editor_thread.join(timeout=10)
+  assert not editor_thread.is_alive()
   assert statuses == {'setup': 200, 'editor': 200}
   stored = fake_db.collection('projects').docs[project_id]
   assert stored['inputConfig'] == setup_payload['inputConfig']
+  assert _scenes_docs(fake_db, project_id)['000000']['prompt'] == 'new scene'
+
+
+def test_editor_patch_escapes_literal_stored_field_paths(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project_id = 'literal-field-path'
+  assert client.post(
+      '/api/projects',
+      json={
+          'id': project_id,
+          'name': 'Before',
+          'inputConfig': {'composition': 'must survive'},
+          'legacyOnly': True,
+      },
+  ).status_code == 200
+  fake_db.collection('projects').docs[project_id]['inputConfig.composition'] = (
+      'legacy literal'
+  )
+
+  response = client.patch(
+      f'/api/projects/{project_id}?view=editor',
+      json={'id': project_id, 'name': 'After', 'storyboard': []},
+  )
+
+  assert response.status_code == 200
+  stored = fake_db.collection('projects').docs[project_id]
+  assert stored['inputConfig']['composition'] == 'must survive'
+  assert 'inputConfig.composition' not in stored
 
 
 def test_legacy_full_patch_still_replaces_omitted_root_fields(
