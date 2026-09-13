@@ -212,12 +212,20 @@ form. The active in-memory project may retain inputs already loaded in Setup;
 there is no cross-project data cache. Keep the per-project save queue and stale
 load protection when changing this flow.
 
-Editor saves without inputs use `PATCH /api/projects/:id?view=editor`. Its root
+Editor saves without inputs use `PATCH /api/projects/:id/editor`. Its root
 field updates leave stored `inputConfig` untouched, including a concurrent
 Setup update. Do not copy an earlier Setup snapshot into a replacement write.
 Full GET/PATCH remains the Setup and legacy detail contract; full PATCH keeps
 its replacement semantics. All editor candidates remain available for counts,
 selection, generation and composition.
+
+The dedicated editor PATCH path is also a rollback safety boundary: a
+pre-feature backend rejects it instead of treating a projected payload as a
+full replacement. Keep that failure visible as unsaved changes; never retry it
+through the full-document endpoint. The query-form editor PATCH is retained
+only for older preview clients. Before downgrading a deployment that served
+those older clients, retire or refresh their open tabs; the new route cannot
+retroactively protect them. Deploy the frontend and backend together.
 
 Regression coverage lives in `test/test_frontdoor_data.py`,
 `config-mediated.spec.ts`, and the Homepage/Setup/Storyboard component specs.
