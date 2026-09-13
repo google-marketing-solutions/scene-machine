@@ -22,16 +22,22 @@ import {
   TextOnlySnackBar,
 } from '@angular/material/snack-bar';
 import {
+  defer,
   filter,
   firstValueFrom,
+  mergeMap,
   Observable,
+  repeat,
   retry,
+  Subscriber,
+  Subscription,
+  Subject,
   tap,
   throwError,
   timeout,
   timer,
-  switchMap,
   take,
+  takeUntil,
 } from 'rxjs';
 import {env} from '../../../env';
 import {ClientMediaService} from '../client-media/client-media';
@@ -98,6 +104,194 @@ class PollTimeoutError extends Error {
   }
 }
 
+const MAX_STATUS_STARTS_PER_SECOND = 4;
+const MAX_STATUS_REQUESTS_IN_FLIGHT = 4;
+const STATUS_START_WINDOW_MS = 1000;
+const POLL_ERROR_BACKOFF_MAX_MS = 30_000;
+const POLL_ERROR_JITTER_MS = 250;
+
+interface QueuedStatusRequest {
+  executionId: string;
+  projectId: string;
+  isForeground: () => boolean;
+  canRun: () => boolean;
+  request: () => Observable<WorkflowStatusResponse>;
+  subscriber: Subscriber<WorkflowStatusResponse>;
+  eligibleAt: number;
+  cancelled: boolean;
+  started: boolean;
+  finished: boolean;
+  subscription?: Subscription;
+}
+
+/**
+ * Per-tab gate for workflow status requests. It deliberately lives next to
+ * RemixEngineService instead of becoming a general scheduling abstraction:
+ * status requests are the only work that needs this browser-local budget.
+ */
+class WorkflowStatusPollScheduler {
+  private readonly queue: QueuedStatusRequest[] = [];
+  private readonly active = new Map<string, QueuedStatusRequest>();
+  private readonly starts: number[] = [];
+  private wakeTimer: ReturnType<typeof setTimeout> | undefined;
+
+  request(
+    executionId: string,
+    projectId: string,
+    isForeground: () => boolean,
+    canRun: () => boolean,
+    request: () => Observable<WorkflowStatusResponse>,
+    eligibleAt = Date.now(),
+  ): Observable<WorkflowStatusResponse> {
+    return new Observable(subscriber => {
+      const item: QueuedStatusRequest = {
+        executionId,
+        projectId,
+        isForeground,
+        canRun,
+        request,
+        subscriber,
+        eligibleAt,
+        cancelled: false,
+        started: false,
+        finished: false,
+      };
+      this.queue.push(item);
+      // A newly queued foreground item may be eligible before an existing
+      // timer. Recompute the wake-up point instead of waiting on the stale one.
+      if (this.wakeTimer !== undefined) {
+        clearTimeout(this.wakeTimer);
+        this.wakeTimer = undefined;
+      }
+      this.pump();
+
+      return () => {
+        item.cancelled = true;
+        if (item.started) {
+          item.subscription?.unsubscribe();
+          this.finish(item);
+        } else {
+          this.pump();
+        }
+      };
+    });
+  }
+
+  setCurrentProject(projectId: string): void {
+    for (const item of [...this.queue]) {
+      if (item.projectId !== projectId) {
+        item.cancelled = true;
+        item.finished = true;
+        item.subscriber.error(new ProjectChangedError());
+      }
+    }
+    for (const item of this.active.values()) {
+      if (item.projectId !== projectId) {
+        item.subscriber.error(new ProjectChangedError());
+        item.subscription?.unsubscribe();
+        this.finish(item);
+      }
+    }
+    this.pump();
+  }
+
+  private pump(): void {
+    this.compactQueue();
+    this.pruneStarts();
+    while (
+      this.active.size < MAX_STATUS_REQUESTS_IN_FLIGHT &&
+      this.starts.length < MAX_STATUS_STARTS_PER_SECOND
+    ) {
+      const index = this.nextEligibleIndex();
+      if (index < 0) break;
+      const item = this.queue.splice(index, 1)[0];
+      if (item.cancelled) continue;
+      if (!item.canRun()) {
+        item.finished = true;
+        item.subscriber.error(new ProjectChangedError());
+        continue;
+      }
+      this.active.set(item.executionId, item);
+      this.starts.push(Date.now());
+      item.started = true;
+      item.subscription = item.request().subscribe({
+        next: response => item.subscriber.next(response),
+        error: error => {
+          item.subscriber.error(error);
+          this.finish(item);
+        },
+        complete: () => {
+          item.subscriber.complete();
+          this.finish(item);
+        },
+      });
+    }
+
+    if (
+      this.queue.length > 0 &&
+      this.active.size < MAX_STATUS_REQUESTS_IN_FLIGHT
+    ) {
+      const now = Date.now();
+      const rateWait =
+        this.starts.length >= MAX_STATUS_STARTS_PER_SECOND
+          ? this.starts[0] + STATUS_START_WINDOW_MS - now
+          : 0;
+      const eligibleTimes = this.queue
+        .filter(item => !item.cancelled && !this.active.has(item.executionId))
+        .map(item => item.eligibleAt);
+      const nextEligibleAt = eligibleTimes.length
+        ? Math.min(...eligibleTimes)
+        : Number.POSITIVE_INFINITY;
+      const wait = Math.max(0, rateWait, nextEligibleAt - now);
+      if (this.wakeTimer === undefined && Number.isFinite(wait)) {
+        this.wakeTimer = setTimeout(() => {
+          this.wakeTimer = undefined;
+          this.pump();
+        }, wait);
+      }
+    } else if (this.queue.length === 0 && this.wakeTimer !== undefined) {
+      clearTimeout(this.wakeTimer);
+      this.wakeTimer = undefined;
+    }
+  }
+
+  private compactQueue(): void {
+    for (let index = this.queue.length - 1; index >= 0; index--) {
+      const item = this.queue[index];
+      if (item.cancelled || item.finished) {
+        this.queue.splice(index, 1);
+      }
+    }
+  }
+
+  private nextEligibleIndex(): number {
+    const now = Date.now();
+    const available = (item: QueuedStatusRequest) =>
+      !item.cancelled &&
+      !this.active.has(item.executionId) &&
+      item.eligibleAt <= now;
+    const foreground = this.queue.findIndex(
+      item => available(item) && item.isForeground(),
+    );
+    if (foreground >= 0) return foreground;
+    return this.queue.findIndex(available);
+  }
+
+  private finish(item: QueuedStatusRequest): void {
+    if (item.finished) return;
+    item.finished = true;
+    this.active.delete(item.executionId);
+    this.pump();
+  }
+
+  private pruneStarts(): void {
+    const cutoff = Date.now() - STATUS_START_WINDOW_MS;
+    while (this.starts.length > 0 && this.starts[0] <= cutoff) {
+      this.starts.shift();
+    }
+  }
+}
+
 /**
  * Thrown when a generation COMPLETED (the workflow produced video outputs) but
  * signing every output's URL failed transiently — e.g. a brief /api/signUrl
@@ -138,6 +332,10 @@ export class RemixEngineService {
   private httpClient = inject(HttpClient);
   private clientMediaService = inject(ClientMediaService);
   private mediaService = inject(MediaService);
+  private readonly pollScheduler = new WorkflowStatusPollScheduler();
+  private readonly projectChanges = new Subject<string>();
+  private foregroundScene: {projectId: string; sceneId: string} | undefined;
+  private readonly immediatePollExecutionIds = new Set<string>();
 
   /**
    * Execution ids whose resume has already been kicked off this session, so
@@ -148,7 +346,21 @@ export class RemixEngineService {
   /** As resumedExecutionIds, but for render (combine-scenes) runs. */
   private readonly resumedRenderExecutionIds = new Set<string>();
 
+  /** Gives the visible Storyboard scene priority in the shared poll queue. */
+  setForegroundScene(projectId: string, sceneId: string | null): void {
+    this.foregroundScene = sceneId ? {projectId, sceneId} : undefined;
+  }
+
+  clearForegroundScene(): void {
+    this.foregroundScene = undefined;
+  }
+
   constructor() {
+    effect(() => {
+      const projectId = this.configService.projectConfig.value().id;
+      this.pollScheduler.setCurrentProject(projectId);
+      this.projectChanges.next(projectId);
+    });
     // Resume persisted in-flight candidate generations whenever a project
     // with pendingGeneration markers is loaded (or re-loaded).
     effect(() => {
@@ -178,6 +390,7 @@ export class RemixEngineService {
           continue;
         }
         this.resumedExecutionIds.add(pending.executionId);
+        this.immediatePollExecutionIds.add(pending.executionId);
         void this.resumeGeneration(config.id, scene.id, pending);
       }
 
@@ -193,6 +406,7 @@ export class RemixEngineService {
         !this.resumedRenderExecutionIds.has(pendingRender.executionId)
       ) {
         this.resumedRenderExecutionIds.add(pendingRender.executionId);
+        this.immediatePollExecutionIds.add(pendingRender.executionId);
         void this.resumeRender(config.id, pendingRender);
       }
     });
@@ -224,26 +438,49 @@ export class RemixEngineService {
   async pollWorkflow(
     workflowId: string,
     projectId: string,
+    sceneId?: string,
   ): Promise<WorkflowStatusResponse> {
+    let firstRequest = true;
+    const startImmediately = this.immediatePollExecutionIds.delete(workflowId);
+    const projectChanged = this.projectChanges.pipe(
+      filter(changedProjectId => changedProjectId !== projectId),
+      mergeMap(() => throwError(() => new ProjectChangedError())),
+    );
     return await firstValueFrom(
-      timer(0, WORKFLOW_STATUS_POLL_INTERVAL_MS).pipe(
-        switchMap(() => this.getWorkflowStatus(workflowId)),
+      defer(() => {
+        const eligibleAt =
+          firstRequest && !startImmediately
+            ? Date.now() + WORKFLOW_STATUS_POLL_INTERVAL_MS
+            : Date.now();
+        firstRequest = false;
+        return this.pollScheduler.request(
+          workflowId,
+          projectId,
+          () =>
+            this.foregroundScene?.projectId === projectId &&
+            this.foregroundScene?.sceneId ===
+              (sceneId ?? this.sceneForExecution(workflowId)),
+          () => this.configService.projectConfig.value().id === projectId,
+          () => this.getWorkflowStatus(workflowId),
+          eligibleAt,
+        );
+      }).pipe(
         retry({
-          delay: error => {
+          delay: (error, retryCount) => {
+            if (error instanceof ProjectChangedError) {
+              return throwError(() => error);
+            }
             if (
               env.controlPlaneMode === 'iap' &&
               error instanceof HttpErrorResponse &&
               error.status === 401
             ) {
               // IAP session-cookie expiry: open ONE session-refresh tab per
-              // expiry episode. The 401 consumes no retry budget and keeps
-              // the normal poll cadence, so the loop survives arbitrarily
-              // long expiry windows instead of dying silently.
+              // expiry episode. The 401 consumes no retry budget; bounded
+              // retry backoff keeps the loop alive without hammering status.
               this.onIapSessionExpiry();
             }
-            // Non-401 (and non-iap) errors take exactly today's path: an
-            // unconditional retry after the poll interval.
-            return timer(WORKFLOW_STATUS_POLL_INTERVAL_MS);
+            return timer(this.pollErrorDelay(error, workflowId, retryCount));
           },
         }),
         tap(() => {
@@ -259,7 +496,11 @@ export class RemixEngineService {
             throw new ProjectChangedError();
           }
         }),
+        repeat({
+          delay: () => timer(WORKFLOW_STATUS_POLL_INTERVAL_MS),
+        }),
         filter(response => response.sink?.output !== undefined),
+        takeUntil(projectChanged),
         // Overall backstop so a poll can never spin forever (e.g. an IAP
         // session that never recovers, or a backend run that ends without
         // writing its sink output). Placed AFTER filter, so the clock measures
@@ -274,6 +515,48 @@ export class RemixEngineService {
         take(1),
       ),
     );
+  }
+
+  private pollErrorJitter(executionId: string, retryCount: number): number {
+    let hash = retryCount;
+    for (const character of executionId) {
+      hash = (hash * 31 + character.charCodeAt(0)) >>> 0;
+    }
+    return hash % (POLL_ERROR_JITTER_MS + 1);
+  }
+
+  private sceneForExecution(executionId: string): string | undefined {
+    return this.configService.projectConfig
+      .value()
+      .storyboard.find(
+        scene =>
+          scene.id &&
+          this.configService.isGeneratedScene(scene) &&
+          scene.pendingGeneration?.executionId === executionId,
+      )?.id;
+  }
+
+  private pollErrorDelay(
+    error: unknown,
+    executionId: string,
+    retryCount: number,
+  ): number {
+    const backoff = Math.min(
+      WORKFLOW_STATUS_POLL_INTERVAL_MS * 2 ** (retryCount - 1),
+      POLL_ERROR_BACKOFF_MAX_MS,
+    );
+    const jittered = backoff + this.pollErrorJitter(executionId, retryCount);
+    if (!(error instanceof HttpErrorResponse)) return jittered;
+    const retryAfter = error.headers.get('Retry-After');
+    if (!retryAfter) return jittered;
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.max(jittered, seconds * 1000);
+    }
+    const timestamp = Date.parse(retryAfter);
+    return Number.isFinite(timestamp)
+      ? Math.max(jittered, timestamp - Date.now())
+      : jittered;
   }
 
   /**

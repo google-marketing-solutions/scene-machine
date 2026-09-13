@@ -109,6 +109,8 @@ describe('Storyboard', () => {
     editCandidate: vi.fn(),
     generatingSceneIds: signal(new Set()),
     editingSceneIds: signal(new Set()),
+    setForegroundScene: vi.fn(),
+    clearForegroundScene: vi.fn(),
   };
   let mockImagePreviewService = {
     create: vi.fn(),
@@ -174,6 +176,8 @@ describe('Storyboard', () => {
       editCandidate: vi.fn(),
       generatingSceneIds: signal(new Set()),
       editingSceneIds: signal(new Set()),
+      setForegroundScene: vi.fn(),
+      clearForegroundScene: vi.fn(),
     };
     mockImagePreviewService = {
       create: vi.fn().mockResolvedValue(undefined),
