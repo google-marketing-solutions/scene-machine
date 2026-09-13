@@ -28,6 +28,13 @@ export const DICTATION_MIME_TYPES = [
 
 export const DICTATION_MAX_AUDIO_BYTES = 4 * 1024 * 1024;
 export const DICTATION_REQUEST_TIMEOUT_MS = 70_000;
+export const DICTATION_SERVER_MAX_DURATION_SECONDS = 120;
+// Leave one second for the 250 ms timer, recorder stop dispatch, and final
+// dataavailable chunk. This is a foreground-timing margin, not a guarantee
+// against arbitrarily delayed background-tab timers.
+export const DICTATION_DURATION_HEADROOM_SECONDS = 1;
+export const DICTATION_CLIENT_MAX_DURATION_SECONDS =
+  DICTATION_SERVER_MAX_DURATION_SECONDS - DICTATION_DURATION_HEADROOM_SECONDS;
 
 export interface DictationConfig {
   enabled: boolean;
@@ -87,7 +94,7 @@ export class DictationService {
   private timer: ReturnType<typeof setInterval> | undefined;
   private upload: Subscription | undefined;
   private maxAudioBytes = DICTATION_MAX_AUDIO_BYTES;
-  private maxDurationSeconds = 120;
+  private maxDurationSeconds = DICTATION_CLIENT_MAX_DURATION_SECONDS;
   private mimeTypes: readonly string[] = DICTATION_MIME_TYPES;
   private eventId = 0;
 
@@ -116,7 +123,10 @@ export class DictationService {
     this.activeOwner = owner;
     const token = ++this.activeToken;
     this.maxAudioBytes = config.maxAudioBytes;
-    this.maxDurationSeconds = config.maxDurationSeconds;
+    this.maxDurationSeconds = Math.min(
+      config.maxDurationSeconds,
+      DICTATION_CLIENT_MAX_DURATION_SECONDS,
+    );
     this.mimeTypes = config.mimeTypes;
     this.chunks = [];
     this.encodedBytes = 0;
