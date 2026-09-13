@@ -2075,6 +2075,7 @@ def test_iap_auth_gates_api_routes(monkeypatch, orchestrator_module):
   # unset here, so a valid assertion reaches the handler and fails soft at 500
   # rather than passing the gate at 401.)
   assert client.get('/api/projects').status_code == 401
+  assert client.patch('/api/projects/editor-auth/editor').status_code == 401
   assert (
       client.get(
           '/api/projects',

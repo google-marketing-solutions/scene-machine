@@ -1291,7 +1291,7 @@ export class ConfigService {
     const editorScope = save.payload.inputConfig === undefined;
     const request = isPersisted
       ? this.httpClient.patch(
-          `/api/projects/${projectId}${editorScope ? '?view=editor' : ''}`,
+          `/api/projects/${projectId}${editorScope ? '/editor' : ''}`,
           save.payload,
         )
       : this.httpClient.post<{id: string}>('/api/projects', save.payload);
