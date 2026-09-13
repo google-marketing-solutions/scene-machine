@@ -1400,6 +1400,11 @@ export class Storyboard {
     const sceneId = this.selectedSceneId();
     if (this.config.isGeneratedScene(this.selectedScene()) && sceneId) {
       const uploadEpoch = ++this.referenceUploadEpoch;
+      const uploadVisitEpoch = this.moveVisitEpoch;
+      const isCurrentUpload = () =>
+        uploadEpoch === this.referenceUploadEpoch &&
+        uploadVisitEpoch === this.moveVisitEpoch &&
+        this.config.projectConfig.value().id === projectId;
       if (
         file.type.startsWith('image/') &&
         !['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)
@@ -1420,12 +1425,7 @@ export class Storyboard {
       const scene = this.config.projectConfig
         .value()
         .storyboard.find(s => s.id === sceneId);
-      if (
-        scene &&
-        this.config.isGeneratedScene(scene) &&
-        uploadEpoch === this.referenceUploadEpoch &&
-        this.config.projectConfig.value().id === projectId
-      ) {
+      if (scene && this.config.isGeneratedScene(scene) && isCurrentUpload()) {
         this.invalidateReferenceMedia(scene.referenceImage);
         scene.referenceImage = {path, url};
         try {
@@ -1436,11 +1436,7 @@ export class Storyboard {
             );
           const lowQualityData =
             await this.clientMediaService.toBase64(lowQualityThumbnail);
-          if (
-            uploadEpoch !== this.referenceUploadEpoch ||
-            this.config.projectConfig.value().id !== projectId
-          )
-            return;
+          if (!isCurrentUpload()) return;
           scene.lowQualityThumbnail = lowQualityData;
         } catch (error) {
           console.error(error);
@@ -1449,8 +1445,7 @@ export class Storyboard {
           const preview = await this.imagePreviewService.create(file);
           if (
             preview &&
-            uploadEpoch === this.referenceUploadEpoch &&
-            this.config.projectConfig.value().id === projectId &&
+            isCurrentUpload() &&
             scene.referenceImage?.path === path &&
             scene.referenceImage.url === url
           ) {
@@ -1461,10 +1456,7 @@ export class Storyboard {
           console.error(error);
         }
       }
-      if (
-        uploadEpoch === this.referenceUploadEpoch &&
-        this.config.projectConfig.value().id === projectId
-      ) {
+      if (isCurrentUpload()) {
         this.updateScenes(scene);
       }
     }
