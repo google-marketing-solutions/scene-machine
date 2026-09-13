@@ -234,22 +234,18 @@ describe('Homepage', () => {
 
   it('shows a placeholder for a reference-only project while config loads', async () => {
     mockConfigService.globalConfig.isLoading = () => true;
-    const project = {
+    const project: ProjectSummary = {
       id: 'reference-only-project',
       name: 'Reference only',
       aspectRatio: '16:9',
-      storyboard: [
-        {
-          id: 'scene-a',
-          name: 'Scene',
-          type: 'generated',
-          prompt: 'prompt',
-          selectedCandidateIndex: 0,
-          referenceImage: {path: 'reference.jpg', url: 'reference-url'},
-          candidates: [],
+      thumbnail: {
+        referenceImage: {
+          path: 'reference.jpg',
+          url: 'reference-url',
         },
-      ],
-    } as unknown as ProjectConfig;
+      },
+      thumbnailPersist: true,
+    };
     mockConfigService.getProjects.mockResolvedValueOnce([project]);
 
     component.fetchProjects();
