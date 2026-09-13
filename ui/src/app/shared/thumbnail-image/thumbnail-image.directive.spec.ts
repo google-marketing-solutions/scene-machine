@@ -293,12 +293,59 @@ describe('ThumbnailImageDirective', () => {
     expect(observers[1].disconnect).toHaveBeenCalled();
   });
 
-  it('keeps the fallback visible when a load event has no decoded image width', async () => {
+  it('keeps the loaded image visible while an unresolved scope is replaced', async () => {
+    const release = vi.fn();
+    const replacementRelease = vi.fn();
+    acquire
+      .mockResolvedValueOnce({url: 'blob:unscoped', release})
+      .mockResolvedValueOnce({url: 'blob:scoped', release: replacementRelease});
+
+    directive.thumbnailCacheScope = null;
+    directive.ngOnChanges();
+    intersect(1);
+    await Promise.resolve();
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
+    image.dispatchEvent(new Event('load'));
+    expect(image.src).toContain('blob:unscoped');
+    expect(image.classList.contains('loaded')).toBe(true);
+
+    directive.thumbnailCacheScope = host.scope;
+    directive.ngOnChanges();
+    expect(image.src).toContain('blob:unscoped');
+    expect(image.classList.contains('loaded')).toBe(true);
+    expect(release).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(image.src).toContain('blob:scoped');
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(image.classList.contains('loaded')).toBe(true);
+  });
+
+  it('clears the image when a resolved scope changes', async () => {
+    const release = vi.fn();
+    acquire.mockResolvedValue({url: 'blob:resolved', release});
     intersect(0);
     await Promise.resolve();
     const image = fixture.nativeElement.querySelector(
       'img',
     ) as HTMLImageElement;
+    image.dispatchEvent(new Event('load'));
+
+    directive.thumbnailCacheScope = {
+      bucket: 'bucket-b',
+      projectId: 'project-b',
+    };
+    directive.ngOnChanges();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(image.getAttribute('src')).toBeNull();
+    expect(image.classList.contains('loaded')).toBe(false);
+  });
+
+  it('keeps the fallback visible when a load event has no decoded image width', async () => {
+    intersect(0);
+    await Promise.resolve();
+    const image = fixture.nativeElement.querySelector('img') as HTMLImageElement;
     Object.defineProperty(image, 'naturalWidth', {
       configurable: true,
       value: 0,

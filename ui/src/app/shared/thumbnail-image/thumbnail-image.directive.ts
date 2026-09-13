@@ -51,6 +51,8 @@ export class ThumbnailImageDirective implements OnChanges, OnDestroy {
   private observer: IntersectionObserver | undefined;
   private requestId = 0;
   private inputKey = '';
+  private mediaKey = '';
+  private scopeKey = '';
   private assignedSrc = '';
   private disposed = false;
   private recoveryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -64,10 +66,28 @@ export class ThumbnailImageDirective implements OnChanges, OnDestroy {
       this.thumbnailImagePersist,
     ]);
     if (key === this.inputKey) return;
+    const mediaKey = JSON.stringify(this.media?.path || this.media?.url);
+    const scopeOnlyChange =
+      mediaKey === this.mediaKey &&
+      this.scopeKey === '' &&
+      !!this.thumbnailCacheScope &&
+      !!this.lease;
     this.inputKey = key;
+    this.mediaKey = mediaKey;
+    this.scopeKey = this.thumbnailCacheScope
+      ? JSON.stringify([
+          this.thumbnailCacheScope.bucket,
+          this.thumbnailCacheScope.projectId,
+        ])
+      : '';
     this.stopObserving();
     this.cancelRecovery();
     this.recoveryAttempt = 0;
+    if (scopeOnlyChange) {
+      const requestId = ++this.requestId;
+      void this.acquire(requestId);
+      return;
+    }
     this.release(true);
     if (!this.media) return;
     this.observeOrAcquire();
