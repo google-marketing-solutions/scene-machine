@@ -37,6 +37,7 @@ import {
 import {MediaService} from '../services/media/media';
 import {MediaSrcPipe} from '../services/media/media-src.pipe';
 import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialog';
+import {HomepageAnnouncement} from './homepage-announcement';
 
 /**
  * Component for the homepage, displaying projects.
@@ -53,6 +54,7 @@ import {ConfirmProjectDeleteDialog} from '../shared/confirm-project-delete-dialo
     MatDialogModule,
     MatMenuModule,
     MediaSrcPipe,
+    HomepageAnnouncement,
   ],
   templateUrl: './homepage.html',
   styleUrl: './homepage.scss',

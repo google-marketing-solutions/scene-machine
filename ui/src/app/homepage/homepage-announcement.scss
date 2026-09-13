@@ -1,0 +1,85 @@
+/*
+ * Copyright 2026 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ */
+
+:host {
+  display: block;
+  width: 100%;
+}
+
+.announcement {
+  width: 100%;
+  min-height: 48px;
+  margin: 0;
+  padding: 0 16px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+  color: var(--mat-sys-on-primary);
+  background: var(--mat-sys-primary);
+  color-scheme: light;
+}
+
+.announcement-emoji {
+  flex: 0 0 auto;
+  max-width: 3em;
+  overflow: hidden;
+  font-size: 24px;
+  white-space: nowrap;
+  line-height: 1;
+}
+
+.announcement-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: clip;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.25;
+
+  &:focus-within {
+    overflow: hidden;
+    text-overflow: clip;
+  }
+
+  p {
+    margin: 0;
+  }
+}
+
+:host ::ng-deep .announcement-content a {
+  color: var(--mat-sys-on-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+
+  &:focus-visible {
+    outline: 2px solid var(--mat-sys-on-primary);
+    outline-offset: -2px;
+  }
+}
+
+.announcement button {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 48px;
+  color: var(--mat-sys-on-primary);
+}
+
+.announcement-more {
+  margin-left: auto;
+}
+
+.announcement-dialog-content {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+:host .announcement button:focus-visible {
+  outline: 2px solid var(--mat-sys-on-primary);
+  outline-offset: -2px;
+}

@@ -411,3 +411,32 @@ def test_dictation_mode_deploy_validation_executes_exact_allowlist(
     assert result.stdout.strip() == selected
   else:
     assert error in result.stderr
+
+
+def test_announcement_seed_is_create_only_and_validated_before_write():
+  """Announcement seeding must never overwrite an operator document."""
+  template = (_REPO / 'config.template.txt').read_text(encoding='utf-8')
+  text = _deploy_sh()
+  assert 'ANNOUNCEMENT_ID' not in template
+  assert 'export ANNOUNCEMENT_MARKDOWN_FILE=config/announcement.md' in template
+  assert 'export ANNOUNCEMENT_ENABLED=1' in template
+  assert 'scripts/seed_announcement.py convert' in text
+  assert 'ANNOUNCEMENT_SEED_JSON=' not in text
+  assert 'documents/config?documentId=announcement' in text
+  assert 'ANNOUNCEMENT_SEED_STATUS' in text
+  assert 'ANNOUNCEMENT_ID' not in text
+  announcement_block = text.split('ANNOUNCEMENT_MARKDOWN_FILE=', 1)[1]
+  assert 'python3 scripts/seed_announcement.py seed' in announcement_block
+  assert 'if ! ANNOUNCEMENT_SEED_STATUS=$(' in announcement_block
+  assert 'documents/config/announcement' not in announcement_block
+  assert announcement_block.index('scripts/seed_announcement.py convert') < announcement_block.index(
+      'scripts/seed_announcement.py seed'
+  )
+
+
+def test_announcement_seed_is_not_enabled_on_worker():
+  text = _deploy_sh()
+  worker_block = text.split('gcloud run deploy worker', 1)[1].split(
+      'gcloud run deploy app', 1
+  )[0]
+  assert 'ANNOUNCEMENT' not in worker_block

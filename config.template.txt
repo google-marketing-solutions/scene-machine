@@ -58,6 +58,12 @@ export DICTATION_ENABLED=1
 # speech. Only SMART and VERBATIM are valid values.
 export DICTATION_MODE=SMART
 
+# Optional homepage announcement. Keep Markdown in its own UTF-8 file so shell
+# quoting cannot alter administrator-authored content. The seed is create-only:
+# an existing config/announcement document is preserved on redeploy.
+export ANNOUNCEMENT_MARKDOWN_FILE=config/announcement.md
+export ANNOUNCEMENT_ENABLED=1
+
 # Optional: Custom domain for the application UI.
 # If you use a custom domain for the Scene Machine UI, uncomment the following
 # variable and update the value with your custom domain.
