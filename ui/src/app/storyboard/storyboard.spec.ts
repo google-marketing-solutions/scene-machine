@@ -439,6 +439,51 @@ describe('Storyboard', () => {
     });
   });
 
+  it('clears stale reference thumbnails when replacement preview generation fails', async () => {
+    const scene: GeneratedScene = {
+      id: 'replace-reference-scene',
+      type: 'generated',
+      name: 'Replace reference scene',
+      prompt: 'scene',
+      candidates: [],
+      referenceImage: {
+        path: 'old-source.png',
+        url: 'old-source-url',
+        preview: {path: 'old-preview.jpg', url: 'old-preview-url'},
+      },
+      lowQualityThumbnail: 'old-low-quality',
+      highQualityThumbnail: {path: 'old-preview.jpg', url: 'old-preview-url'},
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    component.selectScene(scene.id);
+    mockRemixEngineService.uploadMedia.mockResolvedValue({
+      path: 'new-source.png',
+      url: 'new-source-url',
+    });
+    mockImagePreviewService.create.mockRejectedValue(
+      new Error('preview unavailable'),
+    );
+    const clientMedia = TestBed.inject(ClientMediaService);
+    const lowQuality = vi
+      .spyOn(clientMedia, 'generateLowQualityThumbnail')
+      .mockRejectedValue(new Error('low-quality unavailable'));
+
+    try {
+      await component.uploadImage(
+        new File(['image'], 'new-reference.png', {type: 'image/png'}),
+      );
+    } finally {
+      lowQuality.mockRestore();
+    }
+
+    expect(scene.referenceImage).toEqual({
+      path: 'new-source.png',
+      url: 'new-source-url',
+    });
+    expect(scene.lowQualityThumbnail).toBeUndefined();
+    expect(scene.highQualityThumbnail).toBeUndefined();
+  });
+
   it('does not attach a delayed preview to a newer reference upload', async () => {
     const scene: GeneratedScene = {
       id: 'delayed-reference-scene',

@@ -1428,6 +1428,11 @@ export class Storyboard {
       if (scene && this.config.isGeneratedScene(scene) && isCurrentUpload()) {
         this.invalidateReferenceMedia(scene.referenceImage);
         scene.referenceImage = {path, url};
+        // The scene-level thumbnails belong to the previous reference. Clear
+        // them before asynchronous generation so a failed replacement cannot
+        // persist or display stale image material alongside the new ref.
+        delete scene.lowQualityThumbnail;
+        delete scene.highQualityThumbnail;
         try {
           const lowQualityThumbnail =
             await this.clientMediaService.generateLowQualityThumbnail(
