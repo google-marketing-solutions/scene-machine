@@ -16,6 +16,11 @@
 
 import {HarnessLoader} from '@angular/cdk/testing';
 import {TestbedHarnessEnvironment} from '@angular/cdk/testing/testbed';
+import {provideHttpClient} from '@angular/common/http';
+import {
+  HttpTestingController,
+  provideHttpClientTesting,
+} from '@angular/common/http/testing';
 import {signal, type WritableSignal} from '@angular/core';
 import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {MatSelectHarness} from '@angular/material/select/testing';
@@ -51,6 +56,72 @@ describe('Setup', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+});
+
+describe('Setup full-load failure', () => {
+  let fixture: ComponentFixture<Setup>;
+  let http: HttpTestingController;
+  let config: ConfigService;
+
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [Setup],
+      providers: [
+        provideRouter(routes),
+        provideHttpClient(),
+        provideHttpClientTesting(),
+      ],
+    }).compileComponents();
+    fixture = TestBed.createComponent(Setup);
+    http = TestBed.inject(HttpTestingController);
+    config = TestBed.inject(ConfigService);
+    fixture.detectChanges();
+    http.match('/api/config').forEach(request => request.flush({}));
+    http
+      .match('/api/templates')
+      .forEach(request => request.flush({templates: []}));
+    TestBed.tick();
+  });
+
+  it('shows retry instead of reading the failed resource value', async () => {
+    config.loadProjectConfig('broken-project', 'full');
+    TestBed.tick();
+    const request = http.expectOne('/api/projects/broken-project');
+    request.flush('failed', {status: 500, statusText: 'Server Error'});
+    TestBed.tick();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain(
+      'Could not load this project',
+    );
+    const retry = fixture.nativeElement.querySelector('button');
+    expect(retry?.textContent).toContain('Retry');
+
+    retry.click();
+    TestBed.tick();
+    const retryRequest = http.expectOne('/api/projects/broken-project');
+    retryRequest.flush({
+      id: 'broken-project',
+      name: 'Recovered',
+      aspectRatio: '16:9',
+      resolution: '720p',
+      candidateDurationSeconds: 4,
+      generateAudio: false,
+      numberOfCandidates: 1,
+      model: 'veo-default',
+      inputConfig: {products: [], composition: ''},
+      storyboard: [],
+      audioTracks: [],
+      visualOverlays: [],
+    });
+    TestBed.tick();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector('.setup-container'),
+    ).not.toBeNull();
   });
 });
 

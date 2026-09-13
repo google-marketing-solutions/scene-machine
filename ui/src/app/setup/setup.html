@@ -17,8 +17,11 @@
 @if (setupError()) {
   <div class="loading-state">
     <p>Could not load this project. Please try again.</p>
+    <button mat-button type="button" (click)="config.reloadProjectConfig()">
+      Retry
+    </button>
   </div>
-} @else if (setupLoading() || !config.projectConfig.value().id || !setupReady()) {
+} @else if (setupLoading() || !setupReady()) {
   <div class="loading-state">
     <mat-spinner diameter="40"></mat-spinner>
     <p>Loading project...</p>

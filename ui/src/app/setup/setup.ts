@@ -128,11 +128,13 @@ export class Setup {
   /** Keep the form closed while the route-scoped full project load settles. */
   readonly setupLoading = computed(() => this.config.setupInputsLoading());
   readonly setupError = computed(() => this.config.setupInputsError());
-  readonly setupReady = computed(
-    () =>
-      this.config.setupInputsLoaded() &&
-      this.config.projectConfig.value().inputConfig !== undefined,
-  );
+  readonly setupReady = computed(() => {
+    if (!this.config.setupInputsLoaded()) {
+      return false;
+    }
+    const project = this.config.projectConfig.value();
+    return !!project.id && project.inputConfig !== undefined;
+  });
 
   readonly imageCacheScope = computed(() => {
     const projectId = this.config.projectConfig.value().id;
