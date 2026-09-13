@@ -150,6 +150,7 @@ describe('Setup image upload', () => {
   beforeEach(async () => {
     const projectConfig = signal<Partial<ProjectConfig>>({
       id: 'proj-1',
+      aspectRatio: '16:9',
       inputConfig: {
         products: [{id: 1, name: 'Product 1', images: []}],
         composition: '',
@@ -266,8 +267,32 @@ describe('Setup image upload', () => {
         },
         widthPixels: 1600,
         heightPixels: 900,
+        aspectRatioDeviation: 0,
       },
     ]);
+  });
+
+  it('retains aspect-ratio deviation calculated from original preview dimensions', async () => {
+    imagePreviewMock.create.mockResolvedValue({
+      preview: {
+        path: 'thumbnail/portrait.jpg',
+        url: 'https://thumbnail/portrait.jpg',
+      },
+      widthPixels: 900,
+      heightPixels: 1600,
+    });
+    const file = new File([new Uint8Array([1, 2, 3])], 'portrait.jpeg', {
+      type: 'image/jpeg',
+    });
+
+    await component.processFiles(1, [file] as unknown as FileList);
+
+    const image =
+      configMock.projectConfig.value().inputConfig?.products[0].images[0];
+    if (!image) throw new Error('expected uploaded image');
+    expect(image.widthPixels).toBe(900);
+    expect(image.heightPixels).toBe(1600);
+    expect(image.aspectRatioDeviation).toBeGreaterThan(0);
   });
 
   it('keeps the original upload when preview creation fails', async () => {
@@ -281,6 +306,61 @@ describe('Setup image upload', () => {
     expect(
       configMock.projectConfig.value().inputConfig?.products[0].images,
     ).toEqual([{path: 'remix-input/x', url: 'https://x', name: 'pic.jpeg'}]);
+  });
+
+  it('does not land a delayed upload in a different project', async () => {
+    let resolvePreview!: (value: {
+      preview: {path: string; url: string};
+      widthPixels: number;
+      heightPixels: number;
+    }) => void;
+    imagePreviewMock.create.mockReturnValue(
+      new Promise(resolve => {
+        resolvePreview = resolve;
+      }),
+    );
+    const upload = component.processFiles(1, [
+      new File(['image'], 'pic.jpeg', {type: 'image/jpeg'}),
+    ]);
+    await vi.waitFor(() => {
+      expect(imagePreviewMock.create).toHaveBeenCalledOnce();
+    });
+    configMock.projectConfig.value.set({
+      id: 'different-project',
+      aspectRatio: '16:9',
+      inputConfig: {
+        products: [{id: 1, name: 'Other project', images: []}],
+        composition: '',
+        style: '',
+        audience: '',
+      },
+    });
+    resolvePreview({
+      preview: {path: 'thumbnail/pic.jpg', url: 'thumbnail-url'},
+      widthPixels: 100,
+      heightPixels: 100,
+    });
+
+    const result = await upload;
+    expect(result.added).toBe(0);
+    expect(
+      configMock.projectConfig.value().inputConfig?.products[0].images,
+    ).toEqual([]);
+  });
+
+  it('ignores pasted images while project input is still unavailable', () => {
+    configMock.projectConfig.value.set({id: 'proj-1', inputConfig: undefined});
+    const file = new File(['image'], 'pasted.jpeg', {type: 'image/jpeg'});
+    imageImportMock.imageFilesFromDataTransfer.mockReturnValue([file]);
+    const event = {
+      clipboardData: {},
+      preventDefault: vi.fn(),
+    } as unknown as ClipboardEvent;
+
+    component.onSetupPaste(event);
+
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(remixMock.uploadMedia).not.toHaveBeenCalled();
   });
 
   it('keeps successful uploads in input order when a sibling upload fails', async () => {
