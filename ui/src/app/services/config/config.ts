@@ -627,7 +627,7 @@ export class ConfigService {
   private document = inject(DOCUMENT);
   private projectId = signal<string | null>(null);
   private projectView = signal<ProjectConfigView>('full');
-  private projectLoadError = signal<unknown>(undefined);
+  private projectLoadErrorValue = signal<unknown>(undefined);
   /**
    * Mediated mode only: ids known to exist server-side (loaded via GET or
    * already POSTed). First save of a new project goes through
@@ -929,7 +929,7 @@ export class ConfigService {
     params: () => ({projectId: this.projectId(), view: this.projectView()}),
     loader: async ({params, abortSignal}) => {
       if (params.projectId === null) {
-        this.projectLoadError.set(undefined);
+        this.projectLoadErrorValue.set(undefined);
         return {...this.DEFAULT_PROJECT_CONFIG()};
       }
       const isCurrentLoad = () =>
@@ -937,7 +937,7 @@ export class ConfigService {
         this.projectId() === params.projectId &&
         this.projectView() === params.view;
       if (isCurrentLoad()) {
-        this.projectLoadError.set(undefined);
+        this.projectLoadErrorValue.set(undefined);
       }
       const localProjectAtLoad = this.projectWithUnsettledSave(
         params.projectId,
@@ -949,7 +949,7 @@ export class ConfigService {
           ),
         );
         if (isCurrentLoad()) {
-          this.projectLoadError.set(undefined);
+          this.projectLoadErrorValue.set(undefined);
           this.persistedProjectIds.add(params.projectId);
         }
         if (localProjectAtLoad) {
@@ -987,7 +987,7 @@ export class ConfigService {
         // Keep the resource value readable for app-wide effects while Setup
         // exposes this error through setupInputsError and offers a retry.
         if (isCurrentLoad()) {
-          this.projectLoadError.set(error);
+          this.projectLoadErrorValue.set(error);
         }
         return {...this.DEFAULT_PROJECT_CONFIG()};
       }
@@ -999,11 +999,13 @@ export class ConfigService {
   readonly setupInputsLoading = computed(
     () => this.projectView() === 'full' && this.projectConfig.isLoading(),
   );
-  readonly setupInputsError = computed(
+  readonly projectLoadError = computed(
     () =>
-      this.projectView() === 'full' &&
       !this.projectConfig.isLoading() &&
-      (!!this.projectLoadError() || !!this.projectConfig.error()),
+      (!!this.projectLoadErrorValue() || !!this.projectConfig.error()),
+  );
+  readonly setupInputsError = computed(
+    () => this.projectView() === 'full' && this.projectLoadError(),
   );
   readonly setupInputsLoaded = computed(
     () =>

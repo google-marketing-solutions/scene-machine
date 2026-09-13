@@ -76,6 +76,8 @@ describe('Storyboard', () => {
       isLoading: () => false,
       error: () => null,
     },
+    projectLoadError: signal(false),
+    reloadProjectConfig: vi.fn(),
     globalConfig: {
       value: () => ({
         duration: 5,
@@ -138,6 +140,8 @@ describe('Storyboard', () => {
         isLoading: () => false,
         error: () => null,
       },
+      projectLoadError: signal(false),
+      reloadProjectConfig: vi.fn(),
       globalConfig: {
         value: () => ({
           duration: 5,
@@ -250,6 +254,20 @@ describe('Storyboard', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('shows a project load error with a retry action', () => {
+    mockConfigService.projectLoadError.set(true);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain(
+      'Could not load this project',
+    );
+    const retry = fixture.nativeElement.querySelector('button');
+    expect(retry?.textContent).toContain('Retry');
+
+    retry.click();
+    expect(mockConfigService.reloadProjectConfig).toHaveBeenCalledTimes(1);
   });
 
   it('exposes native vertical prompt resizing without stretch styles', () => {

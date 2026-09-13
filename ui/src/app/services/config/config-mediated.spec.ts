@@ -797,6 +797,46 @@ describe('ConfigService (mediated data plane)', () => {
   });
 
   describe('route-scoped project loading', () => {
+    it('keeps a retry for an abandoned project from replacing the current project', async () => {
+      const firstA = new Subject<any>();
+      const retryA = new Subject<any>();
+      const projectA = {
+        ...service.projectConfig.value(),
+        id: 'project-a',
+        name: 'A',
+      };
+      const projectB = {...projectA, id: 'project-b', name: 'B'};
+      let aRequestCount = 0;
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') return of({});
+        if (url === '/api/projects/project-a?view=editor') {
+          aRequestCount += 1;
+          return aRequestCount === 1 ? firstA : retryA;
+        }
+        if (url === '/api/projects/project-b?view=editor') return of(projectB);
+        return of({});
+      });
+
+      service.loadProjectConfig('project-a', 'editor');
+      await vi.waitFor(() => expect(aRequestCount).toBe(1));
+      firstA.error(new HttpErrorResponse({status: 500}));
+      await vi.waitFor(() => expect(service.projectLoadError()).toBe(true));
+
+      service.reloadProjectConfig();
+      await vi.waitFor(() => expect(aRequestCount).toBe(2));
+      service.loadProjectConfig('project-b', 'editor');
+      await vi.waitFor(() =>
+        expect(service.projectConfig.value().id).toBe('project-b'),
+      );
+
+      retryA.next({...projectA, name: 'stale retry A'});
+      retryA.complete();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(service.projectConfig.value().id).toBe('project-b');
+      expect(service.projectConfig.value().name).toBe('B');
+    });
+
     it('does not surface a late stale-load error after a newer same-route load succeeds', async () => {
       const firstA = new Subject<any>();
       const secondA = new Subject<any>();
