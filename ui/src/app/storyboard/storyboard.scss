@@ -469,7 +469,9 @@
   // The live left-track width is carried by a CSS custom property so a
   // container query can reflow all tracks on narrow Storyboard surfaces while
   // desktop resize/collapse continues to control the candidate sidebar.
-  grid-template-columns: var(--storyboard-left-track, 280px) minmax(0, 1fr) 320px;
+  grid-template-columns:
+    var(--storyboard-left-track, 280px) minmax(0, 1fr)
+    320px;
   grid-template-rows: minmax(0, 1fr);
   flex: 1; // Take remaining height
   width: 100%;
@@ -944,6 +946,14 @@
           max-width: 100%;
           max-height: 100%;
           object-fit: contain;
+        }
+
+        .candidate-video-loading {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          z-index: 3;
         }
 
         .video-overlay {

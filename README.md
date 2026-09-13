@@ -93,6 +93,17 @@ preserves all older rendered versions, enabling users to maintain and compare
 multiple creative variants (e.g., short vs. long versions) within the same
 project.
 
+### Local candidate-video cache
+
+The browser may cache selected or hovered candidate videos locally for up to
+seven days to make scene switching faster. This is bounded, best-effort browser
+storage: browsers may evict it earlier, it does not provide offline project
+access, and it is not a remote security purge. Archive and project-delete
+actions invalidate matching entries from the current page. In-flight writes
+are fenced only within that page: another open tab can finish a pending fetch
+and cache the same bytes again. Other browsers or offline devices may also
+retain their local bytes until eviction.
+
 ## Technical Requirements
 
 [< How it Works](#how-it-works) • [Top](#readme-top) •

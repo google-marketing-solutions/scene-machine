@@ -63,6 +63,8 @@ import {
 import {ImageImportService} from '../services/image-import/image-import';
 import {MediaSrcPipe} from '../services/media/media-src.pipe';
 import {MediaService} from '../services/media/media';
+import {CandidateVideoCacheService} from '../services/media/candidate-video-cache';
+import {CandidateVideoDirective} from '../shared/candidate-video/candidate-video.directive';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {EditableProjectTitle} from '../shared/editable-project-title/editable-project-title';
 import {
@@ -106,6 +108,7 @@ import {
     MediaSrcPipe,
     EditableProjectTitle,
     DictationControl,
+    CandidateVideoDirective,
   ],
   templateUrl: './storyboard.html',
   styleUrl: './storyboard.scss',
@@ -120,6 +123,7 @@ export class Storyboard {
   private snackBar = inject(MatSnackBar);
   private httpClient = inject(HttpClient);
   private mediaService = inject(MediaService);
+  private candidateVideoCache = inject(CandidateVideoCacheService);
   private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private downloadCancel = new Subject<void>();
@@ -139,6 +143,11 @@ export class Storyboard {
   readonly dictationConfig = computed(
     () => this.config.globalConfig?.value?.()?.dictation,
   );
+  readonly candidateCacheScope = computed(() => {
+    const projectId = this.config.projectConfig.value().id;
+    const bucket = this.config.globalConfig.value()?.gcsBucket;
+    return bucket && projectId ? {bucket, projectId} : null;
+  });
   private preparedMove:
     | {
         sceneId: string;
@@ -1106,8 +1115,15 @@ export class Storyboard {
   toggleArchive(event: Event, scene: GeneratedScene, index: number) {
     event.stopPropagation();
     if (scene.candidates && scene.candidates[index]) {
-      scene.candidates[index].isArchived = !scene.candidates[index].isArchived;
+      const candidate = scene.candidates[index];
+      candidate.isArchived = !candidate.isArchived;
       this.updateScenes();
+      if (candidate.isArchived && candidate.video?.path) {
+        void this.candidateVideoCache.invalidateCandidate(
+          this.config.projectConfig.value().id,
+          candidate.video.path,
+        );
+      }
     }
   }
 
