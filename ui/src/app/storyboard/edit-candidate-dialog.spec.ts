@@ -21,17 +21,21 @@ import {EditCandidateDialog} from './edit-candidate-dialog';
 
 describe('EditCandidateDialog', () => {
   let fixture: ComponentFixture<EditCandidateDialog>;
+  let component: EditCandidateDialog;
+  let dialogRef: {close: ReturnType<typeof vi.fn>};
 
   beforeEach(async () => {
+    dialogRef = {close: vi.fn()};
     await TestBed.configureTestingModule({
       imports: [EditCandidateDialog],
-      providers: [{provide: MatDialogRef, useValue: {close: vi.fn()}}],
+      providers: [{provide: MatDialogRef, useValue: dialogRef}],
     }).compileComponents();
     fixture = TestBed.createComponent(EditCandidateDialog);
+    component = fixture.componentInstance;
     fixture.detectChanges();
   });
 
-  it('shows an example prompt and keeps Edit disabled for an empty prompt', () => {
+  it('shows an example prompt and keeps Generate disabled for an empty prompt', () => {
     const textarea = fixture.nativeElement.querySelector(
       'textarea',
     ) as HTMLTextAreaElement;
@@ -39,11 +43,33 @@ describe('EditCandidateDialog', () => {
       'button',
     ) as NodeListOf<HTMLButtonElement>;
     const editButton = Array.from(buttons).find(
-      button => button.textContent?.trim() === 'Edit',
+      button => button.textContent?.trim() === 'Generate',
     ) as HTMLButtonElement;
 
     expect(textarea.placeholder).toBe('e.g., Make the sky purple');
     expect(textarea.value).toBe('');
+    expect(getComputedStyle(textarea).resize).toBe('none');
+    expect(fixture.nativeElement.querySelector('h2').textContent.trim()).toBe(
+      'Edit candidate',
+    );
     expect(editButton.disabled).toBe(true);
+  });
+
+  it('enables Generate and returns the trimmed instruction', () => {
+    component.updateEditPrompt('  Make the sky purple  ');
+    fixture.detectChanges();
+
+    const generateButton = Array.from(
+      fixture.nativeElement.querySelectorAll(
+        'button',
+      ) as NodeListOf<HTMLButtonElement>,
+    ).find(
+      button => button.textContent?.trim() === 'Generate',
+    ) as HTMLButtonElement;
+
+    expect(generateButton.disabled).toBe(false);
+    generateButton.click();
+
+    expect(dialogRef.close).toHaveBeenCalledWith('Make the sky purple');
   });
 });

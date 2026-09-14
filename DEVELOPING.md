@@ -121,6 +121,39 @@ A full `./deploy.sh` stays the safe default and is what you should run for a rel
 - **`--skip-ui-build` / `--use-existing-ui-dist`** reuses the existing `ui/dist` instead of rebuilding the UI. Good for backend-only changes. It reuses the config already baked into that build, so use it when redeploying the **same** project. The deploy refuses a `ui/dist` that was built for local dev (sign-in disabled).
 - **`--no-build-cache`** forces a clean cold image build, for a release or a dependency refresh.
 
+### Dictation feature flag
+
+Microphone dictation is included in deployment and enabled by default. The
+optional `DICTATION_ENABLED` variable defaults to `1` when omitted; deploy
+validation accepts only `0` or `1`. Set `export DICTATION_ENABLED=0` in
+`config.txt` before deploying or redeploying to disable it. Existing explicit
+`0` values are preserved. The flag is passed to the app service only, never
+to the worker; the UI reads the capability from `/api/config`.
+The backend uses the fixed `gemini-3.5-transcribe-preview` model in `global`
+with `SMART` transcription by default; there is no runtime model picker or
+fallback. Set `export DICTATION_MODE=VERBATIM` in `config.txt` for word-for-word
+transcription, or `SMART` for filler removal, formatting and spoken
+self-corrections. These are the only accepted values (uppercase); omission
+defaults to `SMART`, while empty or invalid values fail validation. Keep
+`VERBATIM` explicit in `config.txt` to retain it on redeploy; deployment
+replaces any previous Cloud Run mode with this value.
+The mode is passed only to the app service,
+and invalid runtime configuration is rejected before a provider call.
+
+For local endpoint testing, use the existing `DEV` procedure above. The
+backend also enables dictation when the variable is absent; set
+`DICTATION_ENABLED=0` in that process to opt out. Set `DICTATION_MODE` in the
+same backend process environment to override the default mode locally.
+Recording requires a user click and browser microphone permission.
+Transcription uses the configured
+Google Cloud project, requires access to the preview model and can incur
+model charges and consume quota. Verify browser/provider behavior on your
+instance before sharing it with users. Recordings are
+limited to 4 MiB and 120 seconds, become editable transcript text, do not
+submit or auto-generate anything, and have no durable recording storage;
+temporary audio files are removed after processing. The
+preview model's transcription quality is still being evaluated.
+
 ### Future considerations: splitting the app and worker images
 
 Today `deploy.sh` builds **one** image and runs it as two Cloud Run services via the `ROLE` env var (`app` serves the UI and `/api`; `worker` runs background jobs). One image keeps deployment simple, but it means the lightweight `app` service still ships inside an image that also carries ffmpeg and the heavier generation dependencies only the `worker` needs, so a UI change rebuilds the large image.
@@ -144,7 +177,7 @@ The model catalog — which models exist, their locations and capabilities, and 
 
 The Setup and Storyboard video controls read `allowed_resolutions`, `allowed_aspect_ratios` and `duration_by_resolution` from the selected model's entry; a model without them falls back to 720p/1080p, 16:9/9:16 and 4/6/8 s. Changing the model or the resolution snaps the other settings to allowed values. Saved projects retain their settings until the catalog is available; then invalid combinations are corrected to allowed values.
 
-The project's “Use clip audio” choice is retained on each generated candidate, including Omni candidates: Omni always produces an audio track, but turning the choice off mutes it in previews and the final video. On the Output page, “Download Scenes” renders each selected clip with its current trim and saved audio choice. These individual exports omit transitions, music and overlays; they do not slice a historical combined render. The original provider files remain unchanged.
+The project's “Generate Audio” choice is retained on each generated candidate, including Omni candidates: Omni always produces an audio track, but turning the choice off mutes it in previews and the final video. On the Output page, “Download Scenes” renders each selected clip with its current trim and saved audio choice. These individual exports omit transitions, music and overlays; they do not slice a historical combined render. The original provider files remain unchanged.
 
 ## Creating Applications
 

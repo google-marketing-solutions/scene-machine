@@ -7,6 +7,12 @@ as cheap regression gates.
 
 import pathlib
 import re
+import json
+import os
+import subprocess
+import sys
+
+import pytest
 
 _REPO = pathlib.Path(__file__).resolve().parent.parent
 _DEPLOY_SCRIPTS = [
@@ -29,6 +35,124 @@ def _deploy_sh() -> str:
 
 def _dockerfile() -> str:
   return (_REPO / 'Dockerfile').read_text(encoding='utf-8')
+
+
+def _render_cors_origins(metadata):
+  helper = _REPO / 'deploy' / 'render_cors_origins.py'
+  return subprocess.run(
+      [sys.executable, str(helper)],
+      input=json.dumps(metadata),
+      text=True,
+      capture_output=True,
+      check=False,
+  )
+
+
+def test_cors_generation_uses_all_returned_cloud_run_origins():
+  """Both Cloud Run URLs must reach the generated bucket CORS document."""
+  origins = [
+      'https://app-27024139760.us-central1.run.app',
+      'https://app-7jl6tkwhpa-uc.a.run.app',
+  ]
+  metadata_origins = [*origins, origins[0]]
+  metadata = {
+      'metadata': {
+          'annotations': {
+              'run.googleapis.com/urls': json.dumps(metadata_origins),
+          }
+      }
+  }
+  result = _render_cors_origins(metadata)
+  assert result.returncode == 0, result.stderr
+  rendered_template = (
+      (_REPO / 'gcs-cors-config.template.json')
+      .read_text(encoding='utf-8')
+      .replace('${UI_CORS_ORIGINS}', result.stdout.strip())
+  )
+  config = json.loads(rendered_template)
+  assert config[0]['origin'][:4] == [
+      'http://localhost',
+      'http://localhost:4200',
+      'localhost',
+      'localhost:4200',
+  ]
+  assert config[0]['origin'][4:] == origins
+  assert config[0]['method'] == ['GET', 'POST', 'HEAD', 'PUT', 'DELETE']
+  assert config[0]['responseHeader'] == ['Content-Type']
+  assert config[0]['maxAgeSeconds'] == 3600
+
+
+@pytest.mark.parametrize(
+    'metadata',
+    [
+        {},
+        {'metadata': {'annotations': {}}},
+        {'metadata': {'annotations': {'run.googleapis.com/urls': 'not-json'}}},
+        {
+            'metadata': {
+                'annotations': {
+                    'run.googleapis.com/urls': ['https://app.example']
+                }
+            }
+        },
+        {'metadata': {'annotations': {'run.googleapis.com/urls': '[]'}}},
+        {
+            'metadata': {
+                'annotations': {
+                    'run.googleapis.com/urls': json.dumps(
+                        ['https://app.example/path']
+                    )
+                }
+            }
+        },
+        {
+            'metadata': {
+                'annotations': {
+                    'run.googleapis.com/urls': json.dumps(
+                        ['https://app.example/*']
+                    )
+                }
+            }
+        },
+        {
+            'metadata': {
+                'annotations': {
+                    'run.googleapis.com/urls': json.dumps(
+                        ['https://user:pass@app.example']
+                    )
+                }
+            }
+        },
+        {
+            'metadata': {
+                'annotations': {
+                    'run.googleapis.com/urls': json.dumps(
+                        ['https://app.example\t']
+                    )
+                }
+            }
+        },
+    ],
+)
+def test_cors_generation_fails_closed_for_malformed_url_metadata(metadata):
+  """Missing/invalid annotations must not fabricate a CORS origin."""
+  result = _render_cors_origins(metadata)
+  assert result.returncode != 0
+  assert result.stdout == ''
+
+
+def test_deploy_wires_returned_origins_into_bucket_template():
+  """The deploy must use the validated annotation output, not ignore it."""
+  text = _deploy_sh()
+  metadata = "--format='json(metadata.annotations.\"run.googleapis.com/urls\")'"
+  render = 'python3 ./deploy/render_cors_origins.py'
+  assert metadata in text
+  assert render in text
+  assert 'export UI_CORS_ORIGINS' in text
+  render_pos = text.index(render)
+  export_pos = text.index('export UI_CORS_ORIGINS')
+  template_pos = text.index('envsubst < ./gcs-cors-config.template.json')
+  assert render_pos < export_pos < template_pos
 
 
 def test_no_destructive_authorized_domains_update():
@@ -198,3 +322,92 @@ def test_no_infinite_gunicorn_timeout():
       'worker needs a finite gunicorn timeout above its Cloud Run request '
       'timeout (D7).'
   )
+
+
+def test_dictation_flag_is_optional_validated_and_app_only():
+  """Dictation defaults on, remains opt-out, and is app-only."""
+  template = (_REPO / 'config.template.txt').read_text(encoding='utf-8')
+  text = _deploy_sh()
+  assert 'export DICTATION_ENABLED=1' in template
+  assert 'DICTATION_ENABLED="${DICTATION_ENABLED:-1}"' in text
+  assert 'DICTATION_ENABLED must be 0 or 1' in text
+  assert 'export DICTATION_MODE=SMART' in template
+  assert 'DICTATION_MODE="${DICTATION_MODE-SMART}"' in text
+  assert 'DICTATION_MODE must be SMART or VERBATIM' in text
+  worker_block = text.split('gcloud run deploy worker', 1)[1].split(
+      'gcloud run deploy app', 1
+  )[0]
+  assert 'DICTATION_ENABLED=' not in worker_block
+  assert 'DICTATION_MODE=' not in worker_block
+  app_blocks = text.split('--set-env-vars=ROLE=app')[1:]
+  assert app_blocks and all('DICTATION_ENABLED=${DICTATION_ENABLED}' in block for block in app_blocks)
+  assert all('DICTATION_MODE=${DICTATION_MODE}' in block for block in app_blocks)
+
+
+@pytest.mark.parametrize('value, selected, expected, error', [
+    (None, '1', 0, ''),
+    ('0', '0', 0, ''),
+    ('1', '1', 0, ''),
+    ('invalid', None, 1, 'DICTATION_ENABLED must be 0 or 1'),
+    ('2', None, 1, 'DICTATION_ENABLED must be 0 or 1'),
+])
+def test_dictation_deploy_validation_executes_default_and_opt_out(
+    value, selected, expected, error
+):
+  """Execute the deploy.sh flag block without running the deploy."""
+  text = _deploy_sh()
+  match = re.search(
+      r'(?ms)^(DICTATION_ENABLED="\$\{DICTATION_ENABLED:-1\}"\n'
+      r'if \[\[.*?^fi)$',
+      text,
+  )
+  assert match
+  block = match.group(1) + '\nprintf "%s\\n" "$DICTATION_ENABLED"\n'
+  environment = os.environ.copy()
+  environment.pop('DICTATION_ENABLED', None)
+  if value is not None:
+    environment['DICTATION_ENABLED'] = value
+  result = subprocess.run(
+      ['bash', '-c', block], env=environment, capture_output=True, text=True,
+      check=False,
+  )
+  assert result.returncode == expected
+  if selected is not None:
+    assert result.stdout.strip() == selected
+  else:
+    assert error in result.stderr
+
+
+@pytest.mark.parametrize('value, selected, expected, error', [
+    (None, 'SMART', 0, ''),
+    ('SMART', 'SMART', 0, ''),
+    ('VERBATIM', 'VERBATIM', 0, ''),
+    ('', None, 1, 'DICTATION_MODE must be SMART or VERBATIM'),
+    ('smart', None, 1, 'DICTATION_MODE must be SMART or VERBATIM'),
+    ('OTHER', None, 1, 'DICTATION_MODE must be SMART or VERBATIM'),
+])
+def test_dictation_mode_deploy_validation_executes_exact_allowlist(
+    value, selected, expected, error
+):
+  """Execute the deploy.sh mode block without running the deploy."""
+  text = _deploy_sh()
+  match = re.search(
+      r'(?ms)^(DICTATION_MODE="\$\{DICTATION_MODE-SMART\}"\n'
+      r'if \[\[.*?^fi)$',
+      text,
+  )
+  assert match
+  block = match.group(1) + '\nprintf "%s\\n" "$DICTATION_MODE"\n'
+  environment = os.environ.copy()
+  environment.pop('DICTATION_MODE', None)
+  if value is not None:
+    environment['DICTATION_MODE'] = value
+  result = subprocess.run(
+      ['bash', '-c', block], env=environment, capture_output=True, text=True,
+      check=False,
+  )
+  assert result.returncode == expected
+  if selected is not None:
+    assert result.stdout.strip() == selected
+  else:
+    assert error in result.stderr

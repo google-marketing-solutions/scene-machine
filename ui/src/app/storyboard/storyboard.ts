@@ -71,6 +71,7 @@ import {
 } from './add-scene-dialog/add-scene-dialog';
 import {ConfirmDialog} from './confirm-dialog';
 import {EditCandidateDialog} from './edit-candidate-dialog';
+import {DictationControl} from '../shared/dictation/dictation-control';
 import {
   candidateLabel,
   MoveDestination,
@@ -104,6 +105,7 @@ import {
     MatProgressSpinnerModule,
     MediaSrcPipe,
     EditableProjectTitle,
+    DictationControl,
   ],
   templateUrl: './storyboard.html',
   styleUrl: './storyboard.scss',
@@ -129,6 +131,14 @@ export class Storyboard {
   private lastProjectId: string | undefined;
   private moveVisitEpoch = 0;
   readonly downloadInProgress = signal(false);
+  /** Scene prompt revisions make Undo recovery safe across repeated text values. */
+  readonly scenePromptRevisions = signal<Record<string, number>>({});
+  readonly dictationEnabled = computed(
+    () => this.config.globalConfig?.value?.()?.dictation?.enabled === true,
+  );
+  readonly dictationConfig = computed(
+    () => this.config.globalConfig?.value?.()?.dictation,
+  );
   private preparedMove:
     | {
         sceneId: string;
@@ -468,6 +478,20 @@ export class Storyboard {
     return this.trimEnd() - this.trimStart();
   });
 
+  /** Whether a trim removes a meaningful amount from the source duration. */
+  isTrimmedRange(
+    trim: {start?: number; end?: number} | undefined,
+    duration: number,
+  ): boolean {
+    if (!trim || !Number.isFinite(duration) || duration <= 0) {
+      return false;
+    }
+    const startMilliseconds = Math.round((trim.start ?? 0) * 1000);
+    const endMilliseconds = Math.round((trim.end ?? duration) * 1000);
+    const durationMilliseconds = Math.round(duration * 1000);
+    return startMilliseconds > 0 || endMilliseconds < durationMilliseconds;
+  }
+
   // Computed for trim bars
   trimStartPercent = computed(() => {
     const duration = this.videoDuration();
@@ -512,6 +536,10 @@ export class Storyboard {
     const video = this.videoElement()?.nativeElement;
     if (video && !video.paused) {
       this.toggleVideoPlay();
+    }
+    this.isVideoPlaying.set(false);
+    if (video) {
+      video.loop = false;
     }
     document.addEventListener('mousemove', this.boundHandleDrag);
     document.addEventListener('mouseup', this.boundStopDragging);
@@ -610,10 +638,12 @@ export class Storyboard {
     if (!video) return;
 
     if (video.paused) {
+      video.loop = true;
       void video.play();
       this.isVideoPlaying.set(true);
     } else {
       video.pause();
+      video.loop = false;
       this.isVideoPlaying.set(false);
     }
   }
@@ -901,10 +931,12 @@ export class Storyboard {
   }
 
   selectCandidate(scene: GeneratedScene, index: number) {
+    const candidate = scene.candidates![index];
+    const promptChanged = scene.prompt !== candidate.prompt;
     scene.selectedCandidateIndex = index;
-    scene.prompt = scene.candidates![index].prompt;
-    scene.referenceImage = scene.candidates![index].referenceImage;
-    this.updateScenes();
+    scene.prompt = candidate.prompt;
+    scene.referenceImage = candidate.referenceImage;
+    this.updateScenes(scene, promptChanged);
     this.isVideoPlaying.set(false);
   }
 
@@ -1041,7 +1073,10 @@ export class Storyboard {
     return (subtype && knownExtensions[subtype]) || 'bin';
   }
 
-  updateScenes(scene?: GeneratedScene | ProvidedVideoScene) {
+  updateScenes(
+    scene?: GeneratedScene | ProvidedVideoScene,
+    promptChanged = false,
+  ) {
     const updatedScene = scene || this.selectedScene();
     if (!updatedScene) {
       return;
@@ -1051,6 +1086,21 @@ export class Storyboard {
         .value()
         .storyboard.map(s => (s.id === updatedScene.id ? updatedScene : s)),
     });
+    if (promptChanged && this.config.isGeneratedScene(updatedScene)) {
+      this.scenePromptRevisions.update(revisions => ({
+        ...revisions,
+        [updatedScene.id]: (revisions[updatedScene.id] ?? 0) + 1,
+      }));
+    }
+  }
+
+  updateScenePrompt(scene: GeneratedScene, prompt: string): void {
+    scene.prompt = prompt;
+    this.updateScenes(scene, true);
+  }
+
+  scenePromptRevision(sceneId: string): number {
+    return this.scenePromptRevisions()[sceneId] ?? 0;
   }
 
   toggleArchive(event: Event, scene: GeneratedScene, index: number) {
@@ -1064,7 +1114,14 @@ export class Storyboard {
   /** Opens the edit-candidate dialog and, on a non-empty result, runs the edit. */
   editCandidate(event: Event, scene: GeneratedScene, index: number) {
     event.stopPropagation();
-    const dialogRef = this.dialog.open(EditCandidateDialog);
+    const dialogRef = this.dictationEnabled()
+      ? this.dialog.open(EditCandidateDialog, {
+          data: {
+            dictationEnabled: true,
+            dictationConfig: this.dictationConfig(),
+          },
+        })
+      : this.dialog.open(EditCandidateDialog);
     dialogRef.afterClosed().subscribe((result: string | undefined) => {
       if (result) {
         void this.remixEngineService.editCandidate(scene, index, result);
@@ -1341,13 +1398,15 @@ export class Storyboard {
     const scene = this.selectedScene();
     if (this.config.isGeneratedScene(scene)) {
       // While a generation is in flight, the placeholder count must reflect
-      // what THAT run requested — not the live slider. The lost-candidates fix
-      // persists a per-scene pendingGeneration marker that captures
-      // requestedCount at start, so snapshot from there. Without an in-flight
-      // marker (no run in progress) fall back to the live config.
-      const requestedCount =
-        scene.pendingGeneration?.requestedCount ??
-        this.config.projectConfig.value().numberOfCandidates;
+      // what THAT run requested — not the live slider. Edit startup is tracked
+      // in memory until its persisted pendingGeneration marker is available;
+      // ordinary generation falls back to the live config when no marker exists.
+      const requestedCount = this.remixEngineService
+        .editingSceneIds()
+        .has(scene.id)
+        ? 1
+        : (scene.pendingGeneration?.requestedCount ??
+          this.config.projectConfig.value().numberOfCandidates);
       return Array.from({length: requestedCount}).fill(0);
     }
     return [];
