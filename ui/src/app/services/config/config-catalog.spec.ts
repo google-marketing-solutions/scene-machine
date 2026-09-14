@@ -250,6 +250,75 @@ describe('ConfigService model catalog', () => {
     expect(matSnackBarMock.open).not.toHaveBeenCalled();
   });
 
+  it('uses the seeded defaults for new/reset projects without changing saved settings', async () => {
+    await settle();
+    (service as any).globalConfig.set(
+      liveGlobalConfig({
+        veoModel: 'omni-1',
+        veoLocation: 'global',
+        aspectRatio: '16:9',
+        resolution: '720p',
+        duration: 4,
+        generateAudio: true,
+        numberOfCandidates: 4,
+        modelCatalog: CATALOG_WITH_OMNI,
+      }),
+    );
+
+    service.setNewProject('proj-new');
+    expect(service.projectConfig.value()).toMatchObject({
+      id: 'proj-new',
+      aspectRatio: '16:9',
+      resolution: '720p',
+      candidateDurationSeconds: 4,
+      generateAudio: true,
+      numberOfCandidates: 4,
+      model: 'omni-1',
+    });
+
+    service.resetProjectConfig();
+    expect(service.projectConfig.value()).toMatchObject({
+      id: '',
+      aspectRatio: '16:9',
+      resolution: '720p',
+      candidateDurationSeconds: 4,
+      generateAudio: true,
+      numberOfCandidates: 4,
+      model: 'omni-1',
+    });
+
+    httpClientMock.get.mockImplementation((url: string) =>
+      url === '/api/projects/proj-saved'
+        ? of({
+            id: 'proj-saved',
+            name: 'Saved Project',
+            storyboard: [],
+            aspectRatio: '9:16',
+            resolution: '1080p',
+            candidateDurationSeconds: 8,
+            generateAudio: false,
+            numberOfCandidates: 2,
+            model: 'veo-default',
+            inputConfig: {products: [], composition: ''},
+            audioTracks: [],
+            visualOverlays: [],
+          })
+        : of({}),
+    );
+    service.loadProjectConfig('proj-saved');
+    await settle();
+
+    expect(service.projectConfig.value()).toMatchObject({
+      id: 'proj-saved',
+      aspectRatio: '9:16',
+      resolution: '1080p',
+      candidateDurationSeconds: 8,
+      generateAudio: false,
+      numberOfCandidates: 2,
+      model: 'veo-default',
+    });
+  });
+
   it('gives a saved project on the deploy default the visible, persisted rewrite', async () => {
     // Same model value as the untouched default, but the project is known
     // server-side: the correction must persist and be announced, or a reload

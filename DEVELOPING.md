@@ -62,7 +62,7 @@ Point it at your own dev project with the overrides `SM_DEV_PROJECT`, `SM_DEV_FI
 
 ### Seed the local config document (first run only)
 
-The backend serves `/api/config` from the `config/global` Firestore document. A fresh dev database does not have it, so `/api/config` returns `404 Config not seeded`; the UI then falls back to empty defaults (you can browse, but cannot start a generation). Seed it once against your dev database, the same way `deploy.sh` does (model/region values come from `config.txt` — copy `config.template.txt` if you do not have one):
+The backend serves `/api/config` from the `config/global` Firestore document. A fresh dev database does not have it, so `/api/config` returns `404 Config not seeded`; the UI then falls back to empty defaults (you can browse, but cannot start a generation). Seed it once against your dev database, the same way `deploy.sh` does (model/region values come from `config.txt`; the template defaults to Gemini Omni — copy `config.template.txt` if you do not have one):
 
 ```
 set -a; source ./config.txt; set +a   # GEMINI_MODEL, regions, etc.
@@ -88,6 +88,13 @@ python3 scripts/seed_config_models.py convert < ui/definitions/models.json | cur
 ```
 
 This requires a Firestore database to already exist in your dev project (the one `FIRESTORE_DB_UI` names) and ADC with write access to it.
+
+With the shipped config template, the front-door seed starts new projects with Gemini Omni
+(`gemini-omni-1.1-flash-preview`), 720p, audio enabled, four-second candidates,
+and four candidates per run. Omni is global-only: existing deployments must
+set both `VEO_MODEL=gemini-omni-1.1-flash-preview` and `VEO_REGION=global` in
+`config.txt` before redeploying. Existing project documents keep their saved
+video settings; there is no automatic migration.
 
 ### Homepage announcement
 
