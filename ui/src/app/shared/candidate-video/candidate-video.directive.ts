@@ -85,43 +85,62 @@ export class CandidateVideoDirective implements OnChanges, OnDestroy {
     if (!media) return;
     const requestId = ++this.requestId;
     this.loading.set(true);
-    const lease = await this.cache.acquire(
-      this.candidateVideoCacheScope ?? {bucket: '', projectId: ''},
-      media,
-      this.candidateVideoPersist && !!this.candidateVideoCacheScope,
-    );
-    if (requestId !== this.requestId) {
-      lease.release();
-      return;
-    }
-    this.lease = lease;
-    this.element.nativeElement.src = lease.url;
-    this.loadVideo();
-    this.loading.set(false);
-    if (this.candidateVideoHover) {
-      const video = this.element.nativeElement;
-      video.muted = true;
-      video.playbackRate = 2;
-      try {
-        const playback = video.play();
-        if (playback) void playback.catch(() => undefined);
-      } catch {
-        // A preview may be unavailable in a browser without media playback.
+    try {
+      const lease = await this.cache.acquire(
+        this.candidateVideoCacheScope ?? {bucket: '', projectId: ''},
+        media,
+        this.candidateVideoPersist && !!this.candidateVideoCacheScope,
+      );
+      if (requestId !== this.requestId) {
+        lease.release();
+        return;
+      }
+      if (this.lease) {
+        const video = this.element.nativeElement;
+        video.pause();
+        video.removeAttribute('src');
+        this.loadVideo();
+        this.lease.release();
+        this.lease = undefined;
+      }
+      this.lease = lease;
+      if (lease.url) {
+        this.element.nativeElement.src = lease.url;
+      } else {
+        this.element.nativeElement.removeAttribute('src');
+      }
+      this.loadVideo();
+      if (this.candidateVideoHover) {
+        const video = this.element.nativeElement;
+        video.muted = true;
+        video.playbackRate = 2;
+        try {
+          const playback = video.play();
+          if (playback) void playback.catch(() => undefined);
+        } catch {
+          // A preview may be unavailable in a browser without media playback.
+        }
+      }
+    } catch {
+      // Acquisition failures leave the current element/source unchanged.
+    } finally {
+      if (requestId === this.requestId) {
+        this.loading.set(false);
       }
     }
   }
 
   private release(clearElement = false): void {
     this.requestId++;
-    this.lease?.release();
-    this.lease = undefined;
-    this.loading.set(false);
     if (clearElement) {
       const video = this.element.nativeElement;
       video.pause();
       video.removeAttribute('src');
       this.loadVideo();
     }
+    this.lease?.release();
+    this.lease = undefined;
+    this.loading.set(false);
   }
 
   private loadVideo(): void {

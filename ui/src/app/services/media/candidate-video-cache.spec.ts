@@ -142,8 +142,9 @@ describe('CandidateVideoCacheService', () => {
   });
 
   it('discards cache entries with invalid metadata before fetching fresh bytes', async () => {
+    const key = `${globalThis.location.origin}/__scene_machine_candidate_video_cache__/v1/bucket-a/project-a/videos%2Fa.mp4`;
     cache.values.set(
-      'http://localhost:3000/__scene_machine_candidate_video_cache__/v1/bucket-a/project-a/videos/a.mp4',
+      key,
       new Response(new Uint8Array([9]), {
         status: 200,
         headers: {
@@ -157,6 +158,8 @@ describe('CandidateVideoCacheService', () => {
     fetchMock.mockResolvedValue(
       new Response(new Uint8Array([1]), {status: 200}),
     );
+    const deleteSpy = vi.spyOn(cache, 'delete');
+    const matchSpy = vi.spyOn(cache, 'match');
 
     const lease = await service.acquire(
       {bucket: 'bucket-a', projectId: 'project-a'},
@@ -165,13 +168,19 @@ describe('CandidateVideoCacheService', () => {
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstMatched = await matchSpy.mock.results[0].value;
+    expect(firstMatched!.headers.get('x-scene-machine-cached-at')).toBe(
+      'not-a-timestamp',
+    );
+    expect(deleteSpy).toHaveBeenCalledWith(expect.objectContaining({url: key}));
     expect(lease.url).toBe('blob:lease');
     lease.release();
   });
 
   it('does not serve a cache entry dated in the future', async () => {
+    const key = `${globalThis.location.origin}/__scene_machine_candidate_video_cache__/v1/bucket-a/project-a/videos%2Fa.mp4`;
     cache.values.set(
-      'http://localhost:3000/__scene_machine_candidate_video_cache__/v1/bucket-a/project-a/videos/a.mp4',
+      key,
       new Response(new Uint8Array([9]), {
         status: 200,
         headers: {
@@ -185,6 +194,8 @@ describe('CandidateVideoCacheService', () => {
     fetchMock.mockResolvedValue(
       new Response(new Uint8Array([1]), {status: 200}),
     );
+    const deleteSpy = vi.spyOn(cache, 'delete');
+    const matchSpy = vi.spyOn(cache, 'match');
 
     const lease = await service.acquire(
       {bucket: 'bucket-a', projectId: 'project-a'},
@@ -193,7 +204,84 @@ describe('CandidateVideoCacheService', () => {
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstMatched = await matchSpy.mock.results[0].value;
+    const cachedAt = Number(
+      firstMatched!.headers.get('x-scene-machine-cached-at'),
+    );
+    expect(Number.isFinite(cachedAt)).toBe(true);
+    expect(cachedAt).toBeGreaterThan(Date.now());
+    expect(deleteSpy).toHaveBeenCalledWith(expect.objectContaining({url: key}));
     lease.release();
+  });
+
+  it('returns the signed URL without fetching when invalidation races a cached body read', async () => {
+    let releaseRead!: () => void;
+    const readGate = new Promise<void>(resolve => (releaseRead = resolve));
+    const readStarted = new Promise<void>(resolve => {
+      const key = `${globalThis.location.origin}/__scene_machine_candidate_video_cache__/v1/bucket-a/project-a/videos%2Fa.mp4`;
+      const body = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          resolve();
+          await readGate;
+          controller.enqueue(new Uint8Array([1]));
+          controller.close();
+        },
+      });
+      cache.values.set(
+        key,
+        new Response(body, {
+          status: 200,
+          headers: {
+            'x-scene-machine-cached-at': String(Date.now()),
+            'x-scene-machine-cached-size': '1',
+            'content-type': 'video/mp4',
+          },
+        }),
+      );
+    });
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
+
+    const scope = {bucket: 'bucket-a', projectId: 'project-a'};
+    const file = {path: 'videos/a.mp4'};
+    const acquisition = service.acquire(scope, file, true);
+    await readStarted;
+    const invalidation = service.invalidateCandidate(
+      scope.projectId,
+      file.path,
+    );
+    releaseRead();
+
+    const lease = await acquisition;
+    await invalidation;
+    expect(lease.url).toBe('https://signed.example/a.mp4');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    expect(cache.values.size).toBe(0);
+    lease.release();
+  });
+
+  it('bypasses persistent caching when the bucket or project scope is empty', async () => {
+    const open = vi.mocked(globalThis.caches.open);
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
+
+    const bucketMissing = await service.acquire(
+      {bucket: '', projectId: 'project-a'},
+      {path: 'videos/a.mp4'},
+      true,
+    );
+    const projectMissing = await service.acquire(
+      {bucket: 'bucket-a', projectId: ''},
+      {path: 'videos/b.mp4'},
+      true,
+    );
+
+    expect(bucketMissing.url).toBe('https://signed.example/a.mp4');
+    expect(projectMissing.url).toBe('https://signed.example/a.mp4');
+    expect(open).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(cache.values.size).toBe(0);
+    bucketMissing.release();
+    projectMissing.release();
   });
 
   it('keeps bucket, project, and object path namespaces separate', async () => {

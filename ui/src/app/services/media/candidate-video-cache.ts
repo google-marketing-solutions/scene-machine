@@ -82,7 +82,7 @@ export class CandidateVideoCacheService {
     file: MediaRef | null | undefined,
     persist: boolean,
   ): Promise<CandidateVideoLease> {
-    if (!persist || !file?.path) {
+    if (!persist || !file?.path || !scope.bucket || !scope.projectId) {
       return this.directLease(await this.resolve(file));
     }
 
@@ -165,6 +165,7 @@ export class CandidateVideoCacheService {
               if (this.version(scope.projectId, file.path!) === version) {
                 return {blob, fallbackUrl: ''};
               }
+              return {fallbackUrl: await this.resolve(file)};
             } catch {
               // A corrupt or unexpectedly large entry is discarded below.
             }
