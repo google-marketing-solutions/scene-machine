@@ -916,8 +916,7 @@ export class RemixEngineService {
         this.setScenePendingGeneration(scene.id, undefined);
         return;
       }
-      const candidates = [...(scene.candidates ?? []), ...newCandidates];
-      this.attachCandidates(scene.id, candidates);
+      this.attachCandidates(scene.id, newCandidates);
     } catch (error) {
       if (error instanceof ProjectChangedError) {
         // The user left the project mid-run: pendingGeneration stays
@@ -1170,10 +1169,7 @@ export class RemixEngineService {
         this.setScenePendingGeneration(scene.id, undefined);
         return;
       }
-      this.attachCandidates(scene.id, [
-        ...existingCandidates,
-        ...newCandidates,
-      ]);
+      this.attachCandidates(scene.id, newCandidates);
     } catch (error) {
       if (error instanceof ProjectChangedError) {
         console.info(error.message);
@@ -1254,9 +1250,9 @@ export class RemixEngineService {
         pending.executionId,
         projectId,
       );
-      if (workflowStatus.sink?.output['0']['video'][0]['_error']) {
+      if (workflowStatus.sink?.output['0']['video'][0]?.['_error']) {
         const errorMsg =
-          workflowStatus.sink?.output['0']['video'][0]['_error'] ||
+          workflowStatus.sink?.output['0']['video'][0]?.['_error'] ||
           'Unknown error';
         throw new Error(errorMsg);
       }
@@ -1304,7 +1300,7 @@ export class RemixEngineService {
       // navigation so the marker survives and a later return re-collects, rather
       // than attaching to (or clearing the marker on) the wrong project. (E5)
       this.assertProjectUnchanged(projectId);
-      this.attachCandidates(sceneId, [...existingCandidates, ...newCandidates]);
+      this.attachCandidates(sceneId, newCandidates);
     } catch (error) {
       if (error instanceof ProjectChangedError) {
         console.info(error.message);
@@ -1476,22 +1472,39 @@ export class RemixEngineService {
   }
 
   /**
-   * Attaches the full candidate list to a scene, clearing its
+   * Appends newly collected candidates to the live scene, clearing its
    * pendingGeneration marker in the same signal update (atomic), and — on
    * the mediated data plane — persists immediately.
    */
-  private attachCandidates(sceneId: string, candidates: Candidate[]) {
+  private attachCandidates(sceneId: string, newCandidates: Candidate[]) {
     const scenes = this.configService.projectConfig
       .value()
       .storyboard.map(s => {
         if (s.id !== sceneId || !this.configService.isGeneratedScene(s)) {
           return s;
         }
+        const existingCandidates = s.candidates ?? [];
+        const candidates = [...existingCandidates, ...newCandidates];
+        const selectedCandidateIndex = s.selectedCandidateIndex;
         const updated: GeneratedScene = {
           ...s,
-          candidates,
-          selectedCandidateIndex: s.selectedCandidateIndex ?? 0,
+          ...(candidates.length ? {candidates} : {}),
+          ...(candidates.length
+            ? {
+                selectedCandidateIndex:
+                  selectedCandidateIndex !== undefined &&
+                  Number.isInteger(selectedCandidateIndex) &&
+                  selectedCandidateIndex >= 0 &&
+                  selectedCandidateIndex < candidates.length
+                    ? selectedCandidateIndex
+                    : 0,
+              }
+            : {}),
         };
+        if (!candidates.length) {
+          delete updated.candidates;
+          delete updated.selectedCandidateIndex;
+        }
         delete updated.pendingGeneration;
         // A successful run clears any prior failure marker + "!" badge.
         delete updated.generationError;

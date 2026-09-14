@@ -312,6 +312,16 @@ export interface Candidate {
   editPrompt?: string;
   /** The runNumber of the source candidate this one was edited from, if any. */
   editedFromRun?: number;
+  /** Original scene placement, captured the first time this candidate moves. */
+  origin?: CandidateOrigin;
+}
+
+export interface CandidateOrigin {
+  sceneId: string;
+  sceneName: string;
+  runNumber: number;
+  candidateLabel: string;
+  editedFromRun?: number;
 }
 
 /**
