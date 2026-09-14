@@ -15,6 +15,7 @@
  */
 
 import {CdkDragDrop} from '@angular/cdk/drag-drop';
+import {HttpClient} from '@angular/common/http';
 import {HarnessLoader} from '@angular/cdk/testing';
 import {TestbedHarnessEnvironment} from '@angular/cdk/testing/testbed';
 import {signal} from '@angular/core';
@@ -23,6 +24,7 @@ import {MatDialog} from '@angular/material/dialog';
 import {MatSelectHarness} from '@angular/material/select/testing';
 import {MatSlideToggle} from '@angular/material/slide-toggle';
 import {MatSlider} from '@angular/material/slider';
+import {provideRouter} from '@angular/router';
 import {By} from '@angular/platform-browser';
 import {of} from 'rxjs';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
@@ -35,6 +37,7 @@ import {
   resolveSceneRenderClip,
 } from '../services/config/config';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
+import {MediaService} from '../services/media/media';
 import {EditCandidateDialog} from './edit-candidate-dialog';
 import {Storyboard} from './storyboard';
 
@@ -57,6 +60,7 @@ describe('Storyboard', () => {
     audioTracks: [],
     visualOverlays: [],
   });
+
   const canEditCandidatesSignal = signal(false);
   const durationSliderSignal = signal({min: 4, max: 8, step: 2});
   let mockConfigService = {
@@ -100,6 +104,11 @@ describe('Storyboard', () => {
       afterClosed: () => of({type: 'generate'}),
     }),
   };
+  const mockMediaService = {
+    resolve: vi.fn().mockResolvedValue(''),
+    getCachedUrl: vi.fn().mockReturnValue(undefined),
+  };
+  const mockHttpClient = {get: vi.fn()};
 
   beforeEach(async () => {
     sceneIdCounterSignal.set(0);
@@ -148,12 +157,20 @@ describe('Storyboard', () => {
         afterClosed: () => of({type: 'generate'}),
       }),
     };
+    mockMediaService.resolve.mockReset();
+    mockMediaService.resolve.mockResolvedValue('');
+    mockMediaService.getCachedUrl.mockReset();
+    mockMediaService.getCachedUrl.mockReturnValue(undefined);
+    mockHttpClient.get.mockReset();
 
     await TestBed.configureTestingModule({
       imports: [Storyboard],
       providers: [
         {provide: ConfigService, useValue: mockConfigService},
         {provide: RemixEngineService, useValue: mockRemixEngineService},
+        {provide: MediaService, useValue: mockMediaService},
+        {provide: HttpClient, useValue: mockHttpClient},
+        provideRouter([]),
       ],
     })
       .overrideComponent(Storyboard, {
@@ -997,5 +1014,167 @@ describe('Storyboard', () => {
         expect(mockRemixEngineService.editCandidate).not.toHaveBeenCalled();
       });
     }
+  });
+  describe('original candidate download', () => {
+    let anchor: HTMLAnchorElement;
+    let nativeCreateElement: typeof document.createElement;
+    let createElementSpy: ReturnType<typeof vi.spyOn>;
+    let createObjectUrlSpy: ReturnType<typeof vi.spyOn>;
+    let revokeObjectUrlSpy: ReturnType<typeof vi.spyOn>;
+    let clickSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      nativeCreateElement = document.createElement.bind(document);
+      anchor = nativeCreateElement('a');
+      createElementSpy = vi
+        .spyOn(document, 'createElement')
+        .mockImplementation(tag =>
+          tag === 'a' ? anchor : nativeCreateElement(tag),
+        );
+      createObjectUrlSpy = vi
+        .spyOn(URL, 'createObjectURL')
+        .mockReturnValue('blob:original');
+      revokeObjectUrlSpy = vi
+        .spyOn(URL, 'revokeObjectURL')
+        .mockImplementation(() => undefined);
+      clickSpy = vi
+        .spyOn(HTMLAnchorElement.prototype, 'click')
+        .mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      createElementSpy.mockRestore();
+      createObjectUrlSpy.mockRestore();
+      revokeObjectUrlSpy.mockRestore();
+      clickSpy.mockRestore();
+    });
+
+    it('downloads the selected candidate original through the media boundary', async () => {
+      const candidate: Candidate = {
+        runNumber: 2,
+        durationSeconds: 4,
+        model: 'veo-1',
+        prompt: 'test prompt',
+        generateAudio: false,
+        resolution: '1080p',
+        video: {path: 'video/original.mp4', url: 'https://video/original.mp4'},
+      };
+      const scene: GeneratedScene = {
+        id: 'download-scene',
+        type: 'generated',
+        name: 'Scene / One',
+        prompt: 'test',
+        selectedCandidateIndex: 0,
+        candidates: [candidate],
+      };
+      projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+      component.selectScene(scene.id);
+      fixture.detectChanges();
+
+      const button = fixture.nativeElement.querySelector(
+        '[aria-label="Download original"]',
+      ) as HTMLButtonElement;
+      expect(button).toBeTruthy();
+      mockMediaService.resolve.mockResolvedValue('https://signed/original.mp4');
+      mockHttpClient.get.mockReturnValue(
+        of(new Blob(['video'], {type: 'video/mp4'})),
+      );
+      button.click();
+      await fixture.whenStable();
+
+      expect(mockMediaService.resolve).toHaveBeenCalledWith(candidate.video);
+      expect(mockHttpClient.get).toHaveBeenCalledWith(
+        'https://signed/original.mp4',
+        {
+          responseType: 'blob',
+        },
+      );
+      expect(clickSpy).toHaveBeenCalled();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(revokeObjectUrlSpy).toHaveBeenCalledWith('blob:original');
+    });
+
+    it('disables original download when the selected candidate has no media', () => {
+      const scene: GeneratedScene = {
+        id: 'missing-media-scene',
+        type: 'generated',
+        name: 'Scene',
+        prompt: 'test',
+        selectedCandidateIndex: 0,
+        candidates: [
+          {
+            runNumber: 1,
+            durationSeconds: 4,
+            model: 'veo-1',
+            prompt: 'test',
+            generateAudio: true,
+            resolution: '1080p',
+          },
+        ],
+      };
+      projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+      component.selectScene(scene.id);
+      fixture.detectChanges();
+
+      const button = fixture.nativeElement.querySelector(
+        '[aria-label="Download original"]',
+      ) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      expect(mockMediaService.resolve).not.toHaveBeenCalled();
+    });
+
+    it('keeps the click-time candidate and filename while media resolution is pending', async () => {
+      let resolveMedia!: (url: string) => void;
+      mockMediaService.resolve.mockImplementation(
+        () => new Promise<string>(resolve => (resolveMedia = resolve)),
+      );
+      mockHttpClient.get.mockReturnValue(
+        of(new Blob(['video'], {type: 'video/mp4'})),
+      );
+      const candidate: Candidate = {
+        runNumber: 1,
+        durationSeconds: 4,
+        model: 'veo-1',
+        prompt: 'original',
+        generateAudio: true,
+        resolution: '1080p',
+        video: {path: 'video/original.mp4', url: 'https://video/original.mp4'},
+      };
+      const scene: GeneratedScene = {
+        id: 'snapshot-scene',
+        type: 'generated',
+        name: 'Original Scene',
+        prompt: 'test',
+        selectedCandidateIndex: 0,
+        candidates: [candidate],
+      };
+      projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+      component.selectScene(scene.id);
+      fixture.detectChanges();
+      const button = fixture.nativeElement.querySelector(
+        '[aria-label="Download original"]',
+      ) as HTMLButtonElement;
+      expect(document.createElement('div')).toBeInstanceOf(HTMLDivElement);
+
+      const resolveCallsBeforeDownload =
+        mockMediaService.resolve.mock.calls.length;
+      button.click();
+      button.click();
+      expect(mockMediaService.resolve).toHaveBeenCalledTimes(
+        resolveCallsBeforeDownload + 1,
+      );
+      candidate.video = {
+        path: 'video/renamed.webm',
+        url: 'https://video/renamed.webm',
+      };
+      projectConfigSignal.update(config => ({...config, name: 'Renamed'}));
+      resolveMedia('https://signed/original.mp4');
+      await fixture.whenStable();
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      expect(anchor.download).toBe(
+        'Test_Project_Original_Scene_1A_original.mp4',
+      );
+    });
   });
 });

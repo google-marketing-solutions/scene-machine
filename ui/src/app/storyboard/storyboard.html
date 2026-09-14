@@ -511,7 +511,7 @@
 
                     <div class="video-overlay" (click)="toggleVideoPlay()">
                       <div class="video-controls" (click)="$event.stopPropagation()">
-                        <div class="controls-row">
+                        <div class="controls-row generated-controls-row">
                           <button mat-icon-button (click)="toggleVideoPlay()">
                             <mat-icon>{{ isVideoPlaying() ? 'pause' : 'play_arrow' }}</mat-icon>
                           </button>
@@ -585,6 +585,19 @@
                               </mat-slider>
                             </div>
                           </div>
+                          <button
+                            type="button"
+                            mat-icon-button
+                            aria-label="Download original"
+                            matTooltip="Download original"
+                            [disabled]="
+                              downloadInProgress() ||
+                              (!candidate.video?.path && !candidate.video?.url)
+                            "
+                            (click)="$event.stopPropagation(); downloadOriginal()"
+                          >
+                            <mat-icon>download</mat-icon>
+                          </button>
                         </div>
                       </div>
                     </div>
