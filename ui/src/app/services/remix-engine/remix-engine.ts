@@ -178,19 +178,25 @@ class WorkflowStatusPollScheduler {
   }
 
   setCurrentProject(projectId: string): void {
-    for (const item of [...this.queue]) {
-      if (item.projectId !== projectId) {
-        item.cancelled = true;
-        item.finished = true;
-        item.subscriber.error(new ProjectChangedError());
-      }
+    const queueToCancel = this.queue.filter(
+      item => item.projectId !== projectId,
+    );
+    for (const item of queueToCancel) {
+      item.cancelled = true;
+      item.finished = true;
     }
-    for (const item of this.active.values()) {
-      if (item.projectId !== projectId) {
-        item.subscriber.error(new ProjectChangedError());
-        item.subscription?.unsubscribe();
-        this.finish(item);
-      }
+    this.compactQueue();
+
+    const activeToCancel = [...this.active.values()].filter(
+      item => item.projectId !== projectId,
+    );
+    for (const item of activeToCancel) {
+      item.subscriber.error(new ProjectChangedError());
+      item.subscription?.unsubscribe();
+      this.finish(item);
+    }
+    for (const item of queueToCancel) {
+      item.subscriber.error(new ProjectChangedError());
     }
     this.pump();
   }
@@ -214,7 +220,7 @@ class WorkflowStatusPollScheduler {
       this.active.set(item.executionId, item);
       this.starts.push(Date.now());
       item.started = true;
-      item.subscription = item.request().subscribe({
+      item.subscription = defer(item.request).subscribe({
         next: response => item.subscriber.next(response),
         error: error => {
           item.subscriber.error(error);

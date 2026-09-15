@@ -86,7 +86,7 @@ describe('RemixEngineService polling scheduler', () => {
     expect(startedAt).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1);
     expect(startedAt).toHaveLength(4);
-    expect(new Set(startedAt.slice(0, 3)).size).toBe(1);
+    expect(new Set(startedAt.slice(0, 4)).size).toBe(1);
 
     await vi.advanceTimersByTimeAsync(999);
     expect(startedAt).toHaveLength(4);
@@ -260,6 +260,21 @@ describe('RemixEngineService polling scheduler', () => {
     expect(statusCalls).toBe(2);
   });
 
+  it('releases the scheduler slot when the request factory throws', async () => {
+    vi.useFakeTimers();
+    httpClientMock.get.mockImplementationOnce(() => {
+      throw new Error('factory failed');
+    });
+    httpClientMock.get.mockReturnValue(of({sink: {output: {}}}));
+    const poll = service.pollWorkflow('factory-throw-execution', 'project-1');
+
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(httpClientMock.get).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(3250);
+    await expect(poll).resolves.toEqual({sink: {output: {}}});
+    expect(httpClientMock.get).toHaveBeenCalledTimes(2);
+  });
+
   it('cancels an error backoff when the project changes', async () => {
     vi.useFakeTimers();
     const failure = new HttpErrorResponse({status: 503});
@@ -284,7 +299,7 @@ describe('RemixEngineService polling scheduler', () => {
 
     await vi.advanceTimersByTimeAsync(3000);
     projectConfig.set({id: 'project-2', storyboard: []});
-    status.next({sink: {output: {}}});
+    TestBed.tick();
 
     await expect(poll).rejects.toThrow('Project changed');
     expect(httpClientMock.get).toHaveBeenCalledTimes(1);
