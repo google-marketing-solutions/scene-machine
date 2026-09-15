@@ -64,7 +64,9 @@ import {ImageImportService} from '../services/image-import/image-import';
 import {MediaSrcPipe} from '../services/media/media-src.pipe';
 import {MediaService} from '../services/media/media';
 import {CandidateVideoCacheService} from '../services/media/candidate-video-cache';
+import {ThumbnailCacheService} from '../services/media/thumbnail-cache';
 import {CandidateVideoDirective} from '../shared/candidate-video/candidate-video.directive';
+import {ThumbnailImageDirective} from '../shared/thumbnail-image/thumbnail-image.directive';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {EditableProjectTitle} from '../shared/editable-project-title/editable-project-title';
 import {
@@ -109,6 +111,7 @@ import {
     EditableProjectTitle,
     DictationControl,
     CandidateVideoDirective,
+    ThumbnailImageDirective,
   ],
   templateUrl: './storyboard.html',
   styleUrl: './storyboard.scss',
@@ -124,6 +127,7 @@ export class Storyboard {
   private httpClient = inject(HttpClient);
   private mediaService = inject(MediaService);
   private candidateVideoCache = inject(CandidateVideoCacheService);
+  private thumbnailCache = inject(ThumbnailCacheService);
   private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private downloadCancel = new Subject<void>();
@@ -432,6 +436,14 @@ export class Storyboard {
       showReference: !hasThumbnail && hasReferenceImage,
       showIcon: !hasThumbnail && !hasReferenceImage,
     };
+  }
+
+  thumbnailPersistForScene(
+    scene: GeneratedScene | ProvidedVideoScene,
+  ): boolean {
+    if (!this.config.isGeneratedScene(scene)) return true;
+    const selected = scene.candidates?.[scene.selectedCandidateIndex ?? 0];
+    return !selected?.isArchived;
   }
 
   formatTimeLabel(value: number): string {
@@ -1123,6 +1135,16 @@ export class Storyboard {
           this.config.projectConfig.value().id,
           candidate.video.path,
         );
+      }
+      if (candidate.isArchived) {
+        const projectId = this.config.projectConfig.value().id;
+        for (const path of [
+          candidate.highQualityThumbnail?.path,
+          candidate.referenceImage?.path,
+        ]) {
+          if (path)
+            void this.thumbnailCache.invalidateCandidate(projectId, path);
+        }
       }
     }
   }

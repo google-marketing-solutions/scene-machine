@@ -24,12 +24,14 @@ import {of, Subject, throwError} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ConfigService} from './config';
 import {CandidateVideoCacheService} from '../media/candidate-video-cache';
+import {ThumbnailCacheService} from '../media/thumbnail-cache';
 
 describe('ConfigService (mediated data plane)', () => {
   let service: ConfigService;
   let httpClientMock: any;
   let matSnackBarMock: any;
   let candidateVideoCacheMock: any;
+  let thumbnailCacheMock: any;
 
   function saveRequestCount() {
     return (
@@ -56,6 +58,9 @@ describe('ConfigService (mediated data plane)', () => {
       open: vi.fn().mockReturnValue({onAction: () => of()}),
     };
     candidateVideoCacheMock = {
+      invalidateProject: vi.fn().mockResolvedValue(undefined),
+    };
+    thumbnailCacheMock = {
       invalidateProject: vi.fn().mockResolvedValue(undefined),
     };
     const routerMock = {navigate: vi.fn()};
@@ -90,6 +95,7 @@ describe('ConfigService (mediated data plane)', () => {
           provide: CandidateVideoCacheService,
           useValue: candidateVideoCacheMock,
         },
+        {provide: ThumbnailCacheService, useValue: thumbnailCacheMock},
       ],
     });
     service = TestBed.inject(ConfigService);
@@ -806,8 +812,12 @@ describe('ConfigService (mediated data plane)', () => {
       expect(candidateVideoCacheMock.invalidateProject).toHaveBeenCalledWith(
         'proj-1',
       );
+      expect(thumbnailCacheMock.invalidateProject).toHaveBeenCalledWith(
+        'proj-1',
+      );
 
       candidateVideoCacheMock.invalidateProject.mockClear();
+      thumbnailCacheMock.invalidateProject.mockClear();
       httpClientMock.delete.mockReturnValueOnce(
         throwError(() => new Error('delete failed')),
       );
@@ -815,6 +825,7 @@ describe('ConfigService (mediated data plane)', () => {
         'delete failed',
       );
       expect(candidateVideoCacheMock.invalidateProject).not.toHaveBeenCalled();
+      expect(thumbnailCacheMock.invalidateProject).not.toHaveBeenCalled();
     });
   });
 

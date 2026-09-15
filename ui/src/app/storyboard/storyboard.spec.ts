@@ -41,6 +41,7 @@ import {
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {MediaService} from '../services/media/media';
 import {CandidateVideoCacheService} from '../services/media/candidate-video-cache';
+import {ThumbnailCacheService} from '../services/media/thumbnail-cache';
 import {EditCandidateDialog} from './edit-candidate-dialog';
 import {Storyboard} from './storyboard';
 
@@ -115,6 +116,11 @@ describe('Storyboard', () => {
     getCachedUrl: vi.fn().mockReturnValue(undefined),
   };
   const mockHttpClient = {get: vi.fn()};
+  const mockThumbnailCache = {
+    acquire: vi.fn(),
+    invalidateCandidate: vi.fn(),
+    invalidateProject: vi.fn(),
+  };
 
   beforeEach(async () => {
     navigationEvents = new Subject<unknown>();
@@ -171,6 +177,16 @@ describe('Storyboard', () => {
     mockMediaService.getCachedUrl.mockReset();
     mockMediaService.getCachedUrl.mockReturnValue(undefined);
     mockHttpClient.get.mockReset();
+    mockThumbnailCache.invalidateCandidate.mockReset();
+    mockThumbnailCache.invalidateProject.mockReset();
+    mockThumbnailCache.acquire.mockReset();
+    mockThumbnailCache.acquire.mockImplementation(
+      (_scope: unknown, file: {path?: string}) =>
+        Promise.resolve({
+          url: `blob:${file.path ?? 'empty'}`,
+          release: vi.fn(),
+        }),
+    );
 
     await TestBed.configureTestingModule({
       imports: [Storyboard],
@@ -180,6 +196,7 @@ describe('Storyboard', () => {
         {provide: MediaService, useValue: mockMediaService},
         {provide: HttpClient, useValue: mockHttpClient},
         {provide: Router, useValue: {events: navigationEvents}},
+        {provide: ThumbnailCacheService, useValue: mockThumbnailCache},
       ],
     })
       .overrideComponent(Storyboard, {
@@ -226,6 +243,74 @@ describe('Storyboard', () => {
     expect(component).toBeTruthy();
   });
 
+  it('updates the real filmstrip image when the selected candidate changes', async () => {
+    const candidate = (path: string): Candidate => ({
+      runNumber: path === 'candidate-a.jpg' ? 1 : 2,
+      durationSeconds: 4,
+      model: 'veo-1',
+      prompt: 'candidate',
+      generateAudio: true,
+      resolution: '1080p',
+      video: {path: `${path}.mp4`, url: `${path}.mp4`},
+      highQualityThumbnail: {path, url: path},
+    });
+    const scene: GeneratedScene = {
+      id: 'filmstrip-scene',
+      type: 'generated',
+      name: 'Filmstrip scene',
+      prompt: 'scene',
+      candidates: [candidate('candidate-a.jpg'), candidate('candidate-b.jpg')],
+      selectedCandidateIndex: 0,
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    fixture.detectChanges();
+    await Promise.resolve();
+
+    const filmstrip = fixture.nativeElement.querySelector('.filmstrip-item');
+    const image = filmstrip.querySelector('.high-res-img') as HTMLImageElement;
+    expect(image.src).toContain('blob:candidate-a.jpg');
+
+    component.selectCandidate(scene, 1);
+    fixture.detectChanges();
+    await Promise.resolve();
+    expect(image.src).toContain('blob:candidate-b.jpg');
+  });
+
+  it('loads the first filmstrip thumbnail when generation adds the first candidate', async () => {
+    const scene: GeneratedScene = {
+      id: 'first-candidate-scene',
+      type: 'generated',
+      name: 'First candidate scene',
+      prompt: 'scene',
+      candidates: [],
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector('.filmstrip-item img'),
+    ).toBeNull();
+
+    scene.candidates = [
+      {
+        runNumber: 1,
+        durationSeconds: 4,
+        model: 'veo-1',
+        prompt: 'candidate',
+        generateAudio: true,
+        resolution: '1080p',
+        highQualityThumbnail: {path: 'generated.jpg', url: 'generated-url'},
+      },
+    ];
+    scene.selectedCandidateIndex = 0;
+    projectConfigSignal.set({...projectConfigSignal(), storyboard: [scene]});
+    fixture.detectChanges();
+    await Promise.resolve();
+    const image = fixture.nativeElement.querySelector(
+      '.filmstrip-item .high-res-img',
+    ) as HTMLImageElement;
+    expect(image.src).toContain('blob:generated.jpg');
+  });
+
   it('invalidates a candidate cache entry when archiving', () => {
     const candidate: Candidate = {
       runNumber: 1,
@@ -235,6 +320,14 @@ describe('Storyboard', () => {
       generateAudio: true,
       resolution: '1080p',
       video: {path: 'candidate-path', url: 'candidate-url'},
+      highQualityThumbnail: {
+        path: 'candidate-thumb-path',
+        url: 'candidate-thumb-url',
+      },
+      referenceImage: {
+        path: 'candidate-reference-path',
+        url: 'candidate-reference-url',
+      },
     };
     const scene: GeneratedScene = {
       id: 'archive-scene',
@@ -251,6 +344,14 @@ describe('Storyboard', () => {
     component.toggleArchive(new Event('click'), scene, 0);
 
     expect(invalidate).toHaveBeenCalledWith('test-id', 'candidate-path');
+    expect(mockThumbnailCache.invalidateCandidate).toHaveBeenCalledWith(
+      'test-id',
+      'candidate-thumb-path',
+    );
+    expect(mockThumbnailCache.invalidateCandidate).toHaveBeenCalledWith(
+      'test-id',
+      'candidate-reference-path',
+    );
     invalidate.mockRestore();
   });
 
