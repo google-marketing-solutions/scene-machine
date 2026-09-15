@@ -309,6 +309,10 @@ describe('ThumbnailImageDirective', () => {
     const image = fixture.nativeElement.querySelector(
       'img',
     ) as HTMLImageElement;
+    Object.defineProperty(image, 'naturalWidth', {
+      configurable: true,
+      value: 1,
+    });
     image.dispatchEvent(new Event('load'));
     expect(image.src).toContain('blob:unscoped');
     expect(image.classList.contains('loaded')).toBe(true);
@@ -332,6 +336,10 @@ describe('ThumbnailImageDirective', () => {
     const image = fixture.nativeElement.querySelector(
       'img',
     ) as HTMLImageElement;
+    Object.defineProperty(image, 'naturalWidth', {
+      configurable: true,
+      value: 1,
+    });
     image.dispatchEvent(new Event('load'));
 
     directive.thumbnailCacheScope = {
@@ -344,10 +352,59 @@ describe('ThumbnailImageDirective', () => {
     expect(image.classList.contains('loaded')).toBe(false);
   });
 
+  it('restores the displayed image when a scope replacement assignment fails', async () => {
+    vi.useFakeTimers();
+    const originalRelease = vi.fn();
+    const failedRelease = vi.fn();
+    const recoveredRelease = vi.fn();
+    acquire
+      .mockResolvedValueOnce({url: 'blob:unscoped', release: originalRelease})
+      .mockResolvedValueOnce({url: 'blob:failed', release: failedRelease})
+      .mockResolvedValueOnce({url: 'blob:scoped', release: recoveredRelease});
+    directive.thumbnailCacheScope = null;
+    directive.ngOnChanges();
+    intersect(1);
+    await vi.advanceTimersByTimeAsync(0);
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
+    Object.defineProperty(image, 'naturalWidth', {
+      configurable: true,
+      value: 1,
+    });
+    image.dispatchEvent(new Event('load'));
+    const setter = vi
+      .spyOn(image, 'src', 'set')
+      .mockImplementationOnce(value => {
+        image.setAttribute('src', value);
+        throw new Error('replacement assignment failed');
+      });
+
+    directive.thumbnailCacheScope = host.scope;
+    directive.ngOnChanges();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(image.src).toBe('blob:unscoped');
+    expect(image.classList.contains('loaded')).toBe(true);
+    expect(originalRelease).not.toHaveBeenCalled();
+    expect(failedRelease).toHaveBeenCalledTimes(1);
+    setter.mockRestore();
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(image.src).toBe('blob:scoped');
+    expect(originalRelease).toHaveBeenCalledTimes(1);
+    expect(recoveredRelease).not.toHaveBeenCalled();
+    fixture.destroy();
+    expect(originalRelease).toHaveBeenCalledTimes(1);
+    expect(failedRelease).toHaveBeenCalledTimes(1);
+    expect(recoveredRelease).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the fallback visible when a load event has no decoded image width', async () => {
     intersect(0);
     await Promise.resolve();
-    const image = fixture.nativeElement.querySelector('img') as HTMLImageElement;
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
     Object.defineProperty(image, 'naturalWidth', {
       configurable: true,
       value: 0,
@@ -379,6 +436,10 @@ describe('ThumbnailImageDirective', () => {
     const image = fixture.nativeElement.querySelector(
       'img',
     ) as HTMLImageElement;
+    Object.defineProperty(image, 'naturalWidth', {
+      configurable: true,
+      value: 1,
+    });
     image.dispatchEvent(new Event('load'));
     directive.thumbnailCacheScope = host.scope;
     directive.ngOnChanges();
