@@ -21,6 +21,11 @@
       Retry
     </button>
   </div>
+} @else if (configService.projectConfig.isLoading() || !configService.projectConfig.value().id) {
+  <div class="loading-state">
+    <mat-spinner diameter="40"></mat-spinner>
+    <p>Loading project...</p>
+  </div>
 } @else {
 <div class="output-layout">
   <div class="project-title-header">

@@ -470,7 +470,10 @@ describe('Storyboard', () => {
         preview: {path: 'old-preview.jpg', url: 'old-preview-url'},
       },
       lowQualityThumbnail: 'old-low-quality',
-      highQualityThumbnail: {path: 'old-preview.jpg', url: 'old-preview-url'},
+      highQualityThumbnail: {
+        path: 'old-high-quality.jpg',
+        url: 'old-high-quality-url',
+      },
     };
     projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
     component.selectScene(scene.id);
@@ -500,6 +503,77 @@ describe('Storyboard', () => {
     });
     expect(scene.lowQualityThumbnail).toBeUndefined();
     expect(scene.highQualityThumbnail).toBeUndefined();
+    for (const path of [
+      'old-source.png',
+      'old-preview.jpg',
+      'old-high-quality.jpg',
+    ]) {
+      expect(mockThumbnailCache.invalidateCandidate).toHaveBeenCalledWith(
+        'test-id',
+        path,
+      );
+    }
+  });
+
+  it('invalidates a distinct high-quality reference path on removal', () => {
+    const scene: GeneratedScene = {
+      id: 'high-quality-reference-scene',
+      type: 'generated',
+      name: 'High quality reference scene',
+      prompt: 'scene',
+      candidates: [],
+      highQualityThumbnail: {path: 'stored-high-quality.jpg', url: 'url'},
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    component.selectScene(scene.id);
+    component.removeReferenceImage();
+    expect(mockThumbnailCache.invalidateCandidate).toHaveBeenCalledWith(
+      'test-id',
+      'stored-high-quality.jpg',
+    );
+  });
+
+  it('does not save another selected scene when a reference upload target was deleted', async () => {
+    const targetScene: GeneratedScene = {
+      id: 'target-scene',
+      type: 'generated',
+      name: 'Target',
+      prompt: 'target prompt',
+      candidates: [],
+    };
+    const otherScene: GeneratedScene = {
+      id: 'other-scene',
+      type: 'generated',
+      name: 'Other',
+      prompt: 'keep this prompt',
+      candidates: [],
+    };
+    projectConfigSignal.update(config => ({
+      ...config,
+      storyboard: [targetScene, otherScene],
+    }));
+    component.selectScene(targetScene.id);
+    let resolveUpload!: (value: {path: string; url: string}) => void;
+    mockRemixEngineService.uploadMedia.mockReturnValue(
+      new Promise(resolve => (resolveUpload = resolve)),
+    );
+    const upload = component.uploadImage(
+      new File(['image'], 'reference.png', {type: 'image/png'}),
+    );
+    expect(mockRemixEngineService.uploadMedia).toHaveBeenCalledTimes(1);
+    projectConfigSignal.set({
+      ...projectConfigSignal(),
+      storyboard: [otherScene],
+    });
+    component.selectScene(otherScene.id);
+    const save = vi.spyOn(mockConfigService, 'updateProjectConfig');
+    const before = structuredClone(otherScene);
+    resolveUpload({path: 'reference.png', url: 'reference-url'});
+    await upload;
+    expect(save).not.toHaveBeenCalled();
+    expect(projectConfigSignal().storyboard).toEqual([otherScene]);
+    expect(otherScene).toEqual(before);
+    expect(mockImagePreviewService.create).not.toHaveBeenCalled();
   });
 
   it('does not attach a delayed preview to a newer reference upload', async () => {

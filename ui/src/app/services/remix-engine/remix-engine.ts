@@ -1705,7 +1705,7 @@ export class RemixEngineService {
           const imageIndex = Number(image.image_id) - 1;
           const inputImage = products.find(
             product => String(product.id) === productId,
-          )?.images[imageIndex];
+          )?.images?.[imageIndex];
           const preview =
             Number.isInteger(imageIndex) &&
             imageIndex >= 0 &&

@@ -295,6 +295,28 @@ describe('Setup image upload', () => {
     expect(image.aspectRatioDeviation).toBeGreaterThan(0);
   });
 
+  it.each([
+    [0, 800],
+    [-1, 800],
+    [1200, 0],
+    [1200, -1],
+  ])(
+    'ignores nonpositive uploaded dimensions %s x %s',
+    async (widthPixels, heightPixels) => {
+      imagePreviewMock.create.mockResolvedValue({
+        preview: {path: 'thumbnail/invalid.jpg', url: 'invalid-url'},
+        widthPixels,
+        heightPixels,
+      });
+      await component.processFiles(1, [
+        new File(['x'], 'invalid.jpeg', {type: 'image/jpeg'}),
+      ] as unknown as FileList);
+      const image =
+        configMock.projectConfig.value().inputConfig?.products[0].images[0];
+      expect(image?.aspectRatioDeviation).toBeUndefined();
+    },
+  );
+
   it('calculates every pending upload against the latest aspect ratio', async () => {
     let resolveFirst!: (value: {
       preview: {path: string; url: string};

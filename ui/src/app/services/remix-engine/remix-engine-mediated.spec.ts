@@ -2163,6 +2163,48 @@ describe('RemixEngineService (mediated)', () => {
         url: 'https://signed.example/outpainted/product.jpg',
       });
     });
+
+    it('maps returned references without a preview when input images are missing', async () => {
+      vi.spyOn(service, 'startStoryboardWorkflow').mockResolvedValue(
+        of({executionId: 'storyboard-exec'}) as any,
+      );
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {
+          output: {
+            '0': {
+              storyboard: [{file: 'storyboard.json'}],
+              outpainted_images: [
+                {product_id: 1, image_id: 1, file: 'out.jpg'},
+              ],
+            },
+          },
+        },
+      } as any);
+      mediaServiceMock.getBlob.mockResolvedValue({
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              storyboard: [
+                {
+                  product_id: 1,
+                  image_id: 1,
+                  scene_name: 'Scene 1',
+                  video_prompt: 'prompt',
+                },
+              ],
+            }),
+          ),
+      });
+      mediaServiceMock.signUrl.mockResolvedValue(
+        'https://signed.example/out.jpg',
+      );
+      const result = await service.generateStoryboard(
+        [{id: 1, name: 'Product 1'}] as any,
+        'briefing',
+        'outpaint',
+      );
+      expect(result?.[0].referenceImage?.path).toBe('out.jpg');
+    });
   });
 
   describe('global config guard (E1)', () => {

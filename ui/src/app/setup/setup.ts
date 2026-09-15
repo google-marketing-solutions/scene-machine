@@ -272,6 +272,9 @@ export class Setup {
     width: number,
     height: number,
   ): number | undefined {
+    if (width <= 0 || height <= 0) {
+      return undefined;
+    }
     const aspectRatio = this.config.projectConfig.value().aspectRatio;
     const targetAspectRatio =
       aspectRatio === '16:9'

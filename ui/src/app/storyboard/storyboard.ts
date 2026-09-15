@@ -1297,7 +1297,10 @@ export class Storyboard {
     const scene = this.selectedScene();
     if (this.config.isGeneratedScene(scene)) {
       this.referenceUploadEpoch++;
-      this.invalidateReferenceMedia(scene.referenceImage);
+      this.invalidateReferenceMedia(
+        scene.referenceImage,
+        scene.highQualityThumbnail,
+      );
       delete scene.referenceImage;
       delete scene.highQualityThumbnail;
       delete scene.lowQualityThumbnail;
@@ -1312,10 +1315,15 @@ export class Storyboard {
           preview?: {path?: string};
         }
       | undefined,
+    highQualityThumbnail?: {path?: string},
   ): void {
     const projectId = this.config.projectConfig.value().id;
-    if (!projectId || !reference) return;
-    const paths = new Set([reference.path, reference.preview?.path]);
+    if (!projectId || (!reference && !highQualityThumbnail)) return;
+    const paths = new Set([
+      reference?.path,
+      reference?.preview?.path,
+      highQualityThumbnail?.path,
+    ]);
     for (const path of paths) {
       if (path) void this.thumbnailCache.invalidateCandidate(projectId, path);
     }
@@ -1426,7 +1434,10 @@ export class Storyboard {
         .value()
         .storyboard.find(s => s.id === sceneId);
       if (scene && this.config.isGeneratedScene(scene) && isCurrentUpload()) {
-        this.invalidateReferenceMedia(scene.referenceImage);
+        this.invalidateReferenceMedia(
+          scene.referenceImage,
+          scene.highQualityThumbnail,
+        );
         scene.referenceImage = {path, url};
         // The scene-level thumbnails belong to the previous reference. Clear
         // them before asynchronous generation so a failed replacement cannot
@@ -1461,7 +1472,7 @@ export class Storyboard {
           console.error(error);
         }
       }
-      if (isCurrentUpload()) {
+      if (scene && isCurrentUpload()) {
         this.updateScenes(scene);
       }
     }
