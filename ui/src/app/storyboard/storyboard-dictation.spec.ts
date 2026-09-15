@@ -148,9 +148,13 @@ describe('Storyboard dictation parent binding', () => {
     const remixEngine = {
       generatingSceneIds: signal(new Set<string>()),
       editingSceneIds: signal(new Set<string>()),
+      setForegroundScene: vi.fn(),
+      clearForegroundScene: vi.fn(),
     };
     const config = {
       projectConfig: {value: project, isLoading: signal(false)},
+      projectLoadError: signal(false),
+      reloadProjectConfig: vi.fn(),
       globalConfig: {value: () => ({dictation: {enabled: true}})},
       updateProjectConfig,
       isGeneratedScene: (value: unknown) =>
@@ -299,6 +303,8 @@ describe('Storyboard dictation with the real control', () => {
     };
     const config = {
       projectConfig: {value: project, isLoading: signal(false)},
+      projectLoadError: signal(false),
+      reloadProjectConfig: vi.fn(),
       globalConfig: {value: () => ({dictation})},
       updateProjectConfig: (partial: Partial<ProjectConfig>) =>
         project.update(value => ({...value, ...partial})),

@@ -1,7 +1,7 @@
 {
   "fields": {
     "numberOfCandidates": {
-      "integerValue": "1"
+      "integerValue": "4"
     },
     "gcpProject": {
       "stringValue": "${PROJECT}"
@@ -40,7 +40,7 @@
       "stringValue": "${IMAGE_MODEL_REGION}"
     },
     "generateAudio": {
-      "booleanValue": false
+      "booleanValue": true
     },
     "resolution": {
       "stringValue": "720p"

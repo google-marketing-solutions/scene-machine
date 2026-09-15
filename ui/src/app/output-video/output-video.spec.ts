@@ -75,7 +75,11 @@ describe('OutputVideo', () => {
     const configServiceMock = {
       projectConfig: {
         value: projectConfig,
+        isLoading: signal(false),
+        error: signal(null),
       },
+      projectLoadError: signal(false),
+      reloadProjectConfig: vi.fn(),
       updateProjectConfig,
       isGeneratedScene: () => false,
     };
@@ -110,6 +114,61 @@ describe('OutputVideo', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('shows a project load error with a retry action', () => {
+    const configService = TestBed.inject(ConfigService) as unknown as {
+      projectLoadError: WritableSignal<boolean>;
+      reloadProjectConfig: ReturnType<typeof vi.fn>;
+    };
+    configService.projectLoadError.set(true);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.textContent).toContain(
+      'Could not load this project',
+    );
+    const retry = fixture.nativeElement.querySelector('button');
+    expect(retry?.textContent).toContain('Retry');
+
+    retry.click();
+    expect(configService.reloadProjectConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['blank project id', false, ''],
+    ['loading project', true, 'project-1'],
+  ])('shows loading state for %s', (_label, isLoading, id) => {
+    const configService = TestBed.inject(ConfigService) as unknown as {
+      projectConfig: {isLoading: WritableSignal<boolean>};
+    };
+    projectConfig.update(current => ({...current, id}));
+    configService.projectConfig.isLoading.set(isLoading);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain('Loading project...');
+  });
+
+  it('returns from loading to ready and keeps error precedence', () => {
+    const configService = TestBed.inject(ConfigService) as unknown as {
+      projectConfig: {isLoading: WritableSignal<boolean>};
+      projectLoadError: WritableSignal<boolean>;
+    };
+    configService.projectConfig.isLoading.set(true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.output-layout')).toBeNull();
+    configService.projectConfig.isLoading.set(false);
+    fixture.detectChanges();
+    expect(
+      fixture.nativeElement.querySelector('.output-layout'),
+    ).not.toBeNull();
+    configService.projectConfig.isLoading.set(true);
+    configService.projectLoadError.set(true);
+    fixture.detectChanges();
+    expect(fixture.nativeElement.textContent).toContain(
+      'Could not load this project',
+    );
+    expect(fixture.nativeElement.textContent).not.toContain(
+      'Loading project...',
+    );
   });
 
   it('renders the output video without autoplay (opening the output tab must not auto-play)', () => {

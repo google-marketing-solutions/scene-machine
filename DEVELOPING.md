@@ -62,7 +62,7 @@ Point it at your own dev project with the overrides `SM_DEV_PROJECT`, `SM_DEV_FI
 
 ### Seed the local config document (first run only)
 
-The backend serves `/api/config` from the `config/global` Firestore document. A fresh dev database does not have it, so `/api/config` returns `404 Config not seeded`; the UI then falls back to empty defaults (you can browse, but cannot start a generation). Seed it once against your dev database, the same way `deploy.sh` does (model/region values come from `config.txt` — copy `config.template.txt` if you do not have one):
+The backend serves `/api/config` from the `config/global` Firestore document. A fresh dev database does not have it, so `/api/config` returns `404 Config not seeded`; the UI then falls back to empty defaults (you can browse, but cannot start a generation). Seed it once against your dev database, the same way `deploy.sh` does (model/region values come from `config.txt`; the template defaults to Gemini Omni — copy `config.template.txt` if you do not have one):
 
 ```
 set -a; source ./config.txt; set +a   # GEMINI_MODEL, regions, etc.
@@ -88,6 +88,13 @@ python3 scripts/seed_config_models.py convert < ui/definitions/models.json | cur
 ```
 
 This requires a Firestore database to already exist in your dev project (the one `FIRESTORE_DB_UI` names) and ADC with write access to it.
+
+With the shipped config template, the front-door seed starts new projects with Gemini Omni
+(`gemini-omni-1.1-flash-preview`), 720p, audio enabled, four-second candidates,
+and four candidates per run. Omni is global-only: existing deployments must
+set both `VEO_MODEL=gemini-omni-1.1-flash-preview` and `VEO_REGION=global` in
+`config.txt` before redeploying. Existing project documents keep their saved
+video settings; there is no automatic migration.
 
 ### Homepage announcement
 
@@ -174,12 +181,90 @@ previews must use `thumbnailImagePersist=false`. The cache is an optional
 optimization, not an authorization boundary or an offline project store; see
 the [user-facing cache limits and caveats](README.md#local-media-cache).
 
+New Setup uploads and Storyboard reference uploads may carry an optional
+`preview: {path, url}` alongside the original image reference. Display the
+preview through `ThumbnailImageDirective`; keep the original `path` and original
+pixel dimensions for generation and crop/outpaint decisions. Preview creation
+is best-effort and capped at 1 MiB. Legacy images without a preview use their
+original display reference and the same cache limits; large legacy originals
+are not migrated or guaranteed to fit the byte cache.
+
 Composition uses `CandidateVideoCacheService.acquireCached` for its active clip:
 a warm hit returns an object-URL lease, while a miss keeps normal browser
 streaming. Do not replace this with unconditional `acquire`, which waits for a
 complete cold download. Release leases when switching sources or leaving the
 page. Filmstrip cards use actual clip thumbnails when present; legacy clips
 without thumbnails retain their video-frame preview.
+
+### Workflow status polling
+
+`RemixEngineService` shares one status-request budget per browser tab: at most
+four request starts in a rolling second and four requests in flight. Each
+execution polls sequentially; a slow response is not canceled by the next tick.
+New executions first become eligible after three seconds. Resuming a persisted
+execution can check immediately, but still uses the same budget. After a
+healthy non-terminal response, the next check waits at least three seconds.
+
+The selected Storyboard scene gets priority; remaining work uses FIFO order.
+Small active sets therefore retain the three-second cadence, while large
+batches spread their status requests across time. This changes observation,
+not Cloud Tasks concurrency or generation speed. The limits are per tab, not
+an account-wide/server-wide quota. Multiple users or tabs each have a budget.
+
+Errors back off exponentially with a small deterministic jitter, up to about
+30 seconds unless the server asks for a longer `Retry-After`. Project changes
+cancel queued requests, active requests and retry delays. The existing
+ten-minute overall timeout still preserves pending markers for reopening;
+IAP expiry retains the existing single refresh-tab episode. There is no
+provider-duration prediction, status batch endpoint, or background worker.
+
+Regression coverage is in `remix-engine-polling.spec.ts` and the existing
+mediated RemixEngine tests. Use fake time and the HTTP boundary for budget,
+slow-response, navigation and error tests; do not invoke paid generation to
+verify this client-side policy. Synthetic request counts are not production
+completion-latency measurements.
+
+### Page-scoped project data
+
+Fetch only the data a page needs; do not treat a homepage card as an editable
+project or introduce a second, persistent project-data cache.
+
+| Consumer | Read contract | Contents |
+| --- | --- | --- |
+| Homepage | `GET /api/projects` (optionally `?createdBy=me`) | `ProjectSummary`: card metadata, resolved first-scene thumbnail materials and thumbnail persistence policy; no prompts, Setup inputs or candidate arrays. |
+| Storyboard, Composition, Output | `GET /api/projects/:id?view=editor` | Project settings and complete scenes/candidates; excludes Setup-only `inputConfig`. |
+| Setup | `GET /api/projects/:id` | Full project, including all Setup inputs. No per-field lazy loading. |
+
+The homepage query selects root document fields in Firestore and retains the
+batched first-scene lookup. Candidate arrays are still read on the server to
+resolve the selected thumbnail. Editor detail reads still fetch the root
+document, then omit `inputConfig` from the response. These are payload savings,
+not a claim that every Firestore read or document charge disappears.
+
+An absent `inputConfig` in an editor response means **not loaded**, not empty.
+Setup waits for the full load and offers Retry on failure before enabling its
+form. The active in-memory project may retain inputs already loaded in Setup;
+there is no cross-project data cache. Keep the per-project save queue and stale
+load protection when changing this flow.
+
+Editor saves without inputs use `PATCH /api/projects/:id/editor`. Its root
+field updates leave stored `inputConfig` untouched, including a concurrent
+Setup update. Do not copy an earlier Setup snapshot into a replacement write.
+Full GET/PATCH remains the Setup and legacy detail contract; full PATCH keeps
+its replacement semantics. All editor candidates remain available for counts,
+selection, generation and composition.
+
+The dedicated editor PATCH path is also a rollback safety boundary: a
+pre-feature backend rejects it instead of treating a projected payload as a
+full replacement. Keep that failure visible as unsaved changes; never retry it
+through the full-document endpoint. The query-form editor PATCH is retained
+only for older preview clients. Before downgrading a deployment that served
+those older clients, retire or refresh their open tabs; the new route cannot
+retroactively protect them. Deploy the frontend and backend together.
+
+Regression coverage lives in `test/test_frontdoor_data.py`,
+`config-mediated.spec.ts`, and the Homepage/Setup/Storyboard component specs.
+For a new project field, decide which page needs it before expanding a response.
 
 ### Response delivery
 

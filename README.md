@@ -379,8 +379,8 @@ gcloud auth application-default login   # 2. Application Default Credentials (AD
     `REGION`               | Deployment region for various GCP resources.               | e.g., `us-central1`
     `GEMINI_MODEL`         | Text generation model for prompts and analysis.            | `gemini-3.8-flash`
     `GEMINI_REGION`        | Region for model invocation.                               | Check locations availability. Recommended `global`.
-    `VEO_MODEL`            | Video generation model.                                    | `veo-3.1-generate-001`
-    `VEO_REGION`           | Region for Veo model invocation.                           | Check availability. Recommended `global`.
+    `VEO_MODEL`            | Video generation model.                                    | `gemini-omni-1.1-flash-preview` (global-only) or a Veo model
+    `VEO_REGION`           | Region for video model invocation.                        | `global` for Omni; check availability for Veo.
     `IMAGE_MODEL`          | Image model for outpainting and image generation.          | `gemini-3-pro-image` (Nano Banana Pro), `gemini-3.1-flash-image` (Nano Banana 2)
     `IMAGE_MODEL_REGION`   | Region for image model invocation.                         | Check availability. Recommended `global`.
     `GCS_BUCKET`           | Dedicated storage bucket for project images and assets. | Must be globally unique. Auto-created by the deploy. Must not be shared with other data (see Storage note).
@@ -393,6 +393,15 @@ gcloud auth application-default login   # 2. Application Default Credentials (AD
     `DICTATION_ENABLED`    | Microphone dictation in supported text fields.             | `1` (default); set `0` to disable before deploying. Existing explicit `0` values are preserved.
     `DICTATION_MODE`       | Gemini transcription mode for dictation.                  | `SMART` (default) or `VERBATIM`; uppercase only. Empty or invalid values are rejected.
     `CUSTOM_DOMAIN`        | Custom domain for the application user interface.          | Optional. e.g., `scene-machine.my-company.com`
+
+    With the shipped config template, new projects start with Gemini Omni
+    (`gemini-omni-1.1-flash-preview`) at
+    720p, with audio enabled, four-second candidates, and four candidates per
+    run. The front-door seed takes this default from `VEO_MODEL` and
+    `VEO_REGION`; when switching an existing `config.txt` to Omni, set both
+    variables (`VEO_MODEL=gemini-omni-1.1-flash-preview` and
+    `VEO_REGION=global`). Existing saved projects retain their own video
+    settings when this default changes.
 
     -   **Important Notes for Configuration:**
         -   **Naming:** Use alphanumerical names (with hyphens) for entities

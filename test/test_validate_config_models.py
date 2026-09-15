@@ -28,6 +28,7 @@ _MODELS = {
     'gemini-3.5-flash': {'family': 'gemini', 'locations': ['global']},
     'gemini-3-pro-image': {'family': 'image', 'locations': ['global']},
     'veo-3.1-generate-001': {'family': 'veo', 'locations': ['global', 'us-central1']},
+    'gemini-omni-1.1-flash-preview': {'family': 'omni', 'locations': ['global']},
 }
 
 
@@ -51,6 +52,19 @@ def test_valid_config_passes():
       'VEO_MODEL': 'veo-3.1-generate-001', 'VEO_REGION': 'us-central1',
   }
   assert validate_config_models.collect_errors(env, _MODELS) == []
+
+
+def test_omni_video_model_passes_at_global():
+  assert validate_config_models.collect_errors(
+      {'VEO_MODEL': 'gemini-omni-1.1-flash-preview', 'VEO_REGION': 'global'},
+      _MODELS) == []
+
+
+def test_omni_video_model_rejects_regional_location():
+  errors = validate_config_models.collect_errors(
+      {'VEO_MODEL': 'gemini-omni-1.1-flash-preview', 'VEO_REGION': 'us-central1'},
+      _MODELS)
+  assert any('not allowed' in error for error in errors)
 
 
 def test_unknown_model_flagged():
@@ -102,6 +116,8 @@ def test_config_template_defaults_pass_real_allowlist():
   env = _parse_shell_env(os.path.join(_REPO, 'config.template.txt'))
   assert validate_config_models.collect_errors(
       env, load_shipped_allowlist()['models']) == []
+  assert env['VEO_MODEL'] == 'gemini-omni-1.1-flash-preview'
+  assert env['VEO_REGION'] == 'global'
 
 
 def test_catalog_missing_generate_video_field_flagged():

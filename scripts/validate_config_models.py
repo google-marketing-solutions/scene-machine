@@ -56,10 +56,12 @@ def collect_errors(env: Mapping[str, str], models: dict) -> list[str]:
           f'{label}: {model_var}={model!r} is not in the allowlist '
           '(ui/definitions/models.json).')
       continue
-    if entry.get('family') != family:
+    allowed_families = ('veo', 'omni') if family == 'veo' else (family,)
+    if entry.get('family') not in allowed_families:
+      expected_families = ' or '.join(repr(value) for value in allowed_families)
       errors.append(
           f'{label}: {model_var}={model!r} is a {entry.get("family")!r} model, '
-          f'not {family!r}.')
+          f'not {expected_families}.')
     region = env.get(region_var)
     locations = entry.get('locations', [])
     if not region:

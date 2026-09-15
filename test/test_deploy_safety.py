@@ -37,6 +37,20 @@ def _dockerfile() -> str:
   return (_REPO / 'Dockerfile').read_text(encoding='utf-8')
 
 
+def test_frontdoor_seed_has_the_new_project_defaults():
+  """The deploy seed supplies the values used by both video-entry pages."""
+  seed = json.loads(
+      (_REPO / 'firestore_config_frontdoor.template.json').read_text(
+          encoding='utf-8'))
+  fields = seed['fields']
+  assert fields['veoModel'] == {'stringValue': '${VEO_MODEL}'}
+  assert fields['veoLocation'] == {'stringValue': '${VEO_REGION}'}
+  assert fields['resolution'] == {'stringValue': '720p'}
+  assert fields['generateAudio'] == {'booleanValue': True}
+  assert fields['duration'] == {'integerValue': '4'}
+  assert fields['numberOfCandidates'] == {'integerValue': '4'}
+
+
 def _render_cors_origins(metadata):
   helper = _REPO / 'deploy' / 'render_cors_origins.py'
   return subprocess.run(
