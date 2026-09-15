@@ -1472,7 +1472,12 @@ export class Storyboard {
           console.error(error);
         }
       }
-      if (scene && isCurrentUpload()) {
+      // Thumbnail work can outlive the scene captured after the upload.
+      if (
+        scene &&
+        isCurrentUpload() &&
+        this.config.projectConfig.value().storyboard.includes(scene)
+      ) {
         this.updateScenes(scene);
       }
     }

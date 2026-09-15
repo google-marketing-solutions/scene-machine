@@ -576,6 +576,96 @@ describe('Storyboard', () => {
     expect(mockImagePreviewService.create).not.toHaveBeenCalled();
   });
 
+  it.each(['thumbnail', 'base64', 'preview'])(
+    'does not save a deleted reference upload target after %s generation',
+    async pendingStage => {
+      const targetScene: GeneratedScene = {
+        id: 'target-scene',
+        type: 'generated',
+        name: 'Target',
+        prompt: 'target prompt',
+        candidates: [],
+      };
+      const otherScene: GeneratedScene = {
+        id: 'other-scene',
+        type: 'generated',
+        name: 'Other',
+        prompt: 'keep this prompt',
+        candidates: [],
+      };
+      const before = structuredClone(otherScene);
+      projectConfigSignal.update(config => ({
+        ...config,
+        storyboard: [targetScene, otherScene],
+      }));
+      component.selectScene(targetScene.id);
+      mockRemixEngineService.uploadMedia.mockResolvedValue({
+        path: 'reference.png',
+        url: 'reference-url',
+      });
+      let reachedStage!: () => void;
+      const stageReached = new Promise<void>(resolve => {
+        reachedStage = resolve;
+      });
+      let finishStage!: () => void;
+      const pending = new Promise<void>(resolve => {
+        finishStage = resolve;
+      });
+      const pauseAt = async (stage: string) => {
+        if (stage === pendingStage) {
+          reachedStage();
+          await pending;
+        }
+      };
+      const clientMedia = TestBed.inject(ClientMediaService);
+      const lowQuality = vi
+        .spyOn(clientMedia, 'generateLowQualityThumbnail')
+        .mockImplementation(async () => {
+          await pauseAt('thumbnail');
+          return new Blob(['low'], {type: 'image/jpeg'});
+        });
+      const toBase64 = vi
+        .spyOn(clientMedia, 'toBase64')
+        .mockImplementation(async () => {
+          await pauseAt('base64');
+          return 'data:image/jpeg;base64,low';
+        });
+      mockImagePreviewService.create.mockImplementation(async () => {
+        await pauseAt('preview');
+        return {
+          preview: {path: 'preview.jpg', url: 'preview-url'},
+          widthPixels: 100,
+          heightPixels: 100,
+        };
+      });
+      const save = vi.spyOn(mockConfigService, 'updateProjectConfig');
+
+      try {
+        const upload = component.uploadImage(
+          new File(['image'], 'reference.png', {type: 'image/png'}),
+        );
+        await stageReached;
+        expect(targetScene.referenceImage?.path).toBe('reference.png');
+        mockMatDialog.open.mockReturnValueOnce({afterClosed: () => of(true)});
+        component.deleteScene(targetScene.id);
+        component.selectScene(otherScene.id);
+        expect(save).toHaveBeenCalledTimes(1);
+        save.mockClear();
+        finishStage();
+        await upload;
+
+        expect(projectConfigSignal().storyboard).toEqual([before]);
+        expect(otherScene).toEqual(before);
+        expect(save).not.toHaveBeenCalled();
+      } finally {
+        finishStage();
+        lowQuality.mockRestore();
+        toBase64.mockRestore();
+        save.mockRestore();
+      }
+    },
+  );
+
   it('does not attach a delayed preview to a newer reference upload', async () => {
     const scene: GeneratedScene = {
       id: 'delayed-reference-scene',
