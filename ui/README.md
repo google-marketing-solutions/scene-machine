@@ -16,8 +16,14 @@ Once the server is running, open your browser and navigate to `http://localhost:
 
 The standard Scene Machine deployment includes dictation, enabled by default.
 The UI reads this capability from the backend; there is no separate frontend
-feature flag. Recording starts only after the user clicks the microphone and
-grants browser permission. Transcribed text remains editable before submission.
+feature flag. Clicking the bottom-right microphone starts recording after
+browser permission. A compact in-field strip shows status until dismissed:
+square **Stop** finishes and transcribes, while **Cancel** (×) discards
+unfinished dictation. After insertion, **Undo** removes the insertion and
+closing the message keeps the text. The field reserves space for the strip
+only while it is visible; the idle microphone has a narrow right gutter.
+Text remains editable before submission. The Storyboard Prompt supports
+vertical resizing.
 
 The backend defaults to Gemini's `SMART` mode, which removes fillers, formats
 text and applies spoken self-corrections. Review the result before submitting.
