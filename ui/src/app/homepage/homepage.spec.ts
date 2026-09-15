@@ -27,6 +27,7 @@ import {
   ConfigService,
   GeneratedScene,
   ProjectConfig,
+  ProjectSummary,
 } from '../services/config/config';
 import {MediaService} from '../services/media/media';
 import {ThumbnailCacheService} from '../services/media/thumbnail-cache';
@@ -41,7 +42,12 @@ describe('Homepage', () => {
     deleteProject: vi.fn().mockResolvedValue(undefined),
     theme: signal('light-mode'),
     primaryColor: signal('theme-azure'),
-    globalConfig: {value: () => ({gcsBucket: 'bucket-a'})},
+    globalConfig: {
+      value: (): {gcsBucket: string} | undefined => ({
+        gcsBucket: 'bucket-a',
+      }),
+      isLoading: () => false,
+    },
     isGeneratedScene: (scene: GeneratedScene) => scene.type === 'generated',
     isProvidedVideoScene: (scene: GeneratedScene) => scene.type === 'video',
   };
@@ -72,7 +78,12 @@ describe('Homepage', () => {
       deleteProject: vi.fn().mockResolvedValue(undefined),
       theme: signal('light-mode'),
       primaryColor: signal('theme-azure'),
-      globalConfig: {value: () => ({gcsBucket: 'bucket-a'})},
+      globalConfig: {
+        value: (): {gcsBucket: string} | undefined => ({
+          gcsBucket: 'bucket-a',
+        }),
+        isLoading: () => false,
+      },
       isGeneratedScene: (scene: GeneratedScene) => scene.type === 'generated',
       isProvidedVideoScene: (scene: GeneratedScene) => scene.type === 'video',
     };
@@ -221,6 +232,85 @@ describe('Homepage', () => {
     },
   );
 
+  it('shows a placeholder for a reference-only project while config loads', async () => {
+    mockConfigService.globalConfig.isLoading = () => true;
+    const project: ProjectSummary = {
+      id: 'reference-only-project',
+      name: 'Reference only',
+      aspectRatio: '16:9',
+      thumbnail: {
+        referenceImage: {
+          path: 'reference.jpg',
+          url: 'reference-url',
+        },
+      },
+      thumbnailPersist: true,
+    };
+    mockConfigService.getProjects.mockResolvedValueOnce([project]);
+
+    component.fetchProjects();
+    await Promise.resolve();
+    await Promise.resolve();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.project-thumbnail');
+    expect(card.querySelector('img')).toBeNull();
+    expect(card.querySelector('.placeholder-thumbnail')).not.toBeNull();
+  });
+
+  it('renders the homepage summary contract and preserves its cache policy', async () => {
+    const project: ProjectSummary = {
+      id: 'summary-project',
+      name: 'Summary project',
+      aspectRatio: '9:16',
+      thumbnail: {
+        highQualityThumbnail: {
+          path: 'summary-thumb.jpg',
+          url: 'https://example.test/summary-thumb.jpg',
+        },
+      },
+      thumbnailPersist: false,
+    };
+    mockConfigService.getProjects.mockResolvedValueOnce([project]);
+
+    component.fetchProjects();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.project-card-link');
+    expect(card.getAttribute('href')).toBe('/summary-project/storyboard');
+    expect(card.querySelector('.project-title').textContent).toContain(
+      'Summary project',
+    );
+    expect(mockThumbnailCache.acquire).toHaveBeenCalledWith(
+      {bucket: 'bucket-a', projectId: 'summary-project'},
+      project.thumbnail!.highQualityThumbnail,
+      false,
+    );
+  });
+
+  it('uses a reference preview for a summary fallback without changing the original ref', () => {
+    const original = {
+      path: 'original.jpg',
+      url: 'https://example.test/original.jpg',
+      preview: {
+        path: 'preview.jpg',
+        url: 'https://example.test/preview.jpg',
+      },
+    };
+    const project: ProjectSummary = {
+      id: 'preview-summary',
+      thumbnail: {referenceImage: original},
+      thumbnailPersist: true,
+    };
+
+    const data = component.getThumbnailData(project);
+
+    expect(data.referenceImage).toEqual(original.preview);
+    expect(project.thumbnail!.referenceImage).toBe(original);
+  });
+
   it('renders only the selected candidate thumbnail when a reference fallback exists', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const project = {
@@ -265,7 +355,129 @@ describe('Homepage', () => {
     expect(card.querySelector('.high-res-img').src).toContain(
       'blob:candidate.jpg',
     );
-    expect(mockMediaService.signUrls).toHaveBeenCalledWith(['candidate.jpg']);
+    expect(mockMediaService.signUrls).not.toHaveBeenCalled();
+  });
+
+  it('waits for global config before creating cached thumbnail images', async () => {
+    const loading = signal(true);
+    const globalConfig = signal<{gcsBucket: string} | undefined>(undefined);
+    mockConfigService.globalConfig = {
+      value: () => globalConfig(),
+      isLoading: () => loading(),
+    };
+    const project = {
+      id: 'project-a',
+      name: 'Project',
+      aspectRatio: '16:9',
+      storyboard: [
+        {
+          id: 'scene-a',
+          name: 'Scene',
+          type: 'generated',
+          selectedCandidateIndex: 0,
+          candidates: [{highQualityThumbnail: {path: 'candidate.jpg'}}],
+        },
+      ],
+    } as unknown as ProjectConfig;
+    mockConfigService.getProjects.mockResolvedValueOnce([project]);
+    mockThumbnailCache.acquire.mockClear();
+
+    component.fetchProjects();
+    await Promise.resolve();
+    await Promise.resolve();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.project-thumbnail');
+    expect(card.querySelector('.high-res-img')).toBeNull();
+    expect(card.querySelector('.placeholder-thumbnail')).not.toBeNull();
+    expect(mockThumbnailCache.acquire).not.toHaveBeenCalled();
+
+    globalConfig.set({gcsBucket: 'bucket-a'});
+    loading.set(false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(card.querySelector('.high-res-img')).not.toBeNull();
+    expect(mockThumbnailCache.acquire).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a low-quality thumbnail visible while config loads', async () => {
+    const loading = signal(true);
+    mockConfigService.globalConfig = {
+      value: () => undefined,
+      isLoading: () => loading(),
+    };
+    const project = {
+      id: 'project-a',
+      storyboard: [
+        {
+          type: 'generated',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {
+              lowQualityThumbnail: 'data:image/jpeg;base64,low',
+              highQualityThumbnail: {path: 'candidate.jpg'},
+            },
+          ],
+        },
+      ],
+    } as unknown as ProjectConfig;
+    mockConfigService.getProjects.mockResolvedValueOnce([project]);
+    mockThumbnailCache.acquire.mockClear();
+
+    component.fetchProjects();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.project-thumbnail');
+    expect(card.querySelector('.low-quality-thumb')).not.toBeNull();
+    expect(card.querySelector('.placeholder-thumbnail')).toBeNull();
+    expect(card.querySelector('.high-res-img')).toBeNull();
+    expect(mockThumbnailCache.acquire).not.toHaveBeenCalled();
+  });
+
+  it('keeps images available with a non-persistent fallback when config fails', async () => {
+    const loading = signal(true);
+    mockConfigService.globalConfig = {
+      value: () => undefined,
+      isLoading: () => loading(),
+    };
+    const project = {
+      id: 'project-a',
+      name: 'Project',
+      aspectRatio: '16:9',
+      storyboard: [
+        {
+          id: 'scene-a',
+          name: 'Scene',
+          type: 'generated',
+          selectedCandidateIndex: 0,
+          candidates: [{highQualityThumbnail: {path: 'candidate.jpg'}}],
+        },
+      ],
+    } as unknown as ProjectConfig;
+    mockConfigService.getProjects.mockResolvedValueOnce([project]);
+    mockThumbnailCache.acquire.mockClear();
+
+    component.fetchProjects();
+    await Promise.resolve();
+    await Promise.resolve();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('.high-res-img')).toBeNull();
+    expect(mockThumbnailCache.acquire).not.toHaveBeenCalled();
+
+    loading.set(false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(fixture.nativeElement.querySelector('.high-res-img')).not.toBeNull();
+    expect(mockThumbnailCache.acquire).toHaveBeenCalledWith(
+      {bucket: '', projectId: ''},
+      {path: 'candidate.jpg'},
+      false,
+    );
   });
 
   it.each([

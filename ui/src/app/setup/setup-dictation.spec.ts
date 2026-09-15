@@ -76,6 +76,9 @@ describe('Setup dictation parent binding', () => {
     editCandidate = vi.fn();
     const config = {
       projectConfig: {value: project, isLoading: signal(false)},
+      setupInputsLoading: signal(false),
+      setupInputsError: signal(false),
+      setupInputsLoaded: signal(true),
       globalConfig: {
         value: () => ({
           dictation: {enabled: true, maxDurationSeconds: 120, maxChars: 500},
@@ -123,7 +126,7 @@ describe('Setup dictation parent binding', () => {
       By.directive(DictationControlStub),
     ).componentInstance as DictationControlStub;
     control.valueChange.emit('spoken description');
-    expect(project().inputConfig.products[0].description).toBe(
+    expect(project().inputConfig!.products[0].description).toBe(
       'spoken description',
     );
     expect(updateProjectConfig).toHaveBeenCalledTimes(1);
@@ -139,8 +142,8 @@ describe('Setup dictation parent binding', () => {
       .map(node => node.componentInstance as DictationControlStub)
       .find(node => node.ownerKey.endsWith(':composition'))!;
     control.valueChange.emit('spoken composition');
-    expect(project().inputConfig.composition).toBe('spoken composition');
-    expect(project().inputConfig.templateId).toBe('custom');
+    expect(project().inputConfig!.composition).toBe('spoken composition');
+    expect(project().inputConfig!.templateId).toBe('custom');
     expect(generateCandidates).not.toHaveBeenCalled();
     expect(editCandidate).not.toHaveBeenCalled();
   });
@@ -162,8 +165,8 @@ describe('Setup dictation parent binding', () => {
     controls
       .find(control => control.ownerKey.endsWith(':style'))!
       .valueChange.emit('spoken style');
-    expect(project().inputConfig.audience).toBe('spoken audience');
-    expect(project().inputConfig.style).toBe('spoken style');
+    expect(project().inputConfig!.audience).toBe('spoken audience');
+    expect(project().inputConfig!.style).toBe('spoken style');
     expect(generateCandidates).not.toHaveBeenCalled();
     expect(editCandidate).not.toHaveBeenCalled();
   });

@@ -152,6 +152,8 @@ describe('Storyboard original download', () => {
           useValue: {
             generatingSceneIds: signal(new Set()),
             editingSceneIds: signal(new Set()),
+            setForegroundScene: vi.fn(),
+            clearForegroundScene: vi.fn(),
           },
         },
         {provide: MatSnackBar, useValue: snackBar},

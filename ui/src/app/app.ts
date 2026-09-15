@@ -79,12 +79,14 @@ export class App implements OnInit {
         }
         const id = root.paramMap.get('id');
         if (id !== null) {
+          const view =
+            root.routeConfig?.path === ':id/setup' ? 'full' : 'editor';
           if (this.loggedIn()) {
-            this.configService.loadProjectConfig(id);
+            this.configService.loadProjectConfig(id, view);
           } else {
             // Fixes a race condition where the Navigation event happens before the login.
             setTimeout(() => {
-              this.configService.loadProjectConfig(id);
+              this.configService.loadProjectConfig(id, view);
             }, 0);
           }
         }

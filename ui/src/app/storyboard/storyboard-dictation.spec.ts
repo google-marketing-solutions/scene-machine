@@ -148,9 +148,13 @@ describe('Storyboard dictation parent binding', () => {
     const remixEngine = {
       generatingSceneIds: signal(new Set<string>()),
       editingSceneIds: signal(new Set<string>()),
+      setForegroundScene: vi.fn(),
+      clearForegroundScene: vi.fn(),
     };
     const config = {
       projectConfig: {value: project, isLoading: signal(false)},
+      projectLoadError: signal(false),
+      reloadProjectConfig: vi.fn(),
       globalConfig: {value: () => ({dictation: {enabled: true}})},
       updateProjectConfig,
       isGeneratedScene: (value: unknown) =>
@@ -179,6 +183,14 @@ describe('Storyboard dictation parent binding', () => {
               (path: string) => `https://example.test/${path}`,
             ),
             resolve: vi.fn((file: {url: string}) => Promise.resolve(file.url)),
+            signUrls: vi
+              .fn()
+              .mockImplementation(
+                async (paths: string[]) =>
+                  new Map(
+                    paths.map(path => [path, `https://example.test/${path}`]),
+                  ),
+              ),
           },
         },
         {provide: RemixEngineService, useValue: remixEngine},
@@ -291,6 +303,8 @@ describe('Storyboard dictation with the real control', () => {
     };
     const config = {
       projectConfig: {value: project, isLoading: signal(false)},
+      projectLoadError: signal(false),
+      reloadProjectConfig: vi.fn(),
       globalConfig: {value: () => ({dictation})},
       updateProjectConfig: (partial: Partial<ProjectConfig>) =>
         project.update(value => ({...value, ...partial})),
@@ -337,7 +351,14 @@ describe('Storyboard dictation with the real control', () => {
               .mockImplementation((path: string) =>
                 Promise.resolve(`https://example.test/${path}`),
               ),
-            signUrls: vi.fn().mockResolvedValue(new Map()),
+            signUrls: vi
+              .fn()
+              .mockImplementation(
+                async (paths: string[]) =>
+                  new Map(
+                    paths.map(path => [path, `https://example.test/${path}`]),
+                  ),
+              ),
           },
         },
         RemixEngineService,
@@ -359,7 +380,11 @@ describe('Storyboard dictation with the real control', () => {
   async function startRecording(): Promise<DictationControl> {
     const control = fixture.debugElement.query(By.directive(DictationControl))
       .componentInstance as DictationControl;
-    control.start();
+    const trigger = fixture.debugElement.query(
+      By.css('[aria-label="Start dictation"]'),
+    ).nativeElement as HTMLButtonElement;
+    trigger.click();
+    fixture.detectChanges();
     await Promise.resolve();
     await Promise.resolve();
     expect(control.isRecording()).toBe(true);

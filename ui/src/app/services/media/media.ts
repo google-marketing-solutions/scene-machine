@@ -52,6 +52,11 @@ const SIGNED_URL_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
  * stale and re-sign on every change-detection pass (an HTTP storm). (M2)
  */
 const SIGNED_URL_FALLBACK_TTL_MS = 10 * 60 * 1000;
+const SIGN_URL_REQUEST_PREFIX = '/api/signUrl?';
+const MAX_SIGN_URL_PATHS = 100;
+// Keep encoded relative request URLs below Gunicorn's 4094-byte request-line
+// default, leaving room for the method and protocol framing.
+const MAX_SIGN_URL_REQUEST_CHARS = 3500;
 
 /**
  * Mediated media access: uploads via server-issued signed PUT URLs and reads
@@ -187,7 +192,7 @@ export class MediaService {
 
   /**
    * Batch variant of `signUrl`: resolves signed GET URLs for many paths with
-   * a single `/api/signUrl` request (the endpoint accepts repeated `path`
+   * bounded `/api/signUrl` requests (the endpoint accepts repeated `path`
    * params). Paths still fresh in the cache are served from it without a
    * request; paths with an in-flight resolution join that resolution. Each
    * fetched path's promise is registered in `pendingSignRequests`, so
@@ -212,48 +217,74 @@ export class MediaService {
       toFetch.push(path);
     }
     if (toFetch.length > 0) {
-      const query = toFetch
-        .map(path => `path=${encodeURIComponent(path)}`)
-        .join('&');
-      const batch = firstValueFrom(
-        this.httpClient.get<SignUrlResponse>(`/api/signUrl?${query}`),
-      ).then(response => {
-        const expiresAt = this.parseExpiresAt(response.expiresAt);
-        for (const path of toFetch) {
-          const url = response.urls[path];
-          if (url) {
-            this.urlCache.set(path, {url, expiresAt});
-          }
-        }
-        return response;
-      });
+      const batches: string[][] = [];
+      let batch: string[] = [];
+      let batchLength = SIGN_URL_REQUEST_PREFIX.length;
       for (const path of toFetch) {
-        const request = batch
-          .then(response => {
-            const url = response.urls[path];
-            if (!url) {
-              throw new Error(`No signed URL returned for ${path}`);
-            }
-            return url;
-          })
-          .finally(() => {
-            this.pendingSignRequests.delete(path);
-          });
-        this.pendingSignRequests.set(path, request);
-        // M1: tolerate a per-path omission here. A path the server leaves out of
-        // the response rejects its own request (still surfaced to a direct
-        // signUrl(path) via pendingSignRequests), but it must NOT reject the
-        // whole batch via Promise.all and drop every successfully-signed path
-        // from the returned Map. Swallow that single-path case in the
-        // aggregation only.
-        joins.push(request.then(url => results.set(path, url)).catch(() => {}));
+        const encodedPath = `path=${encodeURIComponent(path)}`;
+        const separatorLength = batch.length > 0 ? 1 : 0;
+        const exceedsBudget =
+          batch.length > 0 &&
+          batchLength + separatorLength + encodedPath.length >
+            MAX_SIGN_URL_REQUEST_CHARS;
+        if (batch.length >= MAX_SIGN_URL_PATHS || exceedsBudget) {
+          batches.push(batch);
+          batch = [];
+          batchLength = SIGN_URL_REQUEST_PREFIX.length;
+        }
+        batch.push(path);
+        batchLength += (batch.length > 1 ? 1 : 0) + encodedPath.length;
       }
-      // ...but a whole-batch (HTTP/transport) failure must STILL propagate, so
-      // signUrls() rejects on a real request failure instead of silently
-      // resolving with an empty Map. `batch` rejects only when the request
-      // itself failed (not when a single path is missing), so awaiting it
-      // unguarded reraises exactly that case. (M1)
-      joins.push(batch.then(() => undefined));
+      if (batch.length > 0) batches.push(batch);
+
+      for (const batchPaths of batches) {
+        const query = batchPaths
+          .map(path => `path=${encodeURIComponent(path)}`)
+          .join('&');
+        const batchRequest = firstValueFrom(
+          this.httpClient.get<SignUrlResponse>(
+            `${SIGN_URL_REQUEST_PREFIX}${query}`,
+          ),
+        ).then(response => {
+          const expiresAt = this.parseExpiresAt(response.expiresAt);
+          for (const path of batchPaths) {
+            const url = response.urls[path];
+            if (url) {
+              this.urlCache.set(path, {url, expiresAt});
+            }
+          }
+          return response;
+        });
+        for (const path of batchPaths) {
+          const request = batchRequest
+            .then(response => {
+              const url = response.urls[path];
+              if (!url) {
+                throw new Error(`No signed URL returned for ${path}`);
+              }
+              return url;
+            })
+            .finally(() => {
+              this.pendingSignRequests.delete(path);
+            });
+          this.pendingSignRequests.set(path, request);
+          // M1: tolerate a per-path omission here. A path the server leaves out of
+          // the response rejects its own request (still surfaced to a direct
+          // signUrl(path) via pendingSignRequests), but it must NOT reject the
+          // whole batch via Promise.all and drop every successfully-signed path
+          // from the returned Map. Swallow that single-path case in the
+          // aggregation only.
+          joins.push(
+            request.then(url => results.set(path, url)).catch(() => {}),
+          );
+        }
+        // ...but a whole-batch (HTTP/transport) failure must STILL propagate, so
+        // signUrls() rejects on a real request failure instead of silently
+        // resolving with an empty Map. `batchRequest` rejects only when the request
+        // itself failed (not when a single path is missing), so awaiting it
+        // unguarded reraises exactly that case. (M1)
+        joins.push(batchRequest.then(() => undefined));
+      }
     }
     await Promise.all(joins);
     return results;

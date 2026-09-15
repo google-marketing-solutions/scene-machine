@@ -33,6 +33,7 @@ import threading
 import uuid
 
 from google.api_core import exceptions as google_exceptions
+from google.cloud import firestore
 
 # Reused module-scoped fixture; pytest picks it up from this namespace.
 from test.test_frontdoor import orchestrator_module  # noqa: F401  pylint: disable=unused-import
@@ -135,8 +136,14 @@ class FakeDocumentRef:
     self._collection = collection
     self.id = doc_id
 
+  @property
+  def path(self):
+    return f'{self._collection.path}/{self.id}'
+
   def get(self):
-    return FakeSnapshot(self.id, self._collection.docs.get(self.id))
+    snapshot = FakeSnapshot(self.id, self._collection.docs.get(self.id))
+    snapshot.reference = self
+    return snapshot
 
   def set(self, data):
     self._collection.docs[self.id] = copy.deepcopy(data)
@@ -157,18 +164,31 @@ class FakeDocumentRef:
 class FakeQuery:
   """Read-side surface used by orch: where(filter=)/order_by/stream."""
 
-  def __init__(self, collection, filters=(), order_field=None):
+  def __init__(self, collection, filters=(), order_field=None, field_paths=None):
     self._collection = collection
     self._filters = tuple(filters)
     self._order_field = order_field
+    self._field_paths = field_paths
 
   def where(self, filter=None):  # pylint: disable=redefined-builtin
     return FakeQuery(
-        self._collection, self._filters + (filter,), self._order_field
+        self._collection,
+        self._filters + (filter,),
+        self._order_field,
+        self._field_paths,
     )
 
   def order_by(self, field):
-    return FakeQuery(self._collection, self._filters, field)
+    return FakeQuery(
+        self._collection, self._filters, field, self._field_paths
+    )
+
+  def select(self, field_paths):
+    field_paths = list(field_paths)
+    self._collection.select_calls.append(field_paths)
+    return FakeQuery(
+        self._collection, self._filters, self._order_field, field_paths
+    )
 
   def stream(self):
     items = list(self._collection.docs.items())
@@ -183,14 +203,25 @@ class FakeQuery:
       items.sort(key=lambda item: item[1].get(self._order_field))
     else:
       items.sort(key=lambda item: item[0])
-    return [FakeSnapshot(doc_id, data) for doc_id, data in items]
+    snapshots = []
+    for doc_id, data in items:
+      if self._field_paths is not None:
+        data = {
+            field: copy.deepcopy(data[field])
+            for field in self._field_paths
+            if field in data
+        }
+      snapshots.append(FakeSnapshot(doc_id, data))
+    return snapshots
 
 
 class FakeCollection(FakeQuery):
 
-  def __init__(self):
+  def __init__(self, path=''):
     super().__init__(self)
+    self.path = path
     self.docs = {}
+    self.select_calls = []
     self._subcollections = {}  # (doc_id, name) -> FakeCollection
 
   def document(self, doc_id):
@@ -202,7 +233,9 @@ class FakeCollection(FakeQuery):
     return None, FakeDocumentRef(self, doc_id)
 
   def subcollection(self, doc_id, name):
-    return self._subcollections.setdefault((doc_id, name), FakeCollection())
+    return self._subcollections.setdefault(
+        (doc_id, name), FakeCollection(f'{self.path}/{doc_id}/{name}')
+    )
 
 
 class FakeBatch:
@@ -218,12 +251,17 @@ class FakeBatch:
   def create(self, ref, data):
     self._ops.append(('create', ref, data))
 
+  def update(self, ref, data):
+    self._ops.append(('update', ref, data))
+
   def delete(self, ref):
     self._ops.append(('delete', ref, None))
 
   def commit(self):
     if self._db.commit_barrier is not None:
       self._db.commit_barrier.wait(timeout=5)
+    if self._db.commit_hook is not None:
+      self._db.commit_hook(self)
     with self._db.lock:
       for op, ref, _ in self._ops:
         if op == 'create' and ref.id in ref._collection.docs:
@@ -231,6 +269,22 @@ class FakeBatch:
       for op, ref, data in self._ops:
         if op in ('create', 'set'):
           ref.set(data)
+        elif op == 'update':
+          current = ref._collection.docs[ref.id]
+          for field, value in data.items():
+            if field.startswith('`') and field.endswith('`'):
+              field_parts = [
+                  field[1:-1].replace('\\`', '`').replace('\\\\', '\\')
+              ]
+            else:
+              field_parts = field.split('.')
+            target = current
+            for field_part in field_parts[:-1]:
+              target = target.setdefault(field_part, {})
+            if value is firestore.DELETE_FIELD:
+              target.pop(field_parts[-1], None)
+            else:
+              target[field_parts[-1]] = copy.deepcopy(value)
         else:
           ref.delete()
       self._ops.clear()
@@ -243,9 +297,26 @@ class FakeUiDb:
     self._collections = {}
     self.lock = threading.Lock()
     self.commit_barrier = None
+    self.commit_hook = None
+    self.get_all_calls = 0
+    self.get_all_refs = []
+    self.reverse_get_all = False
+
+  @property
+  def select_calls(self):
+    return self.collection('projects').select_calls
 
   def collection(self, name):
-    return self._collections.setdefault(name, FakeCollection())
+    return self._collections.setdefault(name, FakeCollection(name))
+
+  def get_all(self, refs):
+    refs = list(refs)
+    self.get_all_calls += 1
+    self.get_all_refs.append([ref.path for ref in refs])
+    snapshots = [ref.get() for ref in refs]
+    if self.reverse_get_all:
+      snapshots.reverse()
+    return snapshots
 
   def batch(self):
     return FakeBatch(self)
@@ -984,12 +1055,502 @@ def test_project_storyboard_split_into_scenes_subcollection(
       'scene-2',
   ]
 
-  # The list endpoint returns only the FIRST scene per project (homepage cards
-  # read storyboard[0] for a thumbnail), so it does not reassemble the whole
-  # storyboard like the detail endpoint above. This keeps listing N projects
-  # from reading every scene of every project.
+  # The list endpoint returns a page summary and reads only the FIRST scene per
+  # project for its image material. It does not reassemble the whole storyboard
+  # like the detail endpoint above.
   listed = client.get('/api/projects').get_json()['projects']
-  assert [s['description'] for s in listed[0]['storyboard']] == ['scene-0']
+  assert listed[0]['thumbnail'] == {}
+
+
+def test_project_list_batches_first_scene_reads_and_keeps_query_order(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  for project_id in ('b-project', 'a-project'):
+    assert (
+        client.post(
+            '/api/projects',
+            json={
+                'id': project_id,
+                'name': project_id,
+                'storyboard': [
+                    {'description': f'{project_id}-first'},
+                    {'description': f'{project_id}-second'},
+                ],
+            },
+        ).status_code
+        == 200
+    )
+
+  fake_db.reverse_get_all = True
+  response = client.get('/api/projects')
+
+  assert response.status_code == 200
+  listed = response.get_json()['projects']
+  assert [project['id'] for project in listed] == ['a-project', 'b-project']
+  assert [project['thumbnail'] for project in listed] == [{}, {}]
+  assert fake_db.get_all_calls == 1
+  assert fake_db.get_all_refs == [[
+      'projects/a-project/scenes/000000',
+      'projects/b-project/scenes/000000',
+  ]]
+
+
+def test_project_list_returns_page_summary_and_selects_only_card_root_fields(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  assert client.post(
+      '/api/projects',
+      json={
+          'id': 'summary',
+          'name': 'Card project',
+          'aspectRatio': '16:9',
+          'inputConfig': {'brief': 'do not return this'},
+          'storyboard': [{
+              'type': 'generated',
+              'referenceImage': {'path': 'reference.png'},
+              'selectedCandidateIndex': 1,
+              'candidates': [
+                  {'prompt': 'hidden zero', 'lowQualityThumbnail': 'zero.jpg'},
+                  {
+                      'prompt': 'hidden one',
+                      'isArchived': True,
+                      'lowQualityThumbnail': 'selected-low.jpg',
+                      'highQualityThumbnail': {'path': 'selected-high.jpg'},
+                  },
+              ],
+          }],
+      },
+  ).status_code == 200
+
+  response = client.get('/api/projects')
+
+  assert response.status_code == 200
+  assert response.get_json()['projects'] == [{
+      'id': 'summary',
+      'name': 'Card project',
+      'createdBy': None,
+      'aspectRatio': '16:9',
+      'thumbnail': {
+          'lowQualityThumbnail': 'selected-low.jpg',
+          'highQualityThumbnail': {'path': 'selected-high.jpg'},
+          'referenceImage': {'path': 'reference.png'},
+      },
+      'thumbnailPersist': False,
+  }]
+  assert fake_db.select_calls == [[
+      'id', 'name', 'lastEdited', 'createdBy', 'aspectRatio'
+  ]]
+
+
+def test_project_summary_keeps_provided_image_material_and_empty_projects(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, _, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  assert client.post(
+      '/api/projects',
+      json={
+          'id': 'provided-summary',
+          'name': 'Provided',
+          'storyboard': [{
+              'type': 'video',
+              'lowQualityThumbnail': 'provided-low.jpg',
+              'highQualityThumbnail': {'path': 'provided-high.jpg'},
+              'video': {'path': 'provided.mp4'},
+          }],
+      },
+  ).status_code == 200
+  assert client.post(
+      '/api/projects', json={'id': 'empty-summary', 'name': 'Empty'}
+  ).status_code == 200
+
+  projects = client.get('/api/projects').get_json()['projects']
+  by_id = {project['id']: project for project in projects}
+
+  assert by_id['provided-summary']['thumbnail'] == {
+      'lowQualityThumbnail': 'provided-low.jpg',
+      'highQualityThumbnail': {'path': 'provided-high.jpg'},
+  }
+  assert by_id['provided-summary']['thumbnailPersist'] is True
+  assert by_id['empty-summary']['thumbnail'] == {}
+  assert by_id['empty-summary']['thumbnailPersist'] is True
+
+
+def test_project_summary_uses_first_candidate_when_selected_index_is_null(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, _, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  assert client.post(
+      '/api/projects',
+      json={
+          'id': 'null-index-summary',
+          'storyboard': [{
+              'type': 'generated',
+              'selectedCandidateIndex': None,
+              'candidates': [{
+                  'lowQualityThumbnail': 'first-candidate.jpg',
+              }],
+          }],
+      },
+  ).status_code == 200
+
+  summary = client.get('/api/projects').get_json()['projects'][0]
+
+  assert summary['thumbnail'] == {
+      'lowQualityThumbnail': 'first-candidate.jpg'
+  }
+
+
+def test_project_list_keeps_project_with_missing_first_scene(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  assert (
+      client.post(
+          '/api/projects',
+          json={'id': 'no-scene', 'name': 'No scene', 'storyboard': []},
+      ).status_code
+      == 200
+  )
+
+  response = client.get('/api/projects')
+
+  assert response.status_code == 200
+  assert response.get_json()['projects'] == [{
+      'id': 'no-scene',
+      'name': 'No scene',
+      'createdBy': None,
+      'thumbnail': {},
+      'thumbnailPersist': True,
+  }]
+  assert fake_db.get_all_calls == 1
+  assert fake_db.get_all_refs == [['projects/no-scene/scenes/000000']]
+
+
+def test_project_editor_view_omits_input_config_but_legacy_detail_is_full(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, _, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project = {
+      'id': 'editor-view',
+      'name': 'Editor project',
+      'model': 'veo-fast',
+      'numberOfCandidates': 2,
+      'inputConfig': {
+          'brief': 'keep this 400 KB Setup brief private to editor view',
+          'products': [{'id': 3, 'name': 'Product'}],
+      },
+      'storyboard': [{
+          'type': 'generated',
+          'prompt': 'scene prompt',
+          'selectedCandidateIndex': 0,
+          'candidates': [{
+              'prompt': 'candidate prompt',
+              'runNumber': 1,
+              'lowQualityThumbnail': 'low.jpg',
+          }],
+      }],
+  }
+  assert client.post('/api/projects', json=project).status_code == 200
+
+  editor = client.get('/api/projects/editor-view?view=editor')
+  full = client.get('/api/projects/editor-view')
+
+  assert editor.status_code == 200
+  assert 'inputConfig' not in editor.get_json()
+  assert editor.get_json()['storyboard'][0]['candidates'][0]['prompt'] == (
+      'candidate prompt'
+  )
+  assert full.status_code == 200
+  assert full.get_json()['inputConfig'] == project['inputConfig']
+  assert client.get('/api/projects/editor-view?view=typo').status_code == 400
+
+
+def test_editor_patch_preserves_setup_and_replaces_other_omitted_root_fields(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project_id = 'editor-patch'
+  project = {
+      'id': project_id,
+      'name': 'Before',
+      'model': 'veo-fast',
+      'inputConfig': {'brief': '400 KB setup brief', 'products': [1, 2]},
+      'legacyOnly': 'delete on editor replacement',
+      'storyboard': [{'type': 'generated', 'prompt': 'old'}],
+  }
+  assert client.post('/api/projects', json=project).status_code == 200
+
+  response = client.patch(
+      f'/api/projects/{project_id}?view=editor',
+      json={
+          'id': project_id,
+          'name': 'After',
+          'model': 'veo-fast',
+          'storyboard': [{'type': 'generated', 'prompt': 'new'}],
+      },
+  )
+
+  assert response.status_code == 200
+  stored = fake_db.collection('projects').docs[project_id]
+  assert stored['inputConfig'] == project['inputConfig']
+  assert stored['name'] == 'After'
+  assert 'legacyOnly' not in stored
+  assert _scenes_docs(fake_db, project_id)['000000']['prompt'] == 'new'
+
+  before = copy.deepcopy(stored)
+  rejected = client.patch(
+      f'/api/projects/{project_id}?view=editor',
+      json={'id': project_id, 'inputConfig': {'brief': 'overwrite'}},
+  )
+  assert rejected.status_code == 400
+  assert fake_db.collection('projects').docs[project_id] == before
+  dotted = client.patch(
+      f'/api/projects/{project_id}?view=editor',
+      json={'id': project_id, 'inputConfig.composition': 'bypass'},
+  )
+  assert dotted.status_code == 400
+  assert fake_db.collection('projects').docs[project_id] == before
+
+
+def test_dedicated_editor_patch_preserves_setup_and_rejects_protected_fields(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project_id = 'dedicated-editor-patch'
+  project = {
+      'id': project_id,
+      'name': 'Before',
+      'inputConfig': {'brief': 'must survive'},
+      'legacyOnly': 'remove',
+      'storyboard': [],
+  }
+  assert client.post('/api/projects', json=project).status_code == 200
+
+  response = client.patch(
+      f'/api/projects/{project_id}/editor',
+      json={'id': project_id, 'name': 'After', 'storyboard': []},
+  )
+
+  assert response.status_code == 200
+  stored = fake_db.collection('projects').docs[project_id]
+  assert stored['inputConfig'] == project['inputConfig']
+  assert stored['name'] == 'After'
+  assert 'legacyOnly' not in stored
+
+  before = copy.deepcopy(stored)
+  assert client.patch(
+      f'/api/projects/{project_id}/editor',
+      json={'id': project_id, 'inputConfig': {'brief': 'overwrite'}},
+  ).status_code == 400
+  assert fake_db.collection('projects').docs[project_id] == before
+  assert client.get(
+      f'/api/projects/{project_id}/editor'
+  ).status_code in (404, 405)
+  assert client.post(
+      f'/api/projects/{project_id}/editor'
+  ).status_code in (404, 405)
+
+
+def test_editor_patch_does_not_overwrite_concurrent_setup_save(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  project_id = 'editor-race'
+  client = orch.app.test_client()
+  original = {
+      'id': project_id,
+      'name': 'Before',
+      'model': 'veo-fast',
+      'inputConfig': {'brief': 'old brief'},
+      'storyboard': [{'type': 'generated', 'prompt': 'old'}],
+  }
+  assert client.post('/api/projects', json=original).status_code == 200
+  setup_payload = {
+      **original,
+      'inputConfig': {'brief': 'new brief from Setup'},
+  }
+  editor_payload = {
+      'id': project_id,
+      'name': 'Edited scene',
+      'model': 'veo-fast',
+      'storyboard': [{'type': 'generated', 'prompt': 'new scene'}],
+  }
+  editor_commit_entered = threading.Event()
+  allow_editor_commit = threading.Event()
+
+  def pause_editor_commit(batch):
+    if any(op == 'update' for op, _, _ in batch._ops):
+      editor_commit_entered.set()
+      assert allow_editor_commit.wait(timeout=5)
+
+  fake_db.commit_hook = pause_editor_commit
+  statuses = {}
+
+  def save_editor():
+    with orch.app.test_client() as editor_client:
+      statuses['editor'] = editor_client.patch(
+          f'/api/projects/{project_id}?view=editor', json=editor_payload
+      ).status_code
+
+  editor_thread = threading.Thread(target=save_editor)
+  editor_thread.start()
+  assert editor_commit_entered.wait(timeout=5)
+
+  # Force Setup's full replacement to commit while the editor update is paused.
+  with orch.app.test_client() as setup_client:
+    statuses['setup'] = setup_client.patch(
+        f'/api/projects/{project_id}', json=setup_payload
+    ).status_code
+  allow_editor_commit.set()
+  editor_thread.join(timeout=10)
+  assert not editor_thread.is_alive()
+  assert statuses == {'setup': 200, 'editor': 200}
+  stored = fake_db.collection('projects').docs[project_id]
+  assert stored['inputConfig'] == setup_payload['inputConfig']
+  assert _scenes_docs(fake_db, project_id)['000000']['prompt'] == 'new scene'
+
+
+def test_editor_patch_escapes_literal_stored_field_paths(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project_id = 'literal-field-path'
+  assert client.post(
+      '/api/projects',
+      json={
+          'id': project_id,
+          'name': 'Before',
+          'inputConfig': {'composition': 'must survive'},
+          'legacyOnly': True,
+      },
+  ).status_code == 200
+  fake_db.collection('projects').docs[project_id]['inputConfig.composition'] = (
+      'legacy literal'
+  )
+
+  response = client.patch(
+      f'/api/projects/{project_id}?view=editor',
+      json={'id': project_id, 'name': 'After', 'storyboard': []},
+  )
+
+  assert response.status_code == 200
+  stored = fake_db.collection('projects').docs[project_id]
+  assert stored['inputConfig']['composition'] == 'must survive'
+  assert 'inputConfig.composition' not in stored
+
+
+def test_legacy_full_patch_still_replaces_omitted_root_fields(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project_id = 'full-replacement'
+  assert client.post(
+      '/api/projects',
+      json={
+          'id': project_id,
+          'name': 'Before',
+          'inputConfig': {'brief': 'remove in full replacement'},
+          'legacyOnly': True,
+      },
+  ).status_code == 200
+
+  response = client.patch(
+      f'/api/projects/{project_id}',
+      json={'id': project_id, 'name': 'After', 'storyboard': []},
+  )
+
+  assert response.status_code == 200
+  stored = fake_db.collection('projects').docs[project_id]
+  assert stored['name'] == 'After'
+  assert 'inputConfig' not in stored
+  assert 'legacyOnly' not in stored
+
+
+def test_empty_project_list_skips_empty_batch(monkeypatch, orchestrator_module):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+
+  response = orch.app.test_client().get('/api/projects')
+
+  assert response.status_code == 200
+  assert response.get_json() == {'projects': []}
+  assert fake_db.get_all_calls == 0
+
+
+def test_project_list_batches_after_verified_owner_filter(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(
+      monkeypatch, AUTH_MODE='iap', IAP_AUDIENCE=_IAP_AUDIENCE
+  )
+  _stub_identity(
+      monkeypatch,
+      orch,
+      {'t-u1': {'email': 'u1@x'}, 't-u2': {'email': 'u2@x'}},
+  )
+  client = orch.app.test_client()
+
+  for project_id, assertion in (('u2-project', 't-u2'), ('u1-project', 't-u1')):
+    assert (
+        client.post(
+            '/api/projects',
+            json={'id': project_id, 'name': project_id, 'storyboard': []},
+            headers=_iap(assertion),
+        ).status_code
+        == 200
+    )
+
+  fake_db.get_all_calls = 0
+  fake_db.get_all_refs.clear()
+  mine_u1 = client.get('/api/projects?createdBy=me', headers=_iap('t-u1'))
+  mine_u2 = client.get('/api/projects?createdBy=me', headers=_iap('t-u2'))
+  shared = client.get('/api/projects', headers=_iap('t-u2'))
+
+  assert [project['id'] for project in mine_u1.get_json()['projects']] == [
+      'u1-project'
+  ]
+  assert [project['id'] for project in mine_u2.get_json()['projects']] == [
+      'u2-project'
+  ]
+  assert [project['id'] for project in shared.get_json()['projects']] == [
+      'u1-project',
+      'u2-project',
+  ]
+  assert fake_db.get_all_calls == 3
+  assert fake_db.get_all_refs == [
+      ['projects/u1-project/scenes/000000'],
+      ['projects/u2-project/scenes/000000'],
+      [
+          'projects/u1-project/scenes/000000',
+          'projects/u2-project/scenes/000000',
+      ],
+  ]
 
 
 def test_project_patch_prunes_removed_scenes(monkeypatch, orchestrator_module):

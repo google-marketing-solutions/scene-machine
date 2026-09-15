@@ -54,6 +54,13 @@ export class CandidateVideoCacheService {
     return this.engine.acquire(scope, file, persist);
   }
 
+  acquireCached(
+    scope: CandidateCacheScope,
+    file: MediaRef | null | undefined,
+  ): Promise<CandidateVideoLease | null> {
+    return this.engine.acquireCached(scope, file);
+  }
+
   invalidateCandidate(projectId: string, path: string): Promise<void> {
     return this.engine.invalidateCandidate(projectId, path);
   }

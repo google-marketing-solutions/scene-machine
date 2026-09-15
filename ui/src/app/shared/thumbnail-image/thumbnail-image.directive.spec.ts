@@ -152,8 +152,10 @@ describe('ThumbnailImageDirective', () => {
 
     intersect(0);
     await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(1);
     directive.media = {path: 'thumbnail-b.jpg'};
     directive.ngOnChanges();
+    expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(5000);
 
     expect(acquire).toHaveBeenCalledTimes(1);
@@ -293,6 +295,110 @@ describe('ThumbnailImageDirective', () => {
     expect(observers[1].disconnect).toHaveBeenCalled();
   });
 
+  it('keeps the loaded image visible while an unresolved scope is replaced', async () => {
+    const release = vi.fn();
+    const replacementRelease = vi.fn();
+    acquire
+      .mockResolvedValueOnce({url: 'blob:unscoped', release})
+      .mockResolvedValueOnce({url: 'blob:scoped', release: replacementRelease});
+
+    directive.thumbnailCacheScope = null;
+    directive.ngOnChanges();
+    intersect(1);
+    await Promise.resolve();
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
+    Object.defineProperty(image, 'naturalWidth', {
+      configurable: true,
+      value: 1,
+    });
+    image.dispatchEvent(new Event('load'));
+    expect(image.src).toContain('blob:unscoped');
+    expect(image.classList.contains('loaded')).toBe(true);
+
+    directive.thumbnailCacheScope = host.scope;
+    directive.ngOnChanges();
+    expect(image.src).toContain('blob:unscoped');
+    expect(image.classList.contains('loaded')).toBe(true);
+    expect(release).not.toHaveBeenCalled();
+    await Promise.resolve();
+    expect(image.src).toContain('blob:scoped');
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(image.classList.contains('loaded')).toBe(true);
+  });
+
+  it('clears the image when a resolved scope changes', async () => {
+    const release = vi.fn();
+    acquire.mockResolvedValue({url: 'blob:resolved', release});
+    intersect(0);
+    await Promise.resolve();
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
+    Object.defineProperty(image, 'naturalWidth', {
+      configurable: true,
+      value: 1,
+    });
+    image.dispatchEvent(new Event('load'));
+
+    directive.thumbnailCacheScope = {
+      bucket: 'bucket-b',
+      projectId: 'project-b',
+    };
+    directive.ngOnChanges();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(image.getAttribute('src')).toBeNull();
+    expect(image.classList.contains('loaded')).toBe(false);
+  });
+
+  it('restores the displayed image when a scope replacement assignment fails', async () => {
+    vi.useFakeTimers();
+    const originalRelease = vi.fn();
+    const failedRelease = vi.fn();
+    const recoveredRelease = vi.fn();
+    acquire
+      .mockResolvedValueOnce({url: 'blob:unscoped', release: originalRelease})
+      .mockResolvedValueOnce({url: 'blob:failed', release: failedRelease})
+      .mockResolvedValueOnce({url: 'blob:scoped', release: recoveredRelease});
+    directive.thumbnailCacheScope = null;
+    directive.ngOnChanges();
+    intersect(1);
+    await vi.advanceTimersByTimeAsync(0);
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
+    Object.defineProperty(image, 'naturalWidth', {
+      configurable: true,
+      value: 1,
+    });
+    image.dispatchEvent(new Event('load'));
+    const setter = vi
+      .spyOn(image, 'src', 'set')
+      .mockImplementationOnce(value => {
+        image.setAttribute('src', value);
+        throw new Error('replacement assignment failed');
+      });
+
+    directive.thumbnailCacheScope = host.scope;
+    directive.ngOnChanges();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(image.src).toBe('blob:unscoped');
+    expect(image.classList.contains('loaded')).toBe(true);
+    expect(originalRelease).not.toHaveBeenCalled();
+    expect(failedRelease).toHaveBeenCalledTimes(1);
+    setter.mockRestore();
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(image.src).toBe('blob:scoped');
+    expect(originalRelease).toHaveBeenCalledTimes(1);
+    expect(recoveredRelease).not.toHaveBeenCalled();
+    fixture.destroy();
+    expect(originalRelease).toHaveBeenCalledTimes(1);
+    expect(failedRelease).toHaveBeenCalledTimes(1);
+    expect(recoveredRelease).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the fallback visible when a load event has no decoded image width', async () => {
     intersect(0);
     await Promise.resolve();
@@ -312,6 +418,63 @@ describe('ThumbnailImageDirective', () => {
         .querySelector('div')
         .classList.contains('high-res-loaded'),
     ).toBe(false);
+  });
+
+  it('retains the old lease through replacement recovery', async () => {
+    vi.useFakeTimers();
+    const release = vi.fn();
+    const replacementRelease = vi.fn();
+    acquire
+      .mockResolvedValueOnce({url: 'blob:unscoped', release})
+      .mockRejectedValueOnce(new Error('signing unavailable'))
+      .mockResolvedValueOnce({url: 'blob:scoped', release: replacementRelease});
+
+    directive.thumbnailCacheScope = null;
+    directive.ngOnChanges();
+    intersect(1);
+    await vi.advanceTimersByTimeAsync(0);
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
+    Object.defineProperty(image, 'naturalWidth', {
+      configurable: true,
+      value: 1,
+    });
+    image.dispatchEvent(new Event('load'));
+    directive.thumbnailCacheScope = host.scope;
+    directive.ngOnChanges();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(image.src).toContain('blob:unscoped');
+    expect(release).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(250);
+    expect(image.src).toContain('blob:scoped');
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases both leases when destroyed during replacement', async () => {
+    let resolveReplacement!: (lease: {url: string; release(): void}) => void;
+    const release = vi.fn();
+    const replacementRelease = vi.fn();
+    acquire
+      .mockResolvedValueOnce({url: 'blob:unscoped', release})
+      .mockReturnValueOnce(
+        new Promise(resolve => {
+          resolveReplacement = resolve;
+        }),
+      );
+
+    directive.thumbnailCacheScope = null;
+    directive.ngOnChanges();
+    intersect(1);
+    await Promise.resolve();
+    directive.thumbnailCacheScope = host.scope;
+    directive.ngOnChanges();
+    fixture.destroy();
+    resolveReplacement({url: 'blob:scoped', release: replacementRelease});
+    await Promise.resolve();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(replacementRelease).toHaveBeenCalledTimes(1);
   });
 
   it('marks a loaded relative URL without comparing against the raw lease URL', async () => {

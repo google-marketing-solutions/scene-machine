@@ -98,13 +98,25 @@ project.
 
 The browser may cache selected or hovered candidate videos locally for up to
 seven days to make scene switching faster: up to 64 MiB per video and 512 MiB
-total (at most 64 videos). Homepage and storyboard thumbnails
+total (at most 64 videos). Composition reuses these cached clips when available;
+uncached clips still stream normally instead of waiting for a full download.
+Homepage, storyboard and composition thumbnails
 use a separate cache: up to 1 MiB per image and 64 MiB total (at most 1,024
 images), with the same seven-day expiry. Images near the visible area load
 ahead; offscreen images wait until needed. The homepage shows images only,
 with a static placeholder when no image is available; it never loads videos.
 Changing the selected candidate uses its own thumbnail, not the old selection's
 cached image. Oversized images still display using their original URL.
+Cached thumbnails do not need a new signed-URL request. Nearby images that
+are not cached share batched signing requests as they come into view.
+
+Versioned application JavaScript and CSS also use long-lived private browser
+caching. The HTML entry point remains revalidated so a reload discovers new
+application versions; project data and announcements keep their existing
+freshness policies.
+Successful project reads and text-based application assets support gzip
+compression to reduce transferred bytes; this does not make project data public
+or change when edits become visible.
 
 This is bounded, best-effort browser storage: browsers may evict it earlier,
 it does not provide offline project access, and it is not a remote security
@@ -257,8 +269,15 @@ so end users never need direct storage/database permissions.
 Dictation is included in the standard deployment. Users can speak into the
 microphone control in supported Setup, Storyboard and Edit candidate text
 fields, then review or undo the inserted text before submitting. Enabling the
-feature does not start recording: users must click the microphone and allow
-browser microphone access.
+feature does not start recording: click the bottom-right microphone to start,
+allowing browser microphone access when prompted. Text is inserted at the
+cursor or selection captured at that click, or appended if the text field was
+not focused. A compact strip inside the field shows recording and transcription
+status. Use the square **Stop** button to finish and transcribe, or **Cancel**
+(×) to discard unfinished dictation. After insertion, the strip stays visible
+with **Undo**; closing it leaves the inserted text intact. When idle, only the
+microphone is shown, leaving the field available for text.
+The Storyboard Prompt can be resized vertically without moving the trim controls.
 
 Recordings are sent to Gemini for transcription through the deployment's
 Google Cloud project; usage can incur model charges and consume quota. The
@@ -360,8 +379,8 @@ gcloud auth application-default login   # 2. Application Default Credentials (AD
     `REGION`               | Deployment region for various GCP resources.               | e.g., `us-central1`
     `GEMINI_MODEL`         | Text generation model for prompts and analysis.            | `gemini-3.8-flash`
     `GEMINI_REGION`        | Region for model invocation.                               | Check locations availability. Recommended `global`.
-    `VEO_MODEL`            | Video generation model.                                    | `veo-3.1-generate-001`
-    `VEO_REGION`           | Region for Veo model invocation.                           | Check availability. Recommended `global`.
+    `VEO_MODEL`            | Video generation model.                                    | `gemini-omni-1.1-flash-preview` (global-only) or a Veo model
+    `VEO_REGION`           | Region for video model invocation.                        | `global` for Omni; check availability for Veo.
     `IMAGE_MODEL`          | Image model for outpainting and image generation.          | `gemini-3-pro-image` (Nano Banana Pro), `gemini-3.1-flash-image` (Nano Banana 2)
     `IMAGE_MODEL_REGION`   | Region for image model invocation.                         | Check availability. Recommended `global`.
     `GCS_BUCKET`           | Dedicated storage bucket for project images and assets. | Must be globally unique. Auto-created by the deploy. Must not be shared with other data (see Storage note).
@@ -374,6 +393,15 @@ gcloud auth application-default login   # 2. Application Default Credentials (AD
     `DICTATION_ENABLED`    | Microphone dictation in supported text fields.             | `1` (default); set `0` to disable before deploying. Existing explicit `0` values are preserved.
     `DICTATION_MODE`       | Gemini transcription mode for dictation.                  | `SMART` (default) or `VERBATIM`; uppercase only. Empty or invalid values are rejected.
     `CUSTOM_DOMAIN`        | Custom domain for the application user interface.          | Optional. e.g., `scene-machine.my-company.com`
+
+    With the shipped config template, new projects start with Gemini Omni
+    (`gemini-omni-1.1-flash-preview`) at
+    720p, with audio enabled, four-second candidates, and four candidates per
+    run. The front-door seed takes this default from `VEO_MODEL` and
+    `VEO_REGION`; when switching an existing `config.txt` to Omni, set both
+    variables (`VEO_MODEL=gemini-omni-1.1-flash-preview` and
+    `VEO_REGION=global`). Existing saved projects retain their own video
+    settings when this default changes.
 
     -   **Important Notes for Configuration:**
         -   **Naming:** Use alphanumerical names (with hyphens) for entities
