@@ -166,9 +166,11 @@ describe('edit candidate placeholder reproduction', () => {
   afterEach(() => {
     http.verify();
     fixture.destroy();
+    vi.useRealTimers();
   });
 
   async function editWithHeldStart(sliderCount: number) {
+    vi.useFakeTimers();
     project.update(value => ({...value, numberOfCandidates: sliderCount}));
     fixture.detectChanges();
 
@@ -204,12 +206,12 @@ describe('edit candidate placeholder reproduction', () => {
     expect(
       fixture.nativeElement.querySelectorAll('.video-item.placeholder'),
     ).toHaveLength(1);
-    let statusRequest;
-    await vi.waitFor(() => {
-      const requests = http.match(req => req.url.startsWith('/api/getStatus'));
-      expect(requests).toHaveLength(1);
-      statusRequest = requests[0];
-    });
+    await vi.advanceTimersByTimeAsync(3000);
+    const statusRequests = http.match(req =>
+      req.url.startsWith('/api/getStatus'),
+    );
+    expect(statusRequests).toHaveLength(1);
+    const statusRequest = statusRequests[0];
     statusRequest!.flush({
       sink: {output: {'0': {video: [{file: 'videos/edited.mp4'}]}}},
     });
