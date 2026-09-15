@@ -83,6 +83,8 @@ describe('edit candidate placeholder reproduction', () => {
     });
     const config = {
       projectConfig: {value: project, isLoading: signal(false)},
+      projectLoadError: signal(false),
+      reloadProjectConfig: vi.fn(),
       globalConfig: {
         value: () => ({
           gcpProject: 'test-project',

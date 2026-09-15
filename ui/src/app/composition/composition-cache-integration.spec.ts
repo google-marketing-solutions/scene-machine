@@ -161,6 +161,8 @@ describe('Composition cache integration', () => {
     const config = {
       projectConfig: {value: projectConfigSignal, isLoading: signal(false)},
       globalConfig: {value: () => ({gcsBucket: scope.bucket})},
+      projectLoadError: signal(false),
+      reloadProjectConfig: vi.fn(),
       isGeneratedScene: (scene: ProjectConfig['storyboard'][number]) =>
         scene.type === 'generated',
       isProvidedVideoScene: (scene: ProjectConfig['storyboard'][number]) =>

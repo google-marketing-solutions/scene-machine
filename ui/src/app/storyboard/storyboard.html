@@ -14,7 +14,14 @@
  limitations under the License.
 -->
 
-@if (config.projectConfig.isLoading() || !config.projectConfig.value().id) {
+@if (config.projectLoadError()) {
+  <div class="loading-state">
+    <p>Could not load this project. Please try again.</p>
+    <button mat-button type="button" (click)="config.reloadProjectConfig()">
+      Retry
+    </button>
+  </div>
+} @else if (config.projectConfig.isLoading() || !config.projectConfig.value().id) {
   <div class="loading-state">
     <mat-spinner diameter="40"></mat-spinner>
     <p>Loading project...</p>
@@ -879,7 +886,12 @@
                     >
                       @if (scene.referenceImage) {
                         <div class="reference-image-preview">
-                          <img [src]="scene.referenceImage | mediaSrc" alt="Reference Image" />
+                          <img
+                            [appThumbnailImage]="scene.referenceImage.preview ?? scene.referenceImage"
+                            [thumbnailCacheScope]="candidateCacheScope()"
+                            [thumbnailImagePersist]="thumbnailPersistForScene(scene)"
+                            alt="Reference Image"
+                          />
                           <button
                             mat-icon-button
                             class="remove-image-btn"

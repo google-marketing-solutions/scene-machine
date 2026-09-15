@@ -27,6 +27,7 @@ import {
   ConfigService,
   GeneratedScene,
   ProjectConfig,
+  ProjectSummary,
 } from '../services/config/config';
 import {MediaService} from '../services/media/media';
 import {ThumbnailCacheService} from '../services/media/thumbnail-cache';
@@ -233,22 +234,18 @@ describe('Homepage', () => {
 
   it('shows a placeholder for a reference-only project while config loads', async () => {
     mockConfigService.globalConfig.isLoading = () => true;
-    const project = {
+    const project: ProjectSummary = {
       id: 'reference-only-project',
       name: 'Reference only',
       aspectRatio: '16:9',
-      storyboard: [
-        {
-          id: 'scene-a',
-          name: 'Scene',
-          type: 'generated',
-          prompt: 'prompt',
-          selectedCandidateIndex: 0,
-          referenceImage: {path: 'reference.jpg', url: 'reference-url'},
-          candidates: [],
+      thumbnail: {
+        referenceImage: {
+          path: 'reference.jpg',
+          url: 'reference-url',
         },
-      ],
-    } as unknown as ProjectConfig;
+      },
+      thumbnailPersist: true,
+    };
     mockConfigService.getProjects.mockResolvedValueOnce([project]);
 
     component.fetchProjects();
@@ -260,6 +257,58 @@ describe('Homepage', () => {
     const card = fixture.nativeElement.querySelector('.project-thumbnail');
     expect(card.querySelector('img')).toBeNull();
     expect(card.querySelector('.placeholder-thumbnail')).not.toBeNull();
+  });
+
+  it('renders the homepage summary contract and preserves its cache policy', async () => {
+    const project: ProjectSummary = {
+      id: 'summary-project',
+      name: 'Summary project',
+      aspectRatio: '9:16',
+      thumbnail: {
+        highQualityThumbnail: {
+          path: 'summary-thumb.jpg',
+          url: 'https://example.test/summary-thumb.jpg',
+        },
+      },
+      thumbnailPersist: false,
+    };
+    mockConfigService.getProjects.mockResolvedValueOnce([project]);
+
+    component.fetchProjects();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.project-card-link');
+    expect(card.getAttribute('href')).toBe('/summary-project/storyboard');
+    expect(card.querySelector('.project-title').textContent).toContain(
+      'Summary project',
+    );
+    expect(mockThumbnailCache.acquire).toHaveBeenCalledWith(
+      {bucket: 'bucket-a', projectId: 'summary-project'},
+      project.thumbnail!.highQualityThumbnail,
+      false,
+    );
+  });
+
+  it('uses a reference preview for a summary fallback without changing the original ref', () => {
+    const original = {
+      path: 'original.jpg',
+      url: 'https://example.test/original.jpg',
+      preview: {
+        path: 'preview.jpg',
+        url: 'https://example.test/preview.jpg',
+      },
+    };
+    const project: ProjectSummary = {
+      id: 'preview-summary',
+      thumbnail: {referenceImage: original},
+      thumbnailPersist: true,
+    };
+
+    const data = component.getThumbnailData(project);
+
+    expect(data.referenceImage).toEqual(original.preview);
+    expect(project.thumbnail!.referenceImage).toBe(original);
   });
 
   it('renders only the selected candidate thumbnail when a reference fallback exists', async () => {
