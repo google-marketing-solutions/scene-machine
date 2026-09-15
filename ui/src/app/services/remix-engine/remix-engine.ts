@@ -178,6 +178,10 @@ class WorkflowStatusPollScheduler {
   }
 
   setCurrentProject(projectId: string): void {
+    // Notifying a subscriber can synchronously run teardown and re-enter pump().
+    // Mark and remove all stale queued work first, then cancel an active snapshot.
+    // This avoids redundant cancellation; canRun and RxJS already prevent stale
+    // starts and duplicate terminal notifications reaching consumers.
     const queueToCancel = this.queue.filter(
       item => item.projectId !== projectId,
     );
