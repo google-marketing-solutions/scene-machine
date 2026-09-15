@@ -180,6 +180,23 @@ describe('CandidateVideoCacheService', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('bypasses cache storage when the cache scope is incomplete', async () => {
+    const openSpy = vi.mocked(caches.open);
+
+    const bucketMissing = await service.acquireCached(
+      {bucket: '', projectId: 'project-a'},
+      {path: 'videos/a.mp4'},
+    );
+    const projectMissing = await service.acquireCached(
+      {bucket: 'bucket-a', projectId: ''},
+      {path: 'videos/b.mp4'},
+    );
+
+    expect(bucketMissing).toBeNull();
+    expect(projectMissing).toBeNull();
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
   it('does not wait for a cold acquisition already downloading the same path', async () => {
     let releaseFetch!: (response: Response) => void;
     fetchMock.mockReturnValue(

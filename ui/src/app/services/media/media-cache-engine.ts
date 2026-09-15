@@ -130,7 +130,7 @@ export class MediaCacheEngine {
     scope: MediaCacheScope,
     file: MediaRef | null | undefined,
   ): Promise<MediaCacheLease | null> {
-    if (!file?.path) return null;
+    if (!file?.path || !scope.bucket || !scope.projectId) return null;
 
     const key = this.cacheRequest(scope, file.path).url;
     const version = this.version(scope.projectId, file.path);

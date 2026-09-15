@@ -341,6 +341,7 @@ describe('Homepage', () => {
 
     const card = fixture.nativeElement.querySelector('.project-thumbnail');
     expect(card.querySelector('.high-res-img')).toBeNull();
+    expect(card.querySelector('.placeholder-thumbnail')).not.toBeNull();
     expect(mockThumbnailCache.acquire).not.toHaveBeenCalled();
 
     globalConfig.set({gcsBucket: 'bucket-a'});
@@ -350,6 +351,41 @@ describe('Homepage', () => {
 
     expect(card.querySelector('.high-res-img')).not.toBeNull();
     expect(mockThumbnailCache.acquire).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a low-quality thumbnail visible while config loads', async () => {
+    const loading = signal(true);
+    mockConfigService.globalConfig = {
+      value: () => undefined,
+      isLoading: () => loading(),
+    };
+    const project = {
+      id: 'project-a',
+      storyboard: [
+        {
+          type: 'generated',
+          selectedCandidateIndex: 0,
+          candidates: [
+            {
+              lowQualityThumbnail: 'data:image/jpeg;base64,low',
+              highQualityThumbnail: {path: 'candidate.jpg'},
+            },
+          ],
+        },
+      ],
+    } as unknown as ProjectConfig;
+    mockConfigService.getProjects.mockResolvedValueOnce([project]);
+    mockThumbnailCache.acquire.mockClear();
+
+    component.fetchProjects();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    const card = fixture.nativeElement.querySelector('.project-thumbnail');
+    expect(card.querySelector('.low-quality-thumb')).not.toBeNull();
+    expect(card.querySelector('.placeholder-thumbnail')).toBeNull();
+    expect(card.querySelector('.high-res-img')).toBeNull();
+    expect(mockThumbnailCache.acquire).not.toHaveBeenCalled();
   });
 
   it('keeps images available with a non-persistent fallback when config fails', async () => {

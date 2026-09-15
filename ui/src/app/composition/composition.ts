@@ -680,6 +680,7 @@ export class Composition {
     first: MediaRef | undefined,
     second: MediaRef | undefined,
   ): boolean {
+    if (!first || !second) return false;
     return (
       this.sourceKey(this.candidateCacheScope(), first) ===
       this.sourceKey(this.candidateCacheScope(), second)
