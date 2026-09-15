@@ -369,6 +369,7 @@ describe('DictationControl', () => {
     request.flush({text: 'spoken words'});
     fixture.detectChanges();
 
+    expect(control.canUndo()).toBe(true);
     const textarea = fixture.nativeElement.querySelector(
       'textarea',
     ) as HTMLTextAreaElement;
@@ -380,6 +381,7 @@ describe('DictationControl', () => {
     AngularTestBed.tick();
 
     expect(host.value).toBe('Existing\nspoken words!');
+    expect(control.canUndo()).toBe(false);
     expect(control.panelOpen()).toBe(false);
     expect(document.activeElement).toBe(textarea);
   });
