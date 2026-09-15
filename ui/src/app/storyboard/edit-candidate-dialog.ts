@@ -119,7 +119,7 @@ import {DictationConfig} from '../shared/dictation/dictation';
         }
 
         &.dictation-enabled:has(app-dictation-control.dictation-open) textarea {
-          height: auto;
+          height: auto !important;
           padding-block-end: 0 !important;
         }
 
@@ -130,14 +130,14 @@ import {DictationConfig} from '../shared/dictation/dictation';
           min-height: 0;
         }
 
-        &.dictation-enabled ::ng-deep app-dictation-control {
+        &.dictation-enabled app-dictation-control {
           position: absolute;
           inset-inline-end: 16px;
           bottom: 4px;
           z-index: 2;
         }
 
-        &.dictation-enabled ::ng-deep app-dictation-control.dictation-open {
+        &.dictation-enabled app-dictation-control.dictation-open {
           position: relative;
           inset: auto;
           width: 100%;

@@ -19,6 +19,8 @@ import {
   TestBed as AngularTestBed,
 } from '@angular/core/testing';
 import {provideRouter, Router} from '@angular/router';
+import {MatFormFieldModule} from '@angular/material/form-field';
+import {MatInputModule} from '@angular/material/input';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {DictationControl} from './dictation-control';
 import {
@@ -36,21 +38,28 @@ class FakeTrack {
 
 @Component({
   standalone: true,
-  imports: [DictationControl],
+  imports: [DictationControl, MatFormFieldModule, MatInputModule],
   template: `
     <form (submit)="onSubmit($event)">
-      <textarea #target [value]="value"></textarea>
-      <app-dictation-control
-        [enabled]="enabled"
-        [value]="value"
-        [revision]="revision"
-        [ownerKey]="ownerKey"
-        [textarea]="target"
-        [maxChars]="maxChars"
-        [maxDurationSeconds]="maxDurationSeconds"
-        [audioConfig]="audioConfig"
-        (valueChange)="onValueChange($event)"
-      ></app-dictation-control>
+      <mat-form-field>
+        <textarea
+          #target
+          matInput
+          [value]="value"
+          (input)="onValueChange(target.value)"
+        ></textarea>
+        <app-dictation-control
+          [enabled]="enabled"
+          [value]="value"
+          [revision]="revision"
+          [ownerKey]="ownerKey"
+          [textarea]="target"
+          [maxChars]="maxChars"
+          [maxDurationSeconds]="maxDurationSeconds"
+          [audioConfig]="audioConfig"
+          (valueChange)="onValueChange($event)"
+        ></app-dictation-control>
+      </mat-form-field>
       <button type="submit">Submit</button>
     </form>
   `,
@@ -353,6 +362,76 @@ describe('DictationControl', () => {
     fixture.detectChanges();
 
     expect(host.value).toBe('Existing\nspoken words');
+  });
+
+  it('does not steal textarea focus when editing after transcript insertion', async () => {
+    const request = await record();
+    request.flush({text: 'spoken words'});
+    fixture.detectChanges();
+
+    const textarea = fixture.nativeElement.querySelector(
+      'textarea',
+    ) as HTMLTextAreaElement;
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    textarea.value += '!';
+    textarea.dispatchEvent(new Event('input', {bubbles: true}));
+    fixture.detectChanges();
+    AngularTestBed.tick();
+
+    expect(host.value).toBe('Existing\nspoken words!');
+    expect(control.panelOpen()).toBe(false);
+    expect(document.activeElement).toBe(textarea);
+  });
+
+  it('does not reclaim focus when microphone permission resolves after focus moved away', async () => {
+    let grantPermission!: (stream: {getTracks: () => FakeTrack[]}) => void;
+    getUserMedia.mockReturnValueOnce(
+      new Promise(resolve => {
+        grantPermission = resolve;
+      }),
+    );
+    clickStart();
+    expect(control.state().status).toBe('permission');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe(
+      'Cancel dictation',
+    );
+
+    const textarea = fixture.nativeElement.querySelector(
+      'textarea',
+    ) as HTMLTextAreaElement;
+    textarea.focus();
+    grantPermission({getTracks: () => [track]});
+    await Promise.resolve();
+    await Promise.resolve();
+    fixture.detectChanges();
+    AngularTestBed.tick();
+
+    expect(control.isRecording()).toBe(true);
+    expect(document.activeElement).toBe(textarea);
+    control.cancel();
+  });
+
+  it('moves focus from Stop to Cancel while transcription is pending', async () => {
+    clickStart();
+    await Promise.resolve();
+    await Promise.resolve();
+    fixture.detectChanges();
+    const stop = fixture.nativeElement.querySelector(
+      '[aria-label="Stop recording"]',
+    ) as HTMLButtonElement;
+    stop.focus();
+    stop.click();
+    await Promise.resolve();
+    await Promise.resolve();
+    fixture.detectChanges();
+    AngularTestBed.tick();
+
+    expect(control.state().status).toBe('transcribing');
+    expect(document.activeElement?.getAttribute('aria-label')).toBe(
+      'Cancel dictation',
+    );
+    http.expectOne('/api/transcribe').flush({text: 'spoken words'});
   });
 
   it('falls back to the end when focus moved to an unrelated field', async () => {

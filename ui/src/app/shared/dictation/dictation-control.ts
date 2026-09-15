@@ -160,7 +160,7 @@ import {
             (mousedown)="$event.preventDefault()"
             (click)="handleTrigger()"
           >
-            <mat-icon>mic</mat-icon>
+            <mat-icon aria-hidden="true">mic</mat-icon>
           </button>
         }
       </div>
@@ -337,10 +337,11 @@ export class DictationControl implements OnChanges, OnDestroy {
   private lastValue = '';
   private lastRevision = 0;
   private focusTarget: 'panel' | 'trigger' | undefined;
+  private allowExternalFocus = false;
 
   constructor() {
     afterRenderEffect({
-      read: () => {
+      write: () => {
         const target = this.focusTarget;
         const panelOpen = this.panelOpen();
         const status = this.state().status;
@@ -350,11 +351,28 @@ export class DictationControl implements OnChanges, OnDestroy {
         const element = this.hostElement.nativeElement.querySelector(
           selector,
         ) as HTMLButtonElement | null;
-        if (!element || (target === 'panel' && !panelOpen)) return;
+        if (!element) return;
+        if (target === 'panel' && !panelOpen) return;
+        const activeElement = document.activeElement;
+        const controlOwnsFocus =
+          activeElement instanceof Node &&
+          this.hostElement.nativeElement.contains(activeElement);
+        const focusUnassigned =
+          !activeElement ||
+          activeElement === document.body ||
+          !(activeElement as HTMLElement).isConnected;
+        if (!controlOwnsFocus && !focusUnassigned && !this.allowExternalFocus) {
+          this.focusTarget = undefined;
+          this.allowExternalFocus = false;
+          return;
+        }
         element.focus();
+        // Permission resolution replaces Cancel with the recording controls.
+        // Keep that transition pending, but only while focus stays here.
         if (target === 'trigger' || status !== 'permission') {
           this.focusTarget = undefined;
         }
+        this.allowExternalFocus = false;
       },
     });
     effect(() => {
@@ -413,6 +431,7 @@ export class DictationControl implements OnChanges, OnDestroy {
     if (ownerChanged) {
       this.panelOpen.set(false);
       this.focusTarget = undefined;
+      this.allowExternalFocus = false;
       this.recoveryDialogRef?.close();
       this.recoveryDialogRef = undefined;
       this.recovery.set(undefined);
@@ -434,12 +453,19 @@ export class DictationControl implements OnChanges, OnDestroy {
         this.insertionSelection = undefined;
         this.service.dismiss(this.lastOwner || this.ownerKey);
         this.panelOpen.set(false);
-        this.focusTarget = 'trigger';
+        this.allowExternalFocus = false;
+        const activeElement = document.activeElement;
+        this.focusTarget =
+          activeElement instanceof Node &&
+          this.hostElement.nativeElement.contains(activeElement)
+            ? 'trigger'
+            : undefined;
       }
     }
     if (changes['enabled'] && !this.enabled) {
       this.panelOpen.set(false);
       this.focusTarget = undefined;
+      this.allowExternalFocus = false;
     }
     this.lastOwner = this.ownerKey;
     this.lastValue = this.value;
@@ -466,17 +492,20 @@ export class DictationControl implements OnChanges, OnDestroy {
         this.recovery.set(undefined);
         this.service.start(this.ownerKey, this.config());
       }
-      this.panelOpen.set(true);
+      this.allowExternalFocus = true;
       this.focusTarget = 'panel';
+      this.panelOpen.set(true);
     }
   }
 
   closePanel(restoreFocus = true): void {
     this.panelOpen.set(false);
+    this.allowExternalFocus = restoreFocus;
     if (restoreFocus) this.focusTarget = 'trigger';
   }
 
   stop(): void {
+    this.allowExternalFocus = true;
     this.focusTarget = 'panel';
     this.service.stop(this.ownerKey);
   }
@@ -486,6 +515,7 @@ export class DictationControl implements OnChanges, OnDestroy {
     this.insertionSelection = undefined;
     this.service.cancel(this.ownerKey);
     this.panelOpen.set(false);
+    this.allowExternalFocus = true;
     this.focusTarget = 'trigger';
   }
 
@@ -508,6 +538,7 @@ export class DictationControl implements OnChanges, OnDestroy {
     this.recovery.set(undefined);
     this.service.dismiss(this.ownerKey);
     this.panelOpen.set(false);
+    this.allowExternalFocus = true;
     this.focusTarget = 'trigger';
   }
 
@@ -518,6 +549,7 @@ export class DictationControl implements OnChanges, OnDestroy {
     this.insertionSelection = undefined;
     this.service.dismiss(this.ownerKey);
     this.panelOpen.set(false);
+    this.allowExternalFocus = true;
     this.focusTarget = 'trigger';
   }
 
