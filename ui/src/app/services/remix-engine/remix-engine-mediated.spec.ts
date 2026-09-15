@@ -19,7 +19,7 @@ import {HttpClient} from '@angular/common/http';
 import {signal, type WritableSignal} from '@angular/core';
 import {TestBed} from '@angular/core/testing';
 import {MatSnackBar} from '@angular/material/snack-bar';
-import {from, of} from 'rxjs';
+import {from, of, Subject} from 'rxjs';
 import {afterEach, beforeEach, describe, expect, it, vi} from 'vitest';
 import {ClientMediaService} from '../client-media/client-media';
 import {
@@ -2146,6 +2146,101 @@ describe('RemixEngineService (mediated)', () => {
         expect.objectContaining({generateAudio: false}),
       );
     });
+
+    it.each([
+      [true, false],
+      [false, true],
+      [true, true],
+      [false, false],
+    ])(
+      'keeps the start-time audio snapshot when the project toggle changes in flight (%s -> %s)',
+      async (startAudio, endAudio) => {
+        const mockScene = mockSceneAndProject();
+        projectConfigSignal.update(config => ({
+          ...config,
+          model: 'omni-1',
+          generateAudio: startAudio,
+          storyboard: [mockScene],
+        }));
+        configServiceMock.audioLocked.mockReturnValue(true);
+        configServiceMock.resolveVideoLocation.mockReturnValue('global');
+        mediaServiceMock.upload.mockResolvedValue({
+          path: 'p/video-prompt.txt',
+        });
+        setupHappyMedia();
+
+        // Keep the real startVideoGenerationWorkflow, startWorkflow, and
+        // pollWorkflow calls. Only the HTTP responses are deferred so this
+        // exercises the same boundary as a project-toggle change while a
+        // normal Omni run is starting.
+        const startResponse = new Subject<{executionId: string}>();
+        const statusResponse = new Subject<WorkflowStatusResponse>();
+        httpClientMock.post.mockReturnValue(startResponse.asObservable());
+        httpClientMock.get.mockReturnValue(statusResponse.asObservable());
+        configServiceMock.updateProjectConfig.mockImplementation(
+          (partial: {storyboard?: unknown[]; generateAudio?: boolean}) =>
+            projectConfigSignal.update(config => ({...config, ...partial})),
+        );
+
+        const generationPromise = service.generateCandidates(mockScene as any, {
+          durationSeconds: 5,
+          model: 'omni-1',
+          generateAudio: startAudio,
+          resolution: '720p',
+        });
+        await vi.waitFor(() =>
+          expect(httpClientMock.post).toHaveBeenCalledWith(
+            '/api/supplyNode',
+            expect.objectContaining({
+              workflowDefinition: expect.objectContaining({
+                n_0: expect.objectContaining({
+                  parameters: expect.objectContaining({generate_audio: true}),
+                }),
+              }),
+            }),
+          ),
+        );
+
+        // The live project setting changes after start, but must not rewrite
+        // this run's choice.
+        projectConfigSignal.update(config => ({
+          ...config,
+          generateAudio: endAudio,
+        }));
+        startResponse.next({executionId: 'omni-deferred-exec'});
+        startResponse.complete();
+        await vi.waitFor(() =>
+          expect(httpClientMock.get).toHaveBeenCalledWith(
+            '/api/getStatus?executionId=omni-deferred-exec&signedUrls=false&gcsBucket=mock-bucket',
+          ),
+        );
+
+        statusResponse.next({
+          sink: {
+            actualCounts: {},
+            inputFiles: {},
+            inputGroups: {},
+            lastUpdated: '',
+            output: {'0': {video: [{file: 'p/omni.mp4'}]}},
+            targetCounts: {},
+          },
+        });
+        statusResponse.complete();
+        await generationPromise;
+
+        const finalScene = projectConfigSignal().storyboard[0];
+        expect(finalScene.candidates).toEqual([
+          expect.objectContaining({
+            video: {
+              url: 'https://signed.example/p/omni.mp4',
+              path: 'p/omni.mp4',
+            },
+            generateAudio: startAudio,
+          }),
+        ]);
+        expect(finalScene).not.toHaveProperty('pendingGeneration');
+      },
+    );
   });
 
   describe('video location resolution in generation', () => {

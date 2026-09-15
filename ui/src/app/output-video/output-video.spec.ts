@@ -45,6 +45,7 @@ describe('OutputVideo', () => {
     name: string;
     aspectRatio: string;
     resolution: string;
+    generateAudio: boolean;
     renderRuns: RenderRun[];
     storyboard: never[];
   }
@@ -61,6 +62,7 @@ describe('OutputVideo', () => {
     name: 'Test Project',
     aspectRatio: '16:9',
     resolution: '1080p',
+    generateAudio: false,
     renderRuns,
     storyboard: [],
   });
@@ -122,6 +124,20 @@ describe('OutputVideo', () => {
     // playsinline must stay.
     expect(video!.hasAttribute('controls')).toBe(true);
     expect(video!.hasAttribute('playsinline')).toBe(true);
+  });
+
+  it('does not mute rendered output when current project audio is off', () => {
+    // The project-level toggle controls future candidate generation. It must
+    // not be inherited by the already-rendered output player.
+    projectConfig.update(current => ({...current, generateAudio: false}));
+    fixture.detectChanges();
+    const video: HTMLVideoElement | null =
+      fixture.nativeElement.querySelector('video');
+    expect(video).not.toBeNull();
+    // Audio presence is determined by the rendered file itself and exposed
+    // through native controls, not the live project toggle.
+    expect(video!.hasAttribute('muted')).toBe(false);
+    expect(video!.muted).toBe(false);
   });
 
   it('downloads the exported scene file rather than the candidate source', async () => {
