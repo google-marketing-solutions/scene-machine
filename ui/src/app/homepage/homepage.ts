@@ -159,11 +159,14 @@ export class Homepage {
     const thumb = this.getThumbnailMaterial(project);
     const hasThumb =
       !!thumb.lowQualityThumbnail || !!thumb.highQualityThumbnail;
+    const hasReference = !!(
+      thumb.referenceImage?.path || thumb.referenceImage?.url
+    );
 
     return {
       ...thumb,
-      showReference: !hasThumb && thumb.referenceImage !== undefined,
-      showPlaceholder: !hasThumb && !thumb.referenceImage,
+      showReference: !hasThumb && hasReference,
+      showPlaceholder: !hasThumb && !hasReference,
     };
   }
 

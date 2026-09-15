@@ -57,13 +57,17 @@ describe('ThumbnailImageDirective', () => {
   beforeEach(async () => {
     observers = [];
     class FakeIntersectionObserver {
-      readonly rootMargin = '200px';
+      readonly rootMargin: string;
       readonly callback: IntersectionObserverCallback;
       readonly disconnect = vi.fn();
       readonly observe = vi.fn();
 
-      constructor(callback: IntersectionObserverCallback) {
+      constructor(
+        callback: IntersectionObserverCallback,
+        options?: IntersectionObserverInit,
+      ) {
         this.callback = callback;
+        this.rootMargin = options?.rootMargin ?? '';
         observers.push(this);
       }
     }
@@ -84,6 +88,7 @@ describe('ThumbnailImageDirective', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -203,6 +208,61 @@ describe('ThumbnailImageDirective', () => {
     expect(image.src).toContain('blob:b');
   });
 
+  it('releases failed DOM assignments and bounds their recovery attempts', async () => {
+    vi.useFakeTimers();
+    const releases: ReturnType<typeof vi.fn>[] = [];
+    acquire.mockImplementation(async () => {
+      const release = vi.fn();
+      releases.push(release);
+      return {url: `blob:attempt-${releases.length}`, release};
+    });
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
+    vi.spyOn(image, 'src', 'set').mockImplementation(value => {
+      image.setAttribute('src', value);
+      throw new Error('image assignment failed');
+    });
+
+    intersect(0);
+    await vi.advanceTimersByTimeAsync(250 + 1000 + 4000 + 5000);
+
+    expect(acquire).toHaveBeenCalledTimes(4);
+    expect(image.getAttribute('src')).toBeNull();
+    fixture.destroy();
+    for (const release of releases) expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains the recovered lease after a transient DOM assignment failure', async () => {
+    vi.useFakeTimers();
+    const failedRelease = vi.fn();
+    const recoveredRelease = vi.fn();
+    acquire
+      .mockResolvedValueOnce({url: 'blob:failed', release: failedRelease})
+      .mockResolvedValueOnce({
+        url: 'blob:recovered',
+        release: recoveredRelease,
+      });
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
+    const setter = vi.spyOn(image, 'src', 'set').mockImplementationOnce(() => {
+      throw new Error('image assignment failed');
+    });
+
+    intersect(0);
+    await vi.advanceTimersByTimeAsync(0);
+    setter.mockRestore();
+    expect(failedRelease).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(250);
+
+    expect(image.src).toBe('blob:recovered');
+    expect(recoveredRelease).not.toHaveBeenCalled();
+    fixture.destroy();
+    expect(failedRelease).toHaveBeenCalledTimes(1);
+    expect(recoveredRelease).toHaveBeenCalledTimes(1);
+  });
+
   it('releases the active lease and clears loaded state on media change and destroy', async () => {
     const release = vi.fn();
     acquire.mockResolvedValue({url: 'blob:a', release});
@@ -211,6 +271,10 @@ describe('ThumbnailImageDirective', () => {
     const image = fixture.nativeElement.querySelector(
       'img',
     ) as HTMLImageElement;
+    Object.defineProperty(image, 'naturalWidth', {
+      configurable: true,
+      value: 1,
+    });
     image.dispatchEvent(new Event('load'));
     expect(image.classList.contains('loaded')).toBe(true);
     expect(
@@ -227,6 +291,27 @@ describe('ThumbnailImageDirective', () => {
 
     fixture.destroy();
     expect(observers[1].disconnect).toHaveBeenCalled();
+  });
+
+  it('keeps the fallback visible when a load event has no decoded image width', async () => {
+    intersect(0);
+    await Promise.resolve();
+    const image = fixture.nativeElement.querySelector(
+      'img',
+    ) as HTMLImageElement;
+    Object.defineProperty(image, 'naturalWidth', {
+      configurable: true,
+      value: 0,
+    });
+
+    image.dispatchEvent(new Event('load'));
+
+    expect(image.classList.contains('loaded')).toBe(false);
+    expect(
+      fixture.nativeElement
+        .querySelector('div')
+        .classList.contains('high-res-loaded'),
+    ).toBe(false);
   });
 
   it('marks a loaded relative URL without comparing against the raw lease URL', async () => {

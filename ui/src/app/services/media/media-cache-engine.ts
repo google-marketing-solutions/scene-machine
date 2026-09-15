@@ -290,8 +290,12 @@ export class MediaCacheEngine {
 
   private async validEntries(cache: Cache): Promise<CacheEntry[]> {
     const entries: CacheEntry[] = [];
-    for (const request of await cache.keys()) {
-      const response = await cache.match(request);
+    const requests = await cache.keys();
+    const responses = await Promise.all(
+      requests.map(request => cache.match(request)),
+    );
+    for (const [index, request] of requests.entries()) {
+      const response = responses[index];
       const metadata = response && this.metadata(response);
       if (!metadata || !this.isFresh(metadata.downloadedAt)) {
         await cache.delete(request);

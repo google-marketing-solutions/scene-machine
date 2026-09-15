@@ -99,6 +99,71 @@ describe.sequential('MediaCacheEngine thumbnail policy', () => {
     second.release();
   });
 
+  it('bypasses persistent caching when bucket or project scope is empty', async () => {
+    const bucketMissing = await service.acquire(
+      {bucket: '', projectId: 'project-a'},
+      file,
+    );
+    const projectMissing = await service.acquire(
+      {bucket: 'bucket-a', projectId: ''},
+      file,
+    );
+
+    expect(bucketMissing.url).toBe('https://signed.example/a.webp');
+    expect(projectMissing.url).toBe('https://signed.example/a.webp');
+    expect(caches.open).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+    bucketMissing.release();
+    projectMissing.release();
+  });
+
+  it.each(['candidate', 'project'])(
+    'does not refetch after %s invalidation races a cached body read',
+    async invalidationKind => {
+      let releaseRead!: () => void;
+      let startRead!: () => void;
+      const readGate = new Promise<void>(resolve => (releaseRead = resolve));
+      const readStarted = new Promise<void>(resolve => (startRead = resolve));
+      const body = new ReadableStream<Uint8Array<ArrayBuffer>>({
+        async pull(controller) {
+          await readGate;
+          controller.enqueue(new Uint8Array([1]));
+          controller.close();
+        },
+      });
+      const cached = new Response(body, {
+        headers: {
+          'x-scene-machine-cached-at': String(Date.now()),
+          'x-scene-machine-cached-size': '1',
+        },
+      });
+      const key = `${globalThis.location.origin}/__scene_machine_thumbnail_cache__/v1/bucket-a/project-a/thumbnails%2Fa.webp`;
+      cache.values.set(key, cached);
+      vi.spyOn(cached, 'body', 'get').mockImplementation(() => {
+        startRead();
+        return body;
+      });
+      vi.spyOn(cache, 'match').mockResolvedValueOnce(cached);
+
+      const acquisition = service.acquire(scope, file);
+      await readStarted;
+      const invalidation =
+        invalidationKind === 'project'
+          ? service.invalidateProject(scope.projectId)
+          : service.invalidateCandidate(scope.projectId, file.path);
+      releaseRead();
+      const lease = await acquisition;
+      await invalidation;
+
+      expect(lease.url).toBe('https://signed.example/a.webp');
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+      expect(cache.values.size).toBe(0);
+      lease.release();
+    },
+  );
+
   it('keeps bucket, project, and path keys isolated', async () => {
     let leaseNumber = 0;
     vi.mocked(URL.createObjectURL).mockImplementation(
@@ -316,5 +381,52 @@ describe.sequential('MediaCacheEngine thumbnail policy', () => {
       false,
     );
     leases.forEach(lease => lease.release());
+  });
+
+  it('reads scan metadata concurrently and still removes expired entries', async () => {
+    const prefix = `${globalThis.location.origin}/__scene_machine_thumbnail_cache__/v1/bucket-a/project-a/`;
+    const now = Date.now();
+    const keys = ['first.webp', 'second.webp', 'expired.webp'].map(
+      name => prefix + name,
+    );
+    keys.forEach((key, index) =>
+      cache.values.set(
+        key,
+        response(new Uint8Array([index]), {
+          'x-scene-machine-cached-at': String(
+            index === 2 ? now - 7 * 24 * 60 * 60 * 1000 : now,
+          ),
+          'x-scene-machine-cached-size': '1',
+        }),
+      ),
+    );
+    let releaseMatches!: () => void;
+    const pendingMatches = new Promise<void>(
+      resolve => (releaseMatches = resolve),
+    );
+    const matchedKeys: string[] = [];
+    const originalMatch = cache.match.bind(cache);
+    vi.spyOn(cache, 'match').mockImplementation(async request => {
+      if (keys.includes(request.url)) {
+        matchedKeys.push(request.url);
+        await pendingMatches;
+      }
+      return originalMatch(request);
+    });
+    fetchMock.mockResolvedValue(response(new Uint8Array([1])));
+    const acquisition = service.acquire(scope, {path: 'new.webp'});
+
+    try {
+      await vi.waitFor(() => expect(matchedKeys.length).toBeGreaterThan(0));
+      // None of these reads can finish yet; the scan must have started all three.
+      expect([...matchedKeys]).toEqual(keys);
+    } finally {
+      releaseMatches();
+      (await acquisition).release();
+    }
+    expect(cache.values.has(keys[0])).toBe(true);
+    expect(cache.values.has(keys[1])).toBe(true);
+    expect(cache.values.has(keys[2])).toBe(false);
+    expect(cache.values.has(prefix + 'new.webp')).toBe(true);
   });
 });

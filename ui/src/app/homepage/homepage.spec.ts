@@ -195,6 +195,32 @@ describe('Homepage', () => {
     expect(component.thumbnailPersistForProject(project)).toBe(false);
   });
 
+  it.each([{}, {path: '', url: ''}, undefined])(
+    'uses the placeholder when a reference has no usable source: %j',
+    referenceImage => {
+      const project = {
+        storyboard: [{type: 'generated', referenceImage}],
+      } as unknown as ProjectConfig;
+
+      const data = component.getThumbnailData(project);
+
+      expect(data.showReference).toBe(false);
+      expect(data.showPlaceholder).toBe(true);
+    },
+  );
+
+  it.each([{path: 'reference.jpg'}, {url: 'https://example.com/image.jpg'}])(
+    'uses a reference with a usable source: %j',
+    referenceImage => {
+      const project = {
+        storyboard: [{type: 'generated', referenceImage}],
+      } as unknown as ProjectConfig;
+      const data = component.getThumbnailData(project);
+      expect(data.showReference).toBe(true);
+      expect(data.showPlaceholder).toBe(false);
+    },
+  );
+
   it('renders only the selected candidate thumbnail when a reference fallback exists', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const project = {

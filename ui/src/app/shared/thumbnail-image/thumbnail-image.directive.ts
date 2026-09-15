@@ -17,7 +17,6 @@
 import {
   Directive,
   ElementRef,
-  HostListener,
   Input,
   OnChanges,
   OnDestroy,
@@ -38,7 +37,7 @@ const THUMBNAIL_RECOVERY_DELAYS_MS = [250, 1000, 4000] as const;
  */
 @Directive({
   selector: 'img[appThumbnailImage]',
-  standalone: true,
+  host: {'(load)': 'onLoad()'},
 })
 export class ThumbnailImageDirective implements OnChanges, OnDestroy {
   @Input('appThumbnailImage') media: MediaRef | null | undefined;
@@ -81,13 +80,13 @@ export class ThumbnailImageDirective implements OnChanges, OnDestroy {
     this.release(true);
   }
 
-  @HostListener('load')
   onLoad(): void {
     const image = this.element.nativeElement;
     const currentSrc = image.currentSrc || image.src;
     if (
       !this.lease ||
       !image.getAttribute('src') ||
+      image.naturalWidth <= 0 ||
       currentSrc !== this.assignedSrc
     ) {
       return;
@@ -124,8 +123,9 @@ export class ThumbnailImageDirective implements OnChanges, OnDestroy {
   private async acquire(requestId: number): Promise<void> {
     const media = this.media;
     if (!media || this.disposed) return;
+    let lease: CandidateVideoLease | undefined;
     try {
-      const lease = await this.cache.acquire(
+      lease = await this.cache.acquire(
         this.thumbnailCacheScope ?? {bucket: '', projectId: ''},
         media,
         this.thumbnailImagePersist && !!this.thumbnailCacheScope,
@@ -139,12 +139,25 @@ export class ThumbnailImageDirective implements OnChanges, OnDestroy {
         this.scheduleRecovery(requestId);
         return;
       }
-      this.recoveryAttempt = 0;
+      const image = this.element.nativeElement;
+      image.decoding = 'async';
+      image.src = lease.url;
+      const assignedSrc = image.src;
+      const previousLease = this.lease;
       this.lease = lease;
-      this.element.nativeElement.decoding = 'async';
-      this.element.nativeElement.src = lease.url;
-      this.assignedSrc = this.element.nativeElement.src;
+      this.assignedSrc = assignedSrc;
+      this.recoveryAttempt = 0;
+      previousLease?.release();
     } catch {
+      if (lease) {
+        if (!this.disposed && requestId === this.requestId) {
+          // Restore the still-owned image before releasing a failed assignment.
+          const image = this.element.nativeElement;
+          if (this.assignedSrc) image.setAttribute('src', this.assignedSrc);
+          else image.removeAttribute('src');
+        }
+        lease.release();
+      }
       if (this.disposed || requestId !== this.requestId) return;
       this.scheduleRecovery(requestId);
     }
