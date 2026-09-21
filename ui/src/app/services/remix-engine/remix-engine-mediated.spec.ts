@@ -2333,8 +2333,7 @@ describe('RemixEngineService (mediated)', () => {
 
       expect(result).toBeDefined();
       expect(result?.length).toBe(1);
-      expect(result?.[0].referenceImage?.path).toBeUndefined();
-      expect(result?.[0].referenceImage?.url).toBeUndefined();
+      expect(result?.[0].referenceImage).toBeUndefined();
       expect(matSnackBarMock.open).not.toHaveBeenCalled();
     });
   });

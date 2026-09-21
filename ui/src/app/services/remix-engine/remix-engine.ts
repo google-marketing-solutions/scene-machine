@@ -2020,7 +2020,7 @@ export class RemixEngineService {
         const referenceImage =
           productsToOutpaintedImages[s.product_id]?.[s.image_id];
 
-        return {
+        const scene = {
           id: (sceneIdCounter++).toString(),
           type: 'generated',
           name: s.scene_name,
@@ -2030,14 +2030,11 @@ export class RemixEngineService {
           numberOfCandidates:
             this.configService.globalConfig.value()!.numberOfCandidates,
           generateAudio: this.configService.globalConfig.value()!.generateAudio,
-          referenceImage: {
-            url: referenceImage?.url,
-            path: referenceImage?.path,
-            ...(referenceImage?.preview
-              ? {preview: referenceImage.preview}
-              : {}),
-          },
         } as GeneratedScene;
+        if (referenceImage) {
+          scene.referenceImage = referenceImage;
+        }
+        return scene;
       });
     } catch (error) {
       if (error instanceof ProjectChangedError) {
