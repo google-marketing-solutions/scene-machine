@@ -376,6 +376,57 @@ describe('Storyboard', () => {
     expect(image.src).toContain('blob:candidate-b.jpg');
   });
 
+  it('ignores archived candidates without changing or persisting the scene', () => {
+    const activeReference = {path: 'active-reference.png', url: 'active-url'};
+    const archivedReference = {
+      path: 'archived-reference.png',
+      url: 'archived-url',
+    };
+    const scene: GeneratedScene = {
+      id: 'archived-selection-scene',
+      type: 'generated',
+      name: 'Archived selection scene',
+      prompt: 'active prompt',
+      referenceImage: activeReference,
+      selectedCandidateIndex: 0,
+      candidates: [
+        {
+          runNumber: 1,
+          durationSeconds: 4,
+          model: 'veo-1',
+          prompt: 'active prompt',
+          generateAudio: false,
+          resolution: '1080p',
+          video: {path: 'active.mp4', url: 'active.mp4'},
+          referenceImage: activeReference,
+        },
+        {
+          runNumber: 2,
+          durationSeconds: 4,
+          model: 'veo-1',
+          prompt: 'archived prompt',
+          generateAudio: false,
+          resolution: '1080p',
+          video: {path: 'archived.mp4', url: 'archived.mp4'},
+          referenceImage: archivedReference,
+          isArchived: true,
+        },
+      ],
+    };
+    projectConfigSignal.update(config => ({...config, storyboard: [scene]}));
+    const updateProjectConfig = vi.spyOn(
+      mockConfigService,
+      'updateProjectConfig',
+    );
+
+    component.selectCandidate(scene, 1);
+
+    expect(scene.selectedCandidateIndex).toBe(0);
+    expect(scene.prompt).toBe('active prompt');
+    expect(scene.referenceImage).toBe(activeReference);
+    expect(updateProjectConfig).not.toHaveBeenCalled();
+  });
+
   it('uses a persisted reference preview for filmstrip fallback', () => {
     const referenceImage = {
       path: 'source.png',
@@ -1701,6 +1752,10 @@ describe('Storyboard', () => {
     expect(
       fixture.nativeElement.querySelectorAll('.archived-panel .video-item'),
     ).toHaveLength(1);
+    const archivedItem = fixture.nativeElement.querySelector(
+      '.archived-panel .video-item',
+    ) as HTMLElement;
+    expect(archivedItem.classList.contains('selected')).toBe(false);
     expect(
       fixture.nativeElement.querySelectorAll('.video-info mat-icon'),
     ).toHaveLength(0);
@@ -2305,6 +2360,11 @@ describe('Storyboard', () => {
         'Edit candidate with prompt',
       ]);
       expect(buttons.every(button => !button.disabled)).toBe(true);
+
+      const restoreButton = fixture.nativeElement.querySelector(
+        '.archived-panel .archive-btn',
+      ) as HTMLButtonElement;
+      expect(restoreButton.disabled).toBe(false);
 
       mockRemixEngineService.generatingSceneIds.set(new Set(['1']));
       fixture.detectChanges();

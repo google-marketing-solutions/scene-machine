@@ -972,7 +972,10 @@ export class Storyboard {
   }
 
   selectCandidate(scene: GeneratedScene, index: number) {
-    const candidate = scene.candidates![index];
+    const candidate = scene.candidates?.[index];
+    if (!candidate || candidate.isArchived) {
+      return;
+    }
     const promptChanged = scene.prompt !== candidate.prompt;
     this.referenceUploadEpoch++;
     scene.selectedCandidateIndex = index;
