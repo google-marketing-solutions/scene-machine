@@ -114,7 +114,10 @@ def test_get_signed_url_flask_context_caches_client_and_credentials_until_expire
 
   mock_cred = mock.Mock()
   mock_cred.service_account_email = 'sa@example.com'
-  future_expiry = datetime.datetime.now() + datetime.timedelta(hours=1)
+  future_expiry = (
+      datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+      + datetime.timedelta(hours=1)
+  )
   mock_cred.expiry = future_expiry
   mock_default = mock.Mock(return_value=(mock_cred, 'project-id'))
 
@@ -141,7 +144,8 @@ def test_get_signed_url_flask_context_caches_client_and_credentials_until_expire
 
     # Now expire credentials via real expiry; refresh must be called a second time
     gcs_wrapper._CACHED_SIGNING_CREDENTIALS.expiry = (
-        datetime.datetime.now() - datetime.timedelta(minutes=5)
+        datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+        - datetime.timedelta(minutes=5)
     )
     url3 = gcs_wrapper.get_signed_url('bucket', 'c.mp4', flask_context=True)
     assert url3 == 'https://storage.googleapis.com/signed'
@@ -149,11 +153,52 @@ def test_get_signed_url_flask_context_caches_client_and_credentials_until_expire
     assert mock_cred.refresh.call_count == 2
 
 
+def test_signing_context_uses_refreshed_service_account_email():
+  """Signer identities must use the email resolved by credential refresh."""
+  gcs_wrapper._CACHED_STORAGE_CLIENT = None
+  gcs_wrapper._CACHED_CLIENT_FACTORY = None
+  gcs_wrapper._CACHED_SIGNING_CREDENTIALS = None
+  gcs_wrapper._CACHED_AUTH_FACTORY = None
+
+  mock_client = mock.Mock()
+  mock_cred = mock.Mock()
+  mock_cred.service_account_email = 'default'
+  mock_cred.expiry = (
+      datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+      + datetime.timedelta(hours=1)
+  )
+
+  def resolve_service_account(_):
+    mock_cred.service_account_email = 'resolved@example.com'
+
+  mock_cred.refresh.side_effect = resolve_service_account
+  mock_default = mock.Mock(return_value=(mock_cred, 'project-id'))
+
+  with mock.patch(
+      'util.gcs_wrapper.storage.Client', return_value=mock_client
+  ), mock.patch(
+      'util.gcs_wrapper.default', mock_default
+  ), mock.patch(
+      'util.gcs_wrapper.iam.Signer'
+  ) as signer_factory, mock.patch(
+      'util.gcs_wrapper.compute_engine.IDTokenCredentials'
+  ) as id_token_factory:
+    gcs_wrapper.get_signing_context()
+
+  assert signer_factory.call_args.args[2] == 'resolved@example.com'
+  assert id_token_factory.call_args.kwargs[
+      'service_account_email'
+  ] == 'resolved@example.com'
+
+
 def test_signing_context_built_once_across_concurrent_callers():
   mock_client = mock.Mock()
   mock_cred = mock.Mock()
   mock_cred.service_account_email = 'sa@example.com'
-  mock_cred.expiry = datetime.datetime.now() + datetime.timedelta(hours=1)
+  mock_cred.expiry = (
+      datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+      + datetime.timedelta(hours=1)
+  )
   mock_default = mock.Mock(return_value=(mock_cred, 'project-id'))
 
   with mock.patch(
