@@ -264,8 +264,8 @@ REQUIRED_VARS=(
 )
 MISSING=0
 for var in "${REQUIRED_VARS[@]}"; do
-  if ! grep -qE "^(export )?${var}=[A-Za-z0-9._\$-]+" ./config.txt; then
-    echo "ERROR: $var is missing, empty, or has invalid characters in config.txt" >&2
+  if ! grep -qE "^(export )?${var}=(\"[^\"]+\"|[A-Za-z0-9._\$-]+)" ./config.txt; then
+    echo "ERROR: $var is missing, empty, or has invalid characters in config.txt (use double quotes if quoting)" >&2
     MISSING=$((MISSING + 1))
   fi
 done
@@ -302,6 +302,22 @@ if ! [[ "$APP_MIN_INSTANCES" =~ ^[0-9]+$ ]]; then
   echo "ERROR: APP_MIN_INSTANCES must be a non-negative integer (got '$APP_MIN_INSTANCES')." >&2
   echo "Validation failed. Please fix config.txt and try again." >&2
   exit 1
+fi
+if [ -z "${DICTATION_ENABLED:-}" ]; then
+  # Read live value from the deployed app service, if it exists, to preserve
+  # explicit disabled states (0) across redeploys that omit the flag.
+  LIVE_DICTATION=$(gcloud run services describe app \
+    --region="$REGION" --project="$PROJECT" \
+    --format='value(spec.template.spec.containers[0].env)' 2>/dev/null \
+    | python3 -c '
+import re, sys
+m = re.search(r"[\x27\"]?DICTATION_ENABLED[\x27\"]?\s*[,:]\s*[\x27\"]?value[\x27\"]?\s*[:=]\s*[\x27\"]?([01])[\x27\"]?", sys.stdin.read())
+if m:
+    print(m.group(1))
+' 2>/dev/null || true)
+  if [ -n "$LIVE_DICTATION" ]; then
+    DICTATION_ENABLED="$LIVE_DICTATION"
+  fi
 fi
 DICTATION_ENABLED="${DICTATION_ENABLED:-1}"
 if [[ "$DICTATION_ENABLED" != "0" && "$DICTATION_ENABLED" != "1" ]]; then
