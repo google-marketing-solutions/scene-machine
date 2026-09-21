@@ -2289,6 +2289,54 @@ describe('RemixEngineService (mediated)', () => {
       );
       expect(result?.[0].referenceImage?.path).toBe('out.jpg');
     });
+
+    it('does not throw when model returns an unmatched product or image id', async () => {
+      vi.spyOn(service, 'startStoryboardWorkflow').mockResolvedValue(
+        of({executionId: 'storyboard-exec'}) as any,
+      );
+      vi.spyOn(service, 'pollWorkflow').mockResolvedValue({
+        sink: {
+          output: {
+            '0': {
+              storyboard: [{file: 'storyboard.json'}],
+              outpainted_images: [
+                {product_id: 1, image_id: 1, file: 'out.jpg'},
+              ],
+            },
+          },
+        },
+      } as any);
+      mediaServiceMock.getBlob.mockResolvedValue({
+        text: () =>
+          Promise.resolve(
+            JSON.stringify({
+              storyboard: [
+                {
+                  product_id: 999,
+                  image_id: 888,
+                  scene_name: 'Scene 1',
+                  video_prompt: 'prompt',
+                },
+              ],
+            }),
+          ),
+      });
+      mediaServiceMock.signUrl.mockResolvedValue(
+        'https://signed.example/out.jpg',
+      );
+
+      const result = await service.generateStoryboard(
+        [{id: 1, name: 'Product 1'}] as any,
+        'briefing',
+        'outpaint',
+      );
+
+      expect(result).toBeDefined();
+      expect(result?.length).toBe(1);
+      expect(result?.[0].referenceImage?.path).toBeUndefined();
+      expect(result?.[0].referenceImage?.url).toBeUndefined();
+      expect(matSnackBarMock.open).not.toHaveBeenCalled();
+    });
   });
 
   describe('global config guard (E1)', () => {

@@ -27,6 +27,198 @@ from common import Key
 
 class TestGenerateStoryboard(unittest.TestCase):
 
+  def _make_mock_response(self, storyboard_dict):
+    mock_response = MagicMock()
+    mock_candidate = MagicMock()
+    mock_part = MagicMock()
+    mock_part.text = json.dumps(storyboard_dict)
+    mock_candidate.content.parts = [mock_part]
+    mock_response.candidates = [mock_candidate]
+    return mock_response
+
+  @patch("actions.generate_storyboard.genai.Client")
+  def test_execute_hallucinated_product_id_triggers_retry(
+      self, mock_genai_client_class
+  ):
+    mock_client = MagicMock()
+    mock_genai_client_class.return_value = mock_client
+    invalid_resp = self._make_mock_response({
+        "storyboard": [{
+            "image_id": "i1",
+            "product_id": "p_invalid",
+            "scene_name": "Scene 1",
+            "video_prompt": "Prompt 1",
+        }]
+    })
+    valid_resp = self._make_mock_response({
+        "storyboard": [{
+            "image_id": "i1",
+            "product_id": "p1",
+            "scene_name": "Scene 1",
+            "video_prompt": "Prompt 1",
+        }]
+    })
+    mock_client.models.generate_content.side_effect = [invalid_resp, valid_resp]
+
+    result = generate_storyboard.execute(
+        self.mock_gcs,
+        self.mock_params,
+        self.mock_images,
+        self.mock_user_prompt,
+        self.gemini_model,
+        self.gemini_model_location,
+    )
+
+    self.assertEqual(mock_client.models.generate_content.call_count, 2)
+    self.assertEqual(
+        result,
+        {"storyboard": [{Key.FILE.value: "gs://bucket/storyboard.json"}]},
+    )
+
+  @patch("actions.generate_storyboard.genai.Client")
+  def test_execute_hallucinated_image_id_triggers_retry(
+      self, mock_genai_client_class
+  ):
+    mock_client = MagicMock()
+    mock_genai_client_class.return_value = mock_client
+    invalid_resp = self._make_mock_response({
+        "storyboard": [{
+            "image_id": "i_invalid",
+            "product_id": "p1",
+            "scene_name": "Scene 1",
+            "video_prompt": "Prompt 1",
+        }]
+    })
+    valid_resp = self._make_mock_response({
+        "storyboard": [{
+            "image_id": "i1",
+            "product_id": "p1",
+            "scene_name": "Scene 1",
+            "video_prompt": "Prompt 1",
+        }]
+    })
+    mock_client.models.generate_content.side_effect = [invalid_resp, valid_resp]
+
+    result = generate_storyboard.execute(
+        self.mock_gcs,
+        self.mock_params,
+        self.mock_images,
+        self.mock_user_prompt,
+        self.gemini_model,
+        self.gemini_model_location,
+    )
+
+    self.assertEqual(mock_client.models.generate_content.call_count, 2)
+    self.assertEqual(
+        result,
+        {"storyboard": [{Key.FILE.value: "gs://bucket/storyboard.json"}]},
+    )
+
+  @patch("actions.generate_storyboard.genai.Client")
+  def test_execute_exhausting_retries_raises_runtime_error(
+      self, mock_genai_client_class
+  ):
+    mock_client = MagicMock()
+    mock_genai_client_class.return_value = mock_client
+    invalid_resp = self._make_mock_response({
+        "storyboard": [{
+            "image_id": "i_invalid",
+            "product_id": "p1",
+            "scene_name": "Scene 1",
+            "video_prompt": "Prompt 1",
+        }]
+    })
+    mock_client.models.generate_content.return_value = invalid_resp
+
+    with self.assertRaises(RuntimeError) as cm:
+      generate_storyboard.execute(
+          self.mock_gcs,
+          self.mock_params,
+          self.mock_images,
+          self.mock_user_prompt,
+          self.gemini_model,
+          self.gemini_model_location,
+      )
+
+    self.assertEqual(mock_client.models.generate_content.call_count, 4)
+    self.assertIn("Gemini repeatedly scripted invalid image/product combinations", str(cm.exception))
+
+  @patch("actions.generate_storyboard.genai.Client")
+  def test_execute_valid_ids_pass_through_unchanged(
+      self, mock_genai_client_class
+  ):
+    mock_client = MagicMock()
+    mock_genai_client_class.return_value = mock_client
+    valid_resp = self._make_mock_response({
+        "storyboard": [{
+            "image_id": "i1",
+            "product_id": "p1",
+            "scene_name": "Scene 1",
+            "video_prompt": "Prompt 1",
+        }]
+    })
+    mock_client.models.generate_content.return_value = valid_resp
+
+    generate_storyboard.execute(
+        self.mock_gcs,
+        self.mock_params,
+        self.mock_images,
+        self.mock_user_prompt,
+        self.gemini_model,
+        self.gemini_model_location,
+    )
+
+    self.mock_gcs.store.assert_called_once()
+    stored_json = json.loads(self.mock_gcs.store.call_args[0][0])
+    self.assertEqual(stored_json["storyboard"][0]["product_id"], "p1")
+    self.assertEqual(stored_json["storyboard"][0]["image_id"], "i1")
+
+  @patch("actions.generate_storyboard.genai.Client")
+  def test_execute_missing_product_description_yields_empty_string_not_none(
+      self, mock_genai_client_class
+  ):
+    mock_client = MagicMock()
+    mock_genai_client_class.return_value = mock_client
+    mock_client.models.generate_content.return_value = self._make_mock_response({
+        "storyboard": [{
+            "image_id": "i1",
+            "product_id": "p1",
+            "scene_name": "Scene 1",
+            "video_prompt": "Prompt 1",
+        }]
+    })
+
+    # Test with both omitted and explicitly None product_description
+    images = [
+        {
+            Dimension.PRODUCT_ID.value: "p1",
+            Dimension.IMAGE_ID.value: "i1",
+            Key.FILE.value: "path/to/img1.jpg",
+            # product_description omitted
+        },
+        {
+            Dimension.PRODUCT_ID.value: "p2",
+            Dimension.IMAGE_ID.value: "i2",
+            Key.FILE.value: "path/to/img2.jpg",
+            "product_description": None,
+        },
+    ]
+
+    generate_storyboard.execute(
+        self.mock_gcs,
+        self.mock_params,
+        images,
+        self.mock_user_prompt,
+        self.gemini_model,
+        self.gemini_model_location,
+    )
+
+    _, kwargs = mock_client.models.generate_content.call_args
+    prompt_parts = kwargs["contents"]
+    all_text = "".join(p.text for p in prompt_parts if getattr(p, "text", None))
+    self.assertNotIn("'None'", all_text)
+    self.assertNotIn("Product description:", all_text)
+
   def setUp(self):
     self.mock_gcs = MagicMock()
     self.mock_params = {Key.GCP_PROJECT.value: "test-project"}

@@ -2018,7 +2018,7 @@ export class RemixEngineService {
 
       return storyboardJson['storyboard'].map((s: StoryboardItem) => {
         const referenceImage =
-          productsToOutpaintedImages[s.product_id][s.image_id];
+          productsToOutpaintedImages[s.product_id]?.[s.image_id];
 
         return {
           id: (sceneIdCounter++).toString(),
@@ -2031,9 +2031,9 @@ export class RemixEngineService {
             this.configService.globalConfig.value()!.numberOfCandidates,
           generateAudio: this.configService.globalConfig.value()!.generateAudio,
           referenceImage: {
-            url: referenceImage.url,
-            path: referenceImage.path,
-            ...(referenceImage.preview
+            url: referenceImage?.url,
+            path: referenceImage?.path,
+            ...(referenceImage?.preview
               ? {preview: referenceImage.preview}
               : {}),
           },
