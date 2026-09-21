@@ -15,6 +15,7 @@
 """Tests for the Cloud Storage wrapper."""
 
 import datetime
+import threading
 from unittest import mock
 
 import pytest
@@ -146,3 +147,71 @@ def test_get_signed_url_flask_context_caches_client_and_credentials_until_expire
     assert url3 == 'https://storage.googleapis.com/signed'
     assert client_factory.call_count == 1
     assert mock_cred.refresh.call_count == 2
+
+
+def test_signing_context_built_once_across_concurrent_callers():
+  mock_client = mock.Mock()
+  mock_cred = mock.Mock()
+  mock_cred.service_account_email = 'sa@example.com'
+  mock_cred.expiry = datetime.datetime.now() + datetime.timedelta(hours=1)
+  mock_default = mock.Mock(return_value=(mock_cred, 'project-id'))
+
+  with mock.patch(
+      'util.gcs_wrapper.storage.Client', return_value=mock_client
+  ) as client_factory, mock.patch(
+      'util.gcs_wrapper.default', mock_default
+  ), mock.patch(
+      'util.gcs_wrapper.iam.Signer'
+  ) as signer_factory:
+    num_threads = 10
+    barrier = threading.Barrier(num_threads)
+    results = [None] * num_threads
+
+    def worker(idx):
+      barrier.wait()
+      results[idx] = gcs_wrapper.get_signing_context()
+
+    threads = [
+        threading.Thread(target=worker, args=(i,)) for i in range(num_threads)
+    ]
+    for t in threads:
+      t.start()
+    for t in threads:
+      t.join()
+
+    assert client_factory.call_count == 1
+    assert mock_default.call_count == 1
+    assert mock_cred.refresh.call_count == 1
+    assert signer_factory.call_count == 1
+
+    expected_client, expected_creds = results[0]
+    for client, creds in results:
+      assert client is expected_client
+      assert creds is expected_creds
+
+
+def test_non_service_account_adc_raises_actionable_error():
+  # Simulates an end-user OAuth credential from `gcloud auth application-default login`
+  # which has no service_account_email attribute.
+  user_cred = mock.NonCallableMock(spec=['token', 'refresh'])
+  assert not hasattr(user_cred, 'service_account_email')
+
+  mock_client = mock.Mock()
+  mock_default = mock.Mock(return_value=(user_cred, 'project-id'))
+
+  with mock.patch(
+      'util.gcs_wrapper.storage.Client', return_value=mock_client
+  ) as client_factory, mock.patch(
+      'util.gcs_wrapper.default', mock_default
+  ):
+    # Must raise a clear, actionable RuntimeError, not an unhelpful AttributeError.
+    with pytest.raises(RuntimeError) as exc_info:
+      gcs_wrapper.get_signed_url('bucket', 'file.mp4', flask_context=True)
+
+    err_msg = str(exc_info.value)
+    assert 'service_account_email' in err_msg
+    assert 'gcloud auth application-default login' in err_msg
+    assert '--impersonate-service-account' in err_msg
+    assert 'DEVELOPING.md' in err_msg
+    assert client_factory.call_count == 1
+    assert mock_default.call_count == 1
