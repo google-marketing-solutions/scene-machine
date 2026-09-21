@@ -3,11 +3,9 @@
     "origin": [
       "http://localhost",
       "http://localhost:4200",
-      "localhost",
-      "localhost:4200",
       ${UI_CORS_ORIGINS}
     ],
-    "method": ["GET", "POST", "HEAD", "PUT", "DELETE"],
+    "method": ["GET", "HEAD", "PUT"],
     "responseHeader": ["Content-Type"],
     "maxAgeSeconds": 3600
   }

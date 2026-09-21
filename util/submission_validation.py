@@ -22,6 +22,7 @@ wording.
 import functools
 import json
 import os
+import re
 from typing import Any
 
 from util.model_allowlist import is_pair_allowed, load_allowlist
@@ -246,6 +247,66 @@ def _capability_violation(
   return None
 
 
+_FFMPEG_RESOLUTION_RE = re.compile(r'^\d{2,5}:\d{2,5}$')
+_FFMPEG_EXT_RE = re.compile(r'^[a-zA-Z0-9]{1,10}$')
+
+
+def _is_safe_input_file_path(value: str) -> bool:
+  stripped = value.strip()
+  if not stripped:
+    return False
+  if stripped.startswith('/'):
+    return False
+  if '..' in stripped:
+    return False
+  if '_task-completions' in stripped.split('/'):
+    return False
+  return True
+
+
+def _ffmpeg_action_violation(
+    node_id: str, action: str, params: dict
+) -> tuple[str, str] | None:
+  if action == 'combine_video':
+    if 'resolution' in params:
+      for value in _as_values(params['resolution']):
+        if not isinstance(value, str) or not _FFMPEG_RESOLUTION_RE.fullmatch(value):
+          return (
+              f'Node {node_id!r}: combine_video resolution {value!r} is not allowed',
+              'RESOLUTION_NOT_ALLOWED',
+          )
+    if 'encoding_speed' in params:
+      for value in _as_values(params['encoding_speed']):
+        if isinstance(value, bool) or not isinstance(value, int) or not (0 <= value <= 8):
+          return (
+              f'Node {node_id!r}: combine_video encoding_speed {value!r} must be an integer in 0..8',
+              'MALFORMED_SUBMISSION',
+          )
+    if 'quality_level' in params:
+      for value in _as_values(params['quality_level']):
+        if isinstance(value, bool) or not isinstance(value, int) or not (0 <= value <= 63):
+          return (
+              f'Node {node_id!r}: combine_video quality_level {value!r} must be an integer in 0..63',
+              'MALFORMED_SUBMISSION',
+          )
+  elif action == 'convert_video':
+    if 'output_file_dimension' in params:
+      for value in _as_values(params['output_file_dimension']):
+        if not isinstance(value, str) or not _FFMPEG_RESOLUTION_RE.fullmatch(value):
+          return (
+              f'Node {node_id!r}: convert_video output_file_dimension {value!r} is not allowed',
+              'RESOLUTION_NOT_ALLOWED',
+          )
+    if 'output_file_extension' in params:
+      for value in _as_values(params['output_file_extension']):
+        if not isinstance(value, str) or not _FFMPEG_EXT_RE.fullmatch(value):
+          return (
+              f'Node {node_id!r}: convert_video output_file_extension {value!r} is not allowed',
+              'MALFORMED_SUBMISSION',
+          )
+  return None
+
+
 def validate_submission(
     data: Any,
     allowlist: dict | None = None,
@@ -307,10 +368,15 @@ def validate_submission(
       return (f'inputFiles {key!r} is not a list', 'MALFORMED_SUBMISSION')
     dimension_keys = None
     for entry in files:
-      if (not isinstance(entry, dict) or not isinstance(entry.get('file'), str)
-          or not entry['file'].strip()):
-        return (f'inputFiles {key!r} entries must each have a non-empty '
-                f'file', 'MALFORMED_SUBMISSION')
+      if (
+          not isinstance(entry, dict)
+          or not isinstance(entry.get('file'), str)
+          or not _is_safe_input_file_path(entry['file'])
+      ):
+        return (
+            f'inputFiles {key!r} entries must each have a valid, safe file path',
+            'MALFORMED_SUBMISSION',
+        )
       # The engine groups on the non-file fields of the first entry and
       # indexes every entry by them (group_input._group_dictionaries), so
       # ragged keys raise KeyError there and a non-scalar value makes an
@@ -470,6 +536,10 @@ def validate_submission(
     if limit is not None:
       return limit
     node_locals[node_id] = node_fan
+
+    ffmpeg_violation = _ffmpeg_action_violation(node_id, action, params)
+    if ffmpeg_violation is not None:
+      return ffmpeg_violation
 
     if action not in action_specs:
       continue  # only model-parameterized actions get the model/location checks

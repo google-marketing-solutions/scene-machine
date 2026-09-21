@@ -304,14 +304,36 @@ def require_api_auth() -> flask_response | None:
   return None
 
 
+_VALID_HOST_RE = re.compile(r'^[a-zA-Z0-9.-]+(?::\d{1,5})?$')
+
+
+def _resolve_worker_instance() -> str:
+  """Resolves the worker instance URL, validating Host header when unset.
+
+  Raises:
+    ValueError: if the Host header is missing, malformed, or prohibited.
+  """
+  instance = _WORKER_URL
+  if not instance:
+    host = flask_request.headers.get('Host')
+    if not host or not _VALID_HOST_RE.fullmatch(host):
+      raise ValueError(f'Invalid Host header: {host!r}')
+    if os.environ.get('K_SERVICE'):
+      hostname = host.split(':', 1)[0].lower()
+      if not (
+          hostname.endswith('.run.app')
+          or hostname in ('localhost', '127.0.0.1')
+      ):
+        raise ValueError(f'Host header not permitted in Cloud Run: {host!r}')
+    instance = 'https://' + host
+  return instance
+
+
 def supply_node_handler() -> flask_response:
   """Initiates a node execution by supplying input data to it.
 
   Returns:
     the default response object returned by Flask
-
-  Raises:
-    RuntimeError: if no host header is found and WORKER_URL is unset
   """
   if _LOCAL_WORKER:
     # DEV-ONLY: instance=None makes orchestrator.supply_node run this node (and,
@@ -319,12 +341,10 @@ def supply_node_handler() -> flask_response:
     # Cloud Tasks. Gated by _LOCAL_WORKER (AUTH_MODE=none only); see above.
     instance = None
   else:
-    instance = _WORKER_URL
-    if not instance:
-      host = flask_request.headers.get('Host')
-      if not host:
-        raise RuntimeError('No host header found')
-      instance = 'https://' + host
+    try:
+      instance = _resolve_worker_instance()
+    except ValueError as e:
+      return _json_error(str(e), 400)
   data = flask_request.get_json()
   if not isinstance(data, dict):
     return flask_response(
@@ -395,21 +415,16 @@ def supply_node_handler() -> flask_response:
   )
 
 
-def trigger_action_handler() -> tuple[str, int]:
+def trigger_action_handler() -> flask_response | tuple[str, int]:
   """Triggers an action's execution.
 
   Returns:
     response message and HTTP response code
-
-  Raises:
-    RuntimeError: if no host header is found and WORKER_URL is unset
   """
-  instance = _WORKER_URL
-  if not instance:
-    host = flask_request.headers.get('Host')
-    if not host:
-      raise RuntimeError('No host header found')
-    instance = 'https://' + host
+  try:
+    instance = _resolve_worker_instance()
+  except ValueError as e:
+    return _json_error(str(e), 400)
   data = flask_request.get_json(silent=True)
   if not isinstance(data, dict) or not all(
       key in data
@@ -637,7 +652,9 @@ def get_status_handler() -> flask_response:
   # is the server's own configured bucket, matching the other mediated handlers.
   gcs_bucket_name = config.get('gcsBucket')
   sign_urls = flask_request.args.get(Key.SIGN_URLS.value) == 'true'
-  if not execution_id:
+  if not execution_id or not submission_validation._is_firestore_segment(
+      execution_id, max_bytes=submission_validation._MAX_FIRESTORE_SEGMENT_BYTES
+  ):
     return flask_response(
         json.dumps({'error': 'Incomplete parameters for status request'}),
         status=400,
@@ -897,6 +914,8 @@ def _valid_object_path(path: str) -> bool:
     return False
   if '..' in path:
     return False
+  if '_task-completions' in path.split('/'):
+    return False
   return True
 
 
@@ -949,8 +968,11 @@ def upload_url_handler() -> flask_response:
   if (
       not file_name
       or not isinstance(file_name, str)
+      or len(file_name) > 255
       or '/' in file_name
+      or '\\' in file_name
       or '..' in file_name
+      or any(ord(c) < 32 or ord(c) == 127 for c in file_name)
   ):
     return _json_error('Invalid fileName', 400)
   if not content_type or not isinstance(content_type, str):
@@ -1446,6 +1468,13 @@ def project_detail_handler(
         return _json_error(
             'Editor view accepts only top-level project fields', 400
         )
+    storyboard = data.get('storyboard')
+    if isinstance(storyboard, list) and len(storyboard) > _MAX_CREATE_SCENES:
+      return _json_error(
+          f'Too many scenes for project: {len(storyboard)}'
+          f' (max {_MAX_CREATE_SCENES})',
+          400,
+      )
     payload = copy.deepcopy(data)
     payload.pop('createdBy', None)
     payload['createdBy'] = stored.get('createdBy')
@@ -1468,6 +1497,10 @@ def project_editor_detail_handler(project_id: str) -> flask_response:
   return project_detail_handler(project_id, forced_view='editor')
 
 
+_MAX_TEMPLATES_LIST = 200
+_MAX_TEMPLATE_PAYLOAD_BYTES = 256 * 1024
+
+
 def templates_handler() -> flask_response:
   """Lists (GET) or creates (POST) creative templates.
 
@@ -1481,13 +1514,17 @@ def templates_handler() -> flask_response:
   collection = ui_db.collection('creativeTemplates')
   if flask_request.method == 'GET':
     templates = []
-    for snapshot in collection.order_by('createdAt').stream():
+    for snapshot in (
+        collection.order_by('createdAt').limit(_MAX_TEMPLATES_LIST).stream()
+    ):
       template = util_database.firestore_to_json_serialisable(
           snapshot.to_dict()
       )
       template['id'] = snapshot.id
       templates.append(template)
     return _json_response({'templates': templates})
+  if len(flask_request.get_data() or b'') > _MAX_TEMPLATE_PAYLOAD_BYTES:
+    return _json_error('Template payload exceeds size limit', 400)
   data = flask_request.get_json(silent=True)
   if not isinstance(data, dict):
     return _json_error('Malformed JSON body', 400)
@@ -1521,6 +1558,8 @@ def template_detail_handler(template_id: str) -> flask_response:
       return _json_error('Not found', 404)
     if snapshot.to_dict().get('readOnly'):
       return _json_error('Template is read-only', 403)
+    if len(flask_request.get_data() or b'') > _MAX_TEMPLATE_PAYLOAD_BYTES:
+      return _json_error('Template payload exceeds size limit', 400)
     data = flask_request.get_json(silent=True)
     if not isinstance(data, dict):
       return _json_error('Malformed JSON body', 400)
@@ -1688,4 +1727,8 @@ if _ROLE == 'all':
 
 if __name__ == '__main__':
   logger.info('Running in Flask mode')
-  app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+  app.run(
+      debug=os.environ.get('FLASK_DEBUG', '').strip().lower() in ('1', 'true'),
+      host=os.environ.get('FLASK_HOST', '127.0.0.1'),
+      port=int(os.environ.get('PORT', 8080)),
+  )

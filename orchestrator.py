@@ -21,9 +21,11 @@ import json
 import logging
 import os
 import pathlib
+import re
 import sys
 import threading
 from typing import Any
+import urllib.parse
 import uuid
 
 import actions_wrapper as actwrap
@@ -52,6 +54,8 @@ _TASKS_QUEUE_CLASS_DEFAULT = 'Other'
 _TASK_DISPATCH_DEADLINE_SECONDS = 1800
 _GCS_HOST = 'https://storage.mtls.cloud.google.com/'
 _TASK_COMPLETION_PREFIX = '_task-completions'
+_MAX_STATUS_SIGNED_URLS = 500
+_VALID_HOST_RE = re.compile(r'^[a-zA-Z0-9.-]+(?::\d{1,5})?$')
 
 
 class UndefinedActionError(Exception):
@@ -103,6 +107,52 @@ def get_current_service_account() -> str | None:
 logger.info('Getting service account')
 service_account_email = get_current_service_account()
 logger.info('Running as: %s', service_account_email)
+
+
+def _validate_task_instance_url(instance: str) -> str:
+  """Validates and normalises a Cloud Run task worker instance URL.
+
+  Args:
+    instance: The URL to validate.
+
+  Returns:
+    The validated URL stripped of trailing slashes.
+
+  Raises:
+    ValueError: If instance is invalid, contains userinfo/query/fragment/path,
+      violates WORKER_URL pin, or violates Cloud Run host restrictions.
+  """
+  if not isinstance(instance, str) or not instance:
+    raise ValueError('Instance URL must be a non-empty string')
+  if '@' in instance or '?' in instance or '#' in instance:
+    raise ValueError('Instance URL must not contain userinfo, query, or fragment')
+
+  parsed = urllib.parse.urlparse(instance)
+  if parsed.scheme not in ('http', 'https'):
+    raise ValueError(f'Invalid instance URL scheme: {parsed.scheme}')
+  if parsed.path not in ('', '/'):
+    raise ValueError(f'Instance URL must not have a path: {parsed.path}')
+  if not parsed.netloc or not _VALID_HOST_RE.fullmatch(parsed.netloc):
+    raise ValueError(f'Invalid instance URL host: {parsed.netloc}')
+
+  configured_worker_url = os.environ.get('WORKER_URL')
+  if configured_worker_url:
+    if instance.rstrip('/') != configured_worker_url.rstrip('/'):
+      raise ValueError(
+          f'Instance URL "{instance}" does not match configured WORKER_URL'
+          f' "{configured_worker_url}"'
+      )
+  elif os.environ.get('K_SERVICE'):
+    hostname = parsed.hostname or ''
+    if not (
+        hostname in ('localhost', '127.0.0.1')
+        or hostname.endswith('.run.app')
+    ):
+      raise ValueError(
+          f'Instance URL hostname "{hostname}" must end with .run.app or be localhost'
+      )
+
+  return instance.rstrip('/')
 
 
 def supply_node(
@@ -193,6 +243,7 @@ def supply_node(
       }
 
       if instance:
+        instance = _validate_task_instance_url(instance)
         params = task_payload[Key.WORKFLOW_PARAMS.value]
         client = tasks_v2.CloudTasksClient()
         if action in actions_def:
@@ -261,6 +312,7 @@ def _inform_successors(
     successor_data[Key.INPUT_COUNT.value] = data[Key.SIBLING_ACTIONS.value]
 
     if instance:
+      instance = _validate_task_instance_url(instance)
       params = successor_data[Key.WORKFLOW_PARAMS.value]
       client = tasks_v2.CloudTasksClient()
       queue_path = client.queue_path(
@@ -449,11 +501,17 @@ def get_status(
       for item in items:
         if isinstance(item, dict) and Key.FILE.value in item:
           if sign_urls:
-            if item[Key.FILE.value] not in url_cache:
-              url_cache[item[Key.FILE.value]] = gcs_wrapper.get_signed_url(
-                  gcs_bucket_name, item[Key.FILE.value], flask_context
-              )
-            item[Key.URL.value] = url_cache[item[Key.FILE.value]]
+            file_name = item[Key.FILE.value]
+            if file_name not in url_cache:
+              if len(url_cache) < _MAX_STATUS_SIGNED_URLS:
+                url_cache[file_name] = gcs_wrapper.get_signed_url(
+                    gcs_bucket_name, file_name, flask_context
+                )
+              else:
+                url_cache[file_name] = (
+                    f'{_GCS_HOST}{gcs_bucket_name}/{file_name}'
+                )
+            item[Key.URL.value] = url_cache[file_name]
           else:
             item[Key.URL.value] = (
                 f'{_GCS_HOST}{gcs_bucket_name}/{item[Key.FILE.value]}'

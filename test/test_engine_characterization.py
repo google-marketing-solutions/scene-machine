@@ -654,3 +654,113 @@ def test_prompt_receives_actual_product_description():
   # 'None' artifact is gone.
   assert "**Product description:** 'A red couch.'\n\n" in texts
   assert not any("'None'" in text for text in texts)
+
+
+def test_get_action_by_name_rejects_unregistered_or_traversal_names():
+  import actions.concat
+  import actions_wrapper
+
+  with mock.patch('importlib.import_module') as mock_import:
+    for bad_name in (
+        '../orch',
+        '__init__',
+        'not_in_catalog',
+        'invalid-char',
+        '123bad',
+        '',
+    ):
+      with pytest.raises(RuntimeError):
+        actions_wrapper.get_action_by_name(bad_name)
+    mock_import.assert_not_called()
+
+  assert actions_wrapper.get_action_by_name('concat') == actions.concat.execute
+
+
+def test_get_status_caps_signed_urls_and_validates_task_instance_url(
+    orch, monkeypatch
+):
+  # _validate_task_instance_url validation checks
+  with pytest.raises(ValueError):
+    orch._validate_task_instance_url('https://evil.example/path?x=1')
+
+  with pytest.raises(ValueError):
+    orch._validate_task_instance_url('https://user:pass@evil.example')
+
+  with pytest.raises(ValueError):
+    orch._validate_task_instance_url('ftp://evil.example')
+
+  with pytest.raises(ValueError):
+    orch._validate_task_instance_url('https://evil.example/extra')
+
+  # Valid instances when WORKER_URL and K_SERVICE are unset
+  assert (
+      orch._validate_task_instance_url('https://worker.example')
+      == 'https://worker.example'
+  )
+  assert (
+      orch._validate_task_instance_url('https://worker.example/')
+      == 'https://worker.example'
+  )
+
+  # When WORKER_URL is set in environ, instance must match WORKER_URL
+  monkeypatch.setenv('WORKER_URL', 'https://worker-legit.a.run.app')
+  assert (
+      orch._validate_task_instance_url('https://worker-legit.a.run.app')
+      == 'https://worker-legit.a.run.app'
+  )
+  with pytest.raises(ValueError):
+    orch._validate_task_instance_url('https://attacker.example')
+
+  # When K_SERVICE is set without WORKER_URL, host must end in .run.app or localhost/127.0.0.1
+  monkeypatch.delenv('WORKER_URL', raising=False)
+  monkeypatch.setenv('K_SERVICE', 'worker')
+  assert (
+      orch._validate_task_instance_url('https://my-service.a.run.app')
+      == 'https://my-service.a.run.app'
+  )
+  assert (
+      orch._validate_task_instance_url('http://localhost:8080')
+      == 'http://localhost:8080'
+  )
+  assert (
+      orch._validate_task_instance_url('http://127.0.0.1:8080')
+      == 'http://127.0.0.1:8080'
+  )
+  with pytest.raises(ValueError):
+    orch._validate_task_instance_url('https://evil.attacker.com')
+
+  # get_status caps signed URLs at _MAX_STATUS_SIGNED_URLS (500)
+  monkeypatch.delenv('K_SERVICE', raising=False)
+  fake_docs = [
+      mock.Mock(
+          id='node_1',
+          to_dict=lambda: {
+              'inputFiles': {
+                  'files': {
+                      '0': [{'file': f'file_{i}.txt'} for i in range(505)]
+                  }
+              }
+          },
+      )
+  ]
+  monkeypatch.setattr(orch.db, 'get_documents', lambda _eid: fake_docs)
+  signed_files = []
+  monkeypatch.setattr(
+      'util.gcs_wrapper.get_signed_url',
+      lambda bucket, blob, flask=False: (
+          signed_files.append(blob) or f'signed://{blob}'
+      ),
+  )
+  status = orch.get_status('exec-1', 'bucket-1', sign_urls=True)
+  assert len(signed_files) == 500
+  items = status['node_1']['inputFiles']['files']
+  assert items[0]['url'] == 'signed://file_0.txt'
+  assert items[499]['url'] == 'signed://file_499.txt'
+  assert (
+      items[500]['url']
+      == f'{orch._GCS_HOST}bucket-1/file_500.txt'
+  )
+  assert (
+      items[504]['url']
+      == f'{orch._GCS_HOST}bucket-1/file_504.txt'
+  )

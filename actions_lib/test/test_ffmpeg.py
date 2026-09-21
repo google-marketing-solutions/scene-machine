@@ -138,6 +138,117 @@ class TestFFMPEG(unittest.TestCase):
     self.assertIn('anullsrc=', command)
     self.assertNotIn('[0:a:0]', command)
 
+  def test_set_resolution_rejects_filter_injection(self):
+    for bad in ('1280:720,movie=/etc/passwd', '720p', '', 1280):
+      with self.assertRaises(ValueError):
+        self.ffmpeg.set_resolution(bad)
+    self.ffmpeg.set_resolution('1280:720')
+    self.assertEqual(self.ffmpeg.resolution, '1280:720')
+    self.ffmpeg.set_resolution('720:1280')
+    self.assertEqual(self.ffmpeg.resolution, '720:1280')
+
+  @mock.patch('actions_lib.ffmpeg.get_video_properties')
+  def test_add_video_rejects_invalid_transition_and_non_numeric_times(
+      self, mock_get_props
+  ):
+    mock_get_props.return_value = {
+        'duration': 5.0,
+        'dimensions': '1280:720',
+        'fps': 30.0,
+        'has_audio': True,
+    }
+    # transition injection
+    with self.assertRaises(ValueError):
+      self.ffmpeg.add_video(
+          path='video.mp4',
+          skip_time=0,
+          duration=5.0,
+          transition='fade:duration=1,movie=x',
+          transition_overlap=1.0,
+      )
+    # non-numeric skip_time
+    with self.assertRaises(ValueError):
+      self.ffmpeg.add_video(
+          path='video.mp4',
+          skip_time='0,null',
+          duration=5.0,
+          transition=None,
+          transition_overlap=0,
+      )
+    # non-numeric duration
+    with self.assertRaises(ValueError):
+      self.ffmpeg.add_video(
+          path='video.mp4',
+          skip_time=0,
+          duration='5;null',
+          transition=None,
+          transition_overlap=0,
+      )
+    # non-numeric transition_overlap
+    with self.assertRaises(ValueError):
+      self.ffmpeg.add_video(
+          path='video.mp4',
+          skip_time=0,
+          duration=5.0,
+          transition=None,
+          transition_overlap='1:offset=0',
+      )
+
+  def test_add_audio_rejects_non_numeric_parameters(self):
+    for bad_param in ('start_time', 'skip_time', 'duration'):
+      for bad_val in ('bad', True, False):
+        kwargs = {'path': 'a.mp3', 'start_time': 0.0, 'skip_time': 0.0, 'duration': 1.0}
+        kwargs[bad_param] = bad_val
+        with self.assertRaises(ValueError):
+          self.ffmpeg.add_audio(**kwargs)
+
+  def test_add_image_rejects_string_concatenation_and_overlay_injection(self):
+    # string concatenation bypass on start_time + duration
+    with self.assertRaises(ValueError):
+      self.ffmpeg.add_image(
+          path='img.png',
+          start_time="0)''[out];movie=x",
+          duration='1',
+          offset_x=0,
+          offset_y=0,
+          width=100,
+          height=100,
+      )
+    # boolean / string dimension parameters
+    for bad_param in ('width', 'height', 'offset_x', 'offset_y'):
+      for bad_val in ('100', True, False):
+        kwargs = {
+            'path': 'img.png',
+            'start_time': 0.0,
+            'duration': 1.0,
+            'offset_x': 0,
+            'offset_y': 0,
+            'width': 100,
+            'height': 100,
+        }
+        kwargs[bad_param] = bad_val
+        with self.assertRaises(ValueError):
+          self.ffmpeg.add_image(**kwargs)
+
+  @mock.patch('actions_lib.ffmpeg.get_video_properties')
+  def test_convert_video_rejects_invalid_resolution_or_extension(
+      self, mock_get_props
+  ):
+    mock_get_props.return_value = {
+        'duration': 5.0,
+        'dimensions': '640:360',
+        'fps': 30.0,
+        'has_audio': True,
+    }
+    self.ffmpeg.resolution = '1280:720;null'
+    with self.assertRaises(ValueError):
+      self.ffmpeg.convert_video('input.mp4', 'mp4')
+
+    self.ffmpeg.resolution = '1280:720'
+    for bad_ext in ('mp4;rm', '../mp4', 'mp4/avi', ''):
+      with self.assertRaises(ValueError):
+        self.ffmpeg.convert_video('input.mp4', bad_ext)
+
 
 if __name__ == '__main__':
   unittest.main()

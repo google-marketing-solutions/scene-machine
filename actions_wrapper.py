@@ -26,6 +26,7 @@ import importlib
 import inspect
 import json
 import pathlib
+import re
 from typing import Any
 
 from common import ContentType
@@ -43,6 +44,17 @@ from util.gcs_wrapper import GCS
 
 ActionFunction = Callable[..., NodeOutput]
 
+_ACTION_NAME_RE = re.compile(r'^[a-z][a-z0-9_]{0,63}$')
+
+
+@functools.lru_cache(maxsize=1)
+def _load_actions_def() -> dict[str, Any]:
+  root_dir = pathlib.Path(__file__).parent
+  with open(
+      root_dir / 'ui/definitions/actions.json', 'r', encoding='utf-8'
+  ) as file:
+    return json.load(file)
+
 
 def get_action_by_name(action_name: str) -> ActionFunction:
   """Gets the "execute" method of the named action in the "actions" package.
@@ -53,6 +65,14 @@ def get_action_by_name(action_name: str) -> ActionFunction:
   Returns:
     The "execute" method of the named action.
   """
+  if (
+      not isinstance(action_name, str)
+      or not _ACTION_NAME_RE.fullmatch(action_name)
+      or action_name not in _load_actions_def()
+  ):
+    raise RuntimeError(
+        f'Action name "{action_name}" is invalid or not in catalog.'
+    )
   module_path = f'actions.{action_name}'
   execute_function = 'execute'
   try:
@@ -128,11 +148,7 @@ def _generate_error_output(
     Fake action result with an error.
   """
   logger.warning('Hidden error: %s', error_content)
-  root_dir = pathlib.Path(__file__).parent
-  with open(
-      root_dir / 'ui/definitions/actions.json', 'r', encoding='utf-8'
-  ) as file:
-    actions_def = json.load(file)
+  actions_def = _load_actions_def()
   output = dict.fromkeys(
       actions_def[action_name][Key.OUTPUT.value], [{'_error': error_content}]
   )

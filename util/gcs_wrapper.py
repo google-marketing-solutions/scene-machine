@@ -39,6 +39,33 @@ SIGNED_URL_TTL_HOURS = 24
 MAX_LOCAL_INPUT_BYTES = 8 * 1024 * 1024 * 1024
 _MAX_LOCAL_EXTENSION_LENGTH = 10
 
+_CACHED_STORAGE_CLIENT = None
+_CACHED_CLIENT_FACTORY = None
+_CACHED_SIGNING_CREDENTIALS = None
+_CACHED_AUTH_FACTORY = None
+
+
+def _get_cached_signing_context():
+  global _CACHED_STORAGE_CLIENT, _CACHED_CLIENT_FACTORY
+  global _CACHED_SIGNING_CREDENTIALS, _CACHED_AUTH_FACTORY
+
+  if _CACHED_STORAGE_CLIENT is None or _CACHED_CLIENT_FACTORY is not storage.Client:
+    _CACHED_STORAGE_CLIENT = storage.Client()
+    _CACHED_CLIENT_FACTORY = storage.Client
+  if (
+      _CACHED_SIGNING_CREDENTIALS is None
+      or _CACHED_SIGNING_CREDENTIALS.expired
+      or _CACHED_AUTH_FACTORY is not default
+  ):
+    auth_request = transport_requests.Request()
+    cred, _ = default()
+    cred.refresh(auth_request)  # pyright: ignore[reportAttributeAccessIssue]
+    _CACHED_SIGNING_CREDENTIALS = compute_engine.IDTokenCredentials(
+        auth_request, '', service_account_email=cred.service_account_email  # pyright: ignore[reportAttributeAccessIssue], pylint: disable=linetoolong
+    )
+    _CACHED_AUTH_FACTORY = default
+  return _CACHED_STORAGE_CLIENT, _CACHED_SIGNING_CREDENTIALS
+
 
 def get_signed_url(
     gcs_bucket_name: str, blob_name: str, flask_context: bool = False
@@ -53,17 +80,10 @@ def get_signed_url(
   Returns:
     A signed URL to the input file.
   """
-  storage_client = storage.Client()
-  bucket = storage_client.bucket(gcs_bucket_name)
-  blob = bucket.blob(blob_name)
-
   if flask_context:
-    auth_request = transport_requests.Request()
-    cred, _ = default()
-    cred.refresh(auth_request)  # pyright: ignore[reportAttributeAccessIssue]
-    signing_credentials = compute_engine.IDTokenCredentials(
-        auth_request, '', service_account_email=cred.service_account_email  # pyright: ignore[reportAttributeAccessIssue], pylint: disable=linetoolong
-    )
+    storage_client, signing_credentials = _get_cached_signing_context()
+    bucket = storage_client.bucket(gcs_bucket_name)
+    blob = bucket.blob(blob_name)
     return blob.generate_signed_url(
         version='v4',
         expiration=datetime.timedelta(hours=SIGNED_URL_TTL_HOURS),
@@ -71,6 +91,9 @@ def get_signed_url(
         credentials=signing_credentials,
     )
   else:
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(gcs_bucket_name)
+    blob = bucket.blob(blob_name)
     return blob.generate_signed_url(
         version='v4',
         expiration=datetime.timedelta(hours=SIGNED_URL_TTL_HOURS),

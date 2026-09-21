@@ -196,8 +196,8 @@ function showInspectionBox(items, handlerElement) {
               const iframe = document.createElement('iframe');
               iframe.src = value;
               iframe.style.cssText = 'width: 100%; height: 100%; border: none;';
-              // Sandbox for security, though may be restrictive for some GCS content if not plain text/json.
-              iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+              // Sandbox for security, disallowing scripts and same-origin access.
+              iframe.setAttribute('sandbox', '');
               iframe.onerror = () => {
                 iframeBox.innerHTML =
                   '<p style="color:red;">Error: Could not load content in iframe. Check browser console.</p>';
