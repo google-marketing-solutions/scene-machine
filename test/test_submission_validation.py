@@ -1115,3 +1115,50 @@ def test_input_files_allows_safe_relative_and_gs_paths():
         node_id='root',
     )
     assert validate_submission(data) is None
+
+
+# --- SM-11: fail closed on missing required params, duration caps, audio bool --
+
+_FULL_VALID_VIDEO = {
+    'video_variant_quantity': 1,
+    'aspect_ratio': '16:9',
+    'duration_seconds': 8,
+    'gcp_project': '',
+    'gcp_location': 'global',
+    'model': 'veo-3.1-generate-001',
+    'generate_audio': False,
+    'resolution': '720p',
+}
+
+
+def test_duration_over_cap_rejected_when_resolution_omitted():
+  params = {k: v for k, v in _FULL_VALID_VIDEO.items() if k != 'resolution'}
+  params['duration_seconds'] = 9999
+  assert _code(_sub('generate_video', params)) == 'DURATION_NOT_ALLOWED'
+
+
+def test_duration_over_cap_rejected_when_resolution_present():
+  params = {**_FULL_VALID_VIDEO, 'duration_seconds': 9999}
+  assert _code(_sub('generate_video', params)) == 'DURATION_NOT_ALLOWED'
+
+
+def test_full_valid_submission_passes():
+  assert validate_submission(_sub('generate_video', _FULL_VALID_VIDEO)) is None
+
+
+def test_duration_non_int_rejected_when_resolution_omitted():
+  params = {k: v for k, v in _FULL_VALID_VIDEO.items() if k != 'resolution'}
+  params['duration_seconds'] = '8'
+  assert _code(_sub('generate_video', params)) == 'DURATION_NOT_ALLOWED'
+
+
+@pytest.mark.parametrize('bad_audio', ('true', 'false', 1, 0, None, [1]))
+def test_non_bool_generate_audio_rejected(bad_audio):
+  params = {**_FULL_VALID_VIDEO, 'generate_audio': bad_audio}
+  assert _code(_sub('generate_video', params)) == 'MALFORMED_SUBMISSION'
+
+
+@pytest.mark.parametrize('good_audio', (True, False))
+def test_bool_generate_audio_passes(good_audio):
+  params = {**_FULL_VALID_VIDEO, 'generate_audio': good_audio}
+  assert validate_submission(_sub('generate_video', params)) is None

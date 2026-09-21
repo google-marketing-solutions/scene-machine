@@ -195,35 +195,63 @@ def _capability_violation(
             'RESOLUTION_NOT_ALLOWED',
         )
 
-  if (
-      'duration_seconds' in params
-      and 'duration_by_resolution' in caps
-      and 'resolution' in params
-  ):
+  if 'duration_seconds' in params and 'duration_by_resolution' in caps:
     duration_by_resolution = caps['duration_by_resolution']
-    # Pairwise, not a union of what each resolution alone allows: list
-    # parameters expand as a full cross product, so every (resolution,
-    # duration) combination the engine would actually run must be checked.
-    for resolution in _as_values(params['resolution']):
-      if not isinstance(resolution, str):
-        continue  # can never be a key of the mapping
-      allowed_durations = duration_by_resolution.get(resolution)
-      if allowed_durations is None:
-        continue  # not a key of the mapping; the resolution check above owns it
+    if 'resolution' in params:
+      # Pairwise, not a union of what each resolution alone allows: list
+      # parameters expand as a full cross product, so every (resolution,
+      # duration) combination the engine would actually run must be checked.
+      for resolution in _as_values(params['resolution']):
+        if not isinstance(resolution, str):
+          continue  # can never be a key of the mapping
+        allowed_durations = duration_by_resolution.get(resolution)
+        if allowed_durations is None:
+          continue  # not a key of the mapping; the resolution check above owns it
+        for duration in _as_values(params['duration_seconds']):
+          if (
+              isinstance(duration, bool)
+              or not isinstance(duration, int)
+              or duration not in allowed_durations
+          ):
+            return (
+                (
+                    f'Node {node_id!r}: {action} duration_seconds {duration!r} '
+                    f'is not allowed for {model!r} at resolution '
+                    f'{resolution!r}'
+                ),
+                'DURATION_NOT_ALLOWED',
+            )
+    else:
+      # Resolution omitted: validate duration against the union of all allowed
+      # durations across all resolutions as a minimal fail-closed floor (rejecting
+      # out-of-bounds durations such as 9999). This is a deliberate compromise:
+      # rejecting outright would require treating resolution as mandatory, which
+      # ui/definitions/actions.json does not express. This union check provides a
+      # floor rather than the full cross-product guarantee the if-branch provides.
+      all_allowed = set()
+      for durations in duration_by_resolution.values():
+        all_allowed.update(durations)
       for duration in _as_values(params['duration_seconds']):
         if (
             isinstance(duration, bool)
             or not isinstance(duration, int)
-            or duration not in allowed_durations
+            or duration not in all_allowed
         ):
           return (
               (
                   f'Node {node_id!r}: {action} duration_seconds {duration!r} '
-                  f'is not allowed for {model!r} at resolution '
-                  f'{resolution!r}'
+                  f'is not allowed for {model!r}'
               ),
               'DURATION_NOT_ALLOWED',
           )
+
+  if 'generate_audio' in params:
+    for value in _as_values(params['generate_audio']):
+      if not isinstance(value, bool):
+        return (
+            f'Node {node_id!r}: {action} generate_audio must be a boolean',
+            'MALFORMED_SUBMISSION',
+        )
 
   if caps.get('audio_always_on') is True and 'generate_audio' in action_params:
     if 'generate_audio' not in params:
