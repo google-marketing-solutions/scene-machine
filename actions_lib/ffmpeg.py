@@ -99,10 +99,14 @@ def _clean_duration(
     source_duration: float,
     target_fps: float,
 ) -> float:
-  """Computes clip duration clamped to available footage and aligned to frame boundaries."""
+  """Clamps clip duration to known footage and aligns it to frame boundaries."""
   frame_duration = 1.0 / target_fps
   if duration > 0:
-    effective_duration = min(duration, available_duration)
+    effective_duration = (
+        min(duration, available_duration)
+        if source_duration > 0
+        else duration
+    )
   else:
     effective_duration = min(source_duration, available_duration)
   total_frames = max(1, round(effective_duration / frame_duration))
@@ -264,7 +268,7 @@ class FFMPEG:
             transition_overlap, 'transition_overlap', min_value=0.0
         )
     properties = get_video_properties(path)
-    if skip_time >= properties['duration']:
+    if properties['duration'] > 0 and skip_time >= properties['duration']:
       raise ValueError(
           f'skip_time ({skip_time}) must be less than video duration'
           f" ({properties['duration']})"

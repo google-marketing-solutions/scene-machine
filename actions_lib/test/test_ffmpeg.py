@@ -307,6 +307,27 @@ class TestFFMPEG(unittest.TestCase):
     self.assertEqual(ffmpeg4.inputs[0]['duration'], 7.0)
 
   @mock.patch('actions_lib.ffmpeg.get_video_properties')
+  def test_unknown_source_duration_uses_requested_duration(self, mock_get_props):
+    mock_get_props.return_value = {
+        'duration': 0.0,
+        'dimensions': '1280:720',
+        'fps': 30.0,
+        'has_audio': True,
+    }
+
+    ffmpeg = FFMPEG()
+    ffmpeg.add_video(
+        path='unknown-duration.mp4',
+        skip_time=3.0,
+        duration=4.0,
+        transition=None,
+        transition_overlap=0,
+    )
+
+    self.assertEqual(ffmpeg.inputs[0]['skip'], 3.0)
+    self.assertEqual(ffmpeg.inputs[0]['duration'], 4.0)
+
+  @mock.patch('actions_lib.ffmpeg.get_video_properties')
   def test_negative_times_and_excessive_skip_raise(self, mock_get_props):
     mock_get_props.return_value = {
         'duration': 10.0,
