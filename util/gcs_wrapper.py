@@ -23,12 +23,14 @@ import hashlib
 import io
 import pathlib
 import re
+import threading
 from typing import Iterable
 from typing import Union
 
 from common import logger
 from google.auth import compute_engine
 from google.auth import default
+from google.auth import iam
 from google.auth.transport import requests as transport_requests
 from google.cloud import storage
 
@@ -38,6 +40,46 @@ SIGNED_URL_TTL_HOURS = 24
 # Keep half available for FFmpeg, output files, and the Python process.
 MAX_LOCAL_INPUT_BYTES = 8 * 1024 * 1024 * 1024
 _MAX_LOCAL_EXTENSION_LENGTH = 10
+
+_CACHED_STORAGE_CLIENT = None
+_CACHED_CLIENT_FACTORY = None
+_CACHED_SIGNING_CREDENTIALS = None
+_CACHED_AUTH_FACTORY = None
+_SIGNING_CONTEXT_LOCK = threading.Lock()
+
+
+def _get_cached_signing_context():
+  global _CACHED_STORAGE_CLIENT, _CACHED_CLIENT_FACTORY
+  global _CACHED_SIGNING_CREDENTIALS, _CACHED_AUTH_FACTORY
+
+  with _SIGNING_CONTEXT_LOCK:
+    if _CACHED_STORAGE_CLIENT is None or _CACHED_CLIENT_FACTORY is not storage.Client:
+      _CACHED_STORAGE_CLIENT = storage.Client()
+      _CACHED_CLIENT_FACTORY = storage.Client
+    if (
+        _CACHED_SIGNING_CREDENTIALS is None
+        or _CACHED_SIGNING_CREDENTIALS.expired
+        or _CACHED_AUTH_FACTORY is not default
+    ):
+      auth_request = transport_requests.Request()
+      cred, _ = default()
+      cred.refresh(auth_request)  # pyright: ignore[reportAttributeAccessIssue]
+      signer = iam.Signer(
+          auth_request,
+          cred,
+          cred.service_account_email,  # pyright: ignore[reportAttributeAccessIssue]
+      )
+      signing_creds = compute_engine.IDTokenCredentials(
+          auth_request,
+          '',
+          service_account_email=cred.service_account_email,  # pyright: ignore[reportAttributeAccessIssue]
+          signer=signer,
+      )
+      if isinstance(getattr(cred, 'expiry', None), datetime.datetime):
+        signing_creds.expiry = cred.expiry
+      _CACHED_SIGNING_CREDENTIALS = signing_creds
+      _CACHED_AUTH_FACTORY = default
+    return _CACHED_STORAGE_CLIENT, _CACHED_SIGNING_CREDENTIALS
 
 
 def get_signed_url(
@@ -53,17 +95,10 @@ def get_signed_url(
   Returns:
     A signed URL to the input file.
   """
-  storage_client = storage.Client()
-  bucket = storage_client.bucket(gcs_bucket_name)
-  blob = bucket.blob(blob_name)
-
   if flask_context:
-    auth_request = transport_requests.Request()
-    cred, _ = default()
-    cred.refresh(auth_request)  # pyright: ignore[reportAttributeAccessIssue]
-    signing_credentials = compute_engine.IDTokenCredentials(
-        auth_request, '', service_account_email=cred.service_account_email  # pyright: ignore[reportAttributeAccessIssue], pylint: disable=linetoolong
-    )
+    storage_client, signing_credentials = _get_cached_signing_context()
+    bucket = storage_client.bucket(gcs_bucket_name)
+    blob = bucket.blob(blob_name)
     return blob.generate_signed_url(
         version='v4',
         expiration=datetime.timedelta(hours=SIGNED_URL_TTL_HOURS),
@@ -71,6 +106,9 @@ def get_signed_url(
         credentials=signing_credentials,
     )
   else:
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(gcs_bucket_name)
+    blob = bucket.blob(blob_name)
     return blob.generate_signed_url(
         version='v4',
         expiration=datetime.timedelta(hours=SIGNED_URL_TTL_HOURS),

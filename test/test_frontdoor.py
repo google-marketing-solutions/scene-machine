@@ -2594,3 +2594,67 @@ def test_role_all_with_iap_is_refused(monkeypatch, orchestrator_module):
   del orchestrator_module
   with pytest.raises(RuntimeError, match='ROLE=all'):
     _load_orch(monkeypatch, ROLE='all', AUTH_MODE='iap')
+
+
+def test_get_status_rejects_invalid_firestore_segment_execution_id(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch_all = _load_orch(monkeypatch, ROLE='all')
+  monkeypatch.setitem(orch_all.config, 'gcsBucket', 'frontdoor-test-bucket')
+  client_all = orch_all.app.test_client()
+  assert client_all.get('/getStatus?executionId=bad/path').status_code == 400
+  assert client_all.get('/getStatus?executionId=cloudTasks').status_code == 400
+
+  orch_app = _load_orch(
+      monkeypatch, ROLE='app', WORKER_URL='https://worker-test.a.run.app'
+  )
+  monkeypatch.setitem(orch_app.config, 'gcsBucket', 'frontdoor-test-bucket')
+  client_app = orch_app.app.test_client()
+  assert client_app.get('/api/getStatus?executionId=__reserved__').status_code == 400
+  assert client_app.get('/api/getStatus?executionId=cloudTasks').status_code == 400
+
+
+def test_supply_node_and_trigger_action_reject_invalid_host_header(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch = _load_orch(monkeypatch, ROLE='worker')
+  client = orch.app.test_client()
+
+  resp = client.post(
+      '/supplyNode',
+      json={'nodeId': 'root'},
+      headers={'Host': 'evil.attacker.com/path'},
+  )
+  assert resp.status_code == 400
+
+  resp = client.post(
+      '/triggerAction',
+      json={'action': 'concat'},
+      headers={'Host': 'evil.attacker.com/path'},
+  )
+  assert resp.status_code == 400
+
+  monkeypatch.setenv('K_SERVICE', 'worker')
+  resp = client.post(
+      '/supplyNode',
+      json={'nodeId': 'root'},
+      headers={'Host': 'evil.attacker.com'},
+  )
+  assert resp.status_code == 400
+
+  resp = client.post(
+      '/triggerAction',
+      json={'action': 'concat'},
+      headers={'Host': 'evil.attacker.com'},
+  )
+  assert resp.status_code == 400
+
+  for bad_url in (
+      'https://worker.a.run.app/;extra/path',
+      ' https://worker.a.run.app',
+      'https://worker.a.run.app\r\n',
+  ):
+    with pytest.raises(ValueError):
+      orch.orchestrator._validate_task_instance_url(bad_url)

@@ -1026,3 +1026,92 @@ def test_duration_check_rejects_unhashable_resolution_without_crashing(
             'generate_audio': True}),
       allowlist=_allowlist_without_omni_allowed_resolutions(),
   ) is None
+
+
+def test_combine_video_and_convert_video_resolution_validated():
+  assert (
+      _code(_sub('combine_video', {'resolution': '1280:720,movie=/etc/passwd'}))
+      == 'RESOLUTION_NOT_ALLOWED'
+  )
+  assert (
+      _code(_sub('combine_video', {'resolution': '１２８０:７２０', 'encoding_speed': 6, 'quality_level': 20}))
+      == 'RESOLUTION_NOT_ALLOWED'
+  )
+  assert (
+      _code(_sub('combine_video', {'resolution': '00:00', 'encoding_speed': 6, 'quality_level': 20}))
+      == 'RESOLUTION_NOT_ALLOWED'
+  )
+  assert (
+      _code(_sub('combine_video', {'resolution': '1280:720', 'encoding_speed': 6}))
+      == 'MALFORMED_SUBMISSION'
+  )
+  assert (
+      _code(_sub('convert_video', {'output_file_dimension': 'bad'}))
+      == 'RESOLUTION_NOT_ALLOWED'
+  )
+  assert (
+      _code(_sub('convert_video', {'output_file_dimension': '1280:720'}))
+      == 'MALFORMED_SUBMISSION'
+  )
+  assert (
+      _code(
+          _sub(
+              'convert_video',
+              {
+                  'output_file_dimension': '1280:720',
+                  'output_file_extension': '../mp4',
+              },
+          )
+      )
+      == 'MALFORMED_SUBMISSION'
+  )
+  assert (
+      validate_submission(
+          _sub(
+              'combine_video',
+              {
+                  'resolution': '720:1280',
+                  'encoding_speed': 6,
+                  'quality_level': 20,
+              },
+          )
+      )
+      is None
+  )
+
+
+@pytest.mark.parametrize(
+    'bad_path',
+    (
+        '../secret.json',
+        '/etc/passwd',
+        '_task-completions/abc.json',
+        '_task-completions',
+        ' images/pic.png',
+        'images/pic.png\n',
+        'images\\pic.png',
+        'images/\x00pic.png',
+    ),
+)
+def test_input_files_rejects_traversal_leading_slash_and_task_completions(
+    bad_path,
+):
+  data = _submission(
+      {'root': {'action': 'pass', 'input': {'images': None}}},
+      {'images': [{'file': bad_path}]},
+      node_id='root',
+  )
+  assert validate_submission(data) == (
+      "inputFiles 'images' entries must each have a valid, safe file path",
+      'MALFORMED_SUBMISSION',
+  )
+
+
+def test_input_files_allows_safe_relative_and_gs_paths():
+  for safe_path in ('images/pic.png', 'gs://bucket/image.png', 'valid.mp4'):
+    data = _submission(
+        {'root': {'action': 'pass', 'input': {'images': None}}},
+        {'images': [{'file': safe_path}]},
+        node_id='root',
+    )
+    assert validate_submission(data) is None

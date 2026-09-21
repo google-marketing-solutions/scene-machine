@@ -15,6 +15,8 @@
 """Encapsulates use of FFmpeg."""
 
 import json
+import math
+import re
 import shlex
 import subprocess
 from typing import Any
@@ -24,6 +26,71 @@ from common import logger
 
 FFMPEG_PATH = 'ffmpeg'
 FFPROBE_PATH = 'ffprobe'
+
+_RESOLUTION_RE = re.compile(r'^[1-9][0-9]{1,4}:[1-9][0-9]{1,4}$')
+_EXTENSION_RE = re.compile(r'^[a-zA-Z0-9]{1,10}$')
+_XFADE_TRANSITIONS = frozenset({
+    'fade',
+    'wipeleft',
+    'wiperight',
+    'wipeup',
+    'wipedown',
+    'circleclose',
+    'circlecrop',
+    'circleopen',
+    'diagbl',
+    'diagbr',
+    'diagtl',
+    'diagtr',
+    'distance',
+    'dissolve',
+    'fadeblack',
+    'fadegrays',
+    'fadewhite',
+    'hblur',
+    'hlslice',
+    'horzclose',
+    'horzopen',
+    'hrslice',
+    'pixelize',
+    'radial',
+    'rectcrop',
+    'slideleft',
+    'slideright',
+    'slideup',
+    'slidedown',
+    'smoothleft',
+    'smoothright',
+    'smoothup',
+    'smoothdown',
+    'squeezeh',
+    'squeezev',
+    'vdslice',
+    'vertclose',
+    'vertopen',
+    'vuslice',
+    'wipebl',
+    'wipebr',
+    'wipetl',
+    'wipetr',
+})
+
+
+def _require_finite_number(value: Any, name: str) -> float:
+  if (
+      isinstance(value, bool)
+      or not isinstance(value, (int, float))
+      or not math.isfinite(value)
+  ):
+    raise ValueError(f'{name} must be a finite number: {value!r}')
+  return float(value)
+
+
+def _require_int(value: Any, name: str) -> int:
+  if isinstance(value, bool) or not isinstance(value, int):
+    raise ValueError(f'{name} must be an integer: {value!r}')
+  return int(value)
+
 
 
 def get_video_properties(file_path: str) -> Dict[str, Any]:
@@ -129,6 +196,8 @@ class FFMPEG:
     Returns:
       the instance of FFMPEG so that calls can be chained.
     """
+    if not isinstance(res, str) or not _RESOLUTION_RE.fullmatch(res):
+      raise ValueError(f'Invalid resolution: {res!r}')
     self.resolution = res
     return self
 
@@ -156,6 +225,20 @@ class FFMPEG:
     Returns:
       the instance of FFMPEG so that calls can be chained.
     """
+    skip_time = _require_finite_number(skip_time, 'skip_time')
+    duration = _require_finite_number(duration, 'duration')
+    if transition is not None:
+      if transition not in _XFADE_TRANSITIONS:
+        raise ValueError(f'Invalid transition: {transition!r}')
+      transition_overlap = _require_finite_number(
+          0.0 if transition_overlap is None else transition_overlap,
+          'transition_overlap',
+      )
+    else:
+      if transition_overlap is not None:
+        transition_overlap = _require_finite_number(
+            transition_overlap, 'transition_overlap'
+        )
     properties = get_video_properties(path)
     if properties['fps'] > self.target_fps:
       self.target_fps = properties['fps']
@@ -191,6 +274,9 @@ class FFMPEG:
     Returns:
       the instance of FFMPEG so that calls can be chained.
     """
+    start_time = _require_finite_number(start_time, 'start_time')
+    skip_time = _require_finite_number(skip_time, 'skip_time')
+    duration = _require_finite_number(duration, 'duration')
     self.inputs.append({
         'type': 'audio',
         'path': path,
@@ -228,6 +314,12 @@ class FFMPEG:
 
     TODO: use the start_time to start the clip at the right place.
     """
+    start_time = _require_finite_number(start_time, 'start_time')
+    duration = _require_finite_number(duration, 'duration')
+    offset_x = _require_int(offset_x, 'offset_x')
+    offset_y = _require_int(offset_y, 'offset_y')
+    width = _require_int(width, 'width')
+    height = _require_int(height, 'height')
     self.inputs.append({
         'type': 'image',
         'path': path,
@@ -465,6 +557,19 @@ class FFMPEG:
     Returns:
       the local path to the converted file.
     """
+    if (
+        not isinstance(self.resolution, str)
+        or not _RESOLUTION_RE.fullmatch(self.resolution)
+    ):
+      raise ValueError(f'Invalid resolution: {self.resolution!r}')
+    if (
+        not isinstance(output_file_extension, str)
+        or not _EXTENSION_RE.fullmatch(output_file_extension)
+    ):
+      raise ValueError(
+          f'Invalid output_file_extension: {output_file_extension!r}'
+      )
+
     # Check the type and dimensions to see if conversion is needed
     input_dimensions = get_video_properties(input_file_path)['dimensions']
     input_extension = input_file_path.split('.')[-1]

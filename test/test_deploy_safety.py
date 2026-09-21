@@ -84,16 +84,28 @@ def test_cors_generation_uses_all_returned_cloud_run_origins():
       .replace('${UI_CORS_ORIGINS}', result.stdout.strip())
   )
   config = json.loads(rendered_template)
-  assert config[0]['origin'][:4] == [
+  assert config[0]['origin'][:2] == [
       'http://localhost',
       'http://localhost:4200',
-      'localhost',
-      'localhost:4200',
   ]
-  assert config[0]['origin'][4:] == origins
-  assert config[0]['method'] == ['GET', 'POST', 'HEAD', 'PUT', 'DELETE']
+  assert config[0]['origin'][2:] == origins
+  assert 'localhost' not in config[0]['origin']
+  assert 'localhost:4200' not in config[0]['origin']
+  assert config[0]['method'] == ['GET', 'HEAD', 'PUT']
+  assert 'POST' not in config[0]['method']
+  assert 'DELETE' not in config[0]['method']
   assert config[0]['responseHeader'] == ['Content-Type']
   assert config[0]['maxAgeSeconds'] == 3600
+
+
+def test_status_viewer_iframe_sandbox_disallows_scripts():
+  """CM-SM-001: status viewer iframe must be sandboxed without script execution."""
+  viewer_js = (
+      _REPO / 'ui' / 'remix-engine-status-viewer' / 'renderWorkflow.js'
+  ).read_text(encoding='utf-8')
+  assert "iframe.setAttribute('sandbox', '')" in viewer_js
+  assert 'allow-scripts' not in viewer_js
+
 
 
 @pytest.mark.parametrize(

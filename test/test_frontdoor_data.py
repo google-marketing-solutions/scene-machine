@@ -164,11 +164,19 @@ class FakeDocumentRef:
 class FakeQuery:
   """Read-side surface used by orch: where(filter=)/order_by/stream."""
 
-  def __init__(self, collection, filters=(), order_field=None, field_paths=None):
+  def __init__(
+      self,
+      collection,
+      filters=(),
+      order_field=None,
+      field_paths=None,
+      limit_count=None,
+  ):
     self._collection = collection
     self._filters = tuple(filters)
     self._order_field = order_field
     self._field_paths = field_paths
+    self._limit_count = limit_count
 
   def where(self, filter=None):  # pylint: disable=redefined-builtin
     return FakeQuery(
@@ -176,18 +184,36 @@ class FakeQuery:
         self._filters + (filter,),
         self._order_field,
         self._field_paths,
+        self._limit_count,
     )
 
   def order_by(self, field):
     return FakeQuery(
-        self._collection, self._filters, field, self._field_paths
+        self._collection,
+        self._filters,
+        field,
+        self._field_paths,
+        self._limit_count,
     )
 
   def select(self, field_paths):
     field_paths = list(field_paths)
     self._collection.select_calls.append(field_paths)
     return FakeQuery(
-        self._collection, self._filters, self._order_field, field_paths
+        self._collection,
+        self._filters,
+        self._order_field,
+        field_paths,
+        self._limit_count,
+    )
+
+  def limit(self, count):
+    return FakeQuery(
+        self._collection,
+        self._filters,
+        self._order_field,
+        self._field_paths,
+        count,
     )
 
   def stream(self):
@@ -203,6 +229,8 @@ class FakeQuery:
       items.sort(key=lambda item: item[1].get(self._order_field))
     else:
       items.sort(key=lambda item: item[0])
+    if self._limit_count is not None:
+      items = items[: self._limit_count]
     snapshots = []
     for doc_id, data in items:
       if self._field_paths is not None:
@@ -390,8 +418,16 @@ def test_upload_url_validates_prefix_and_filename(
     assert response.status_code == 400, bad_prefix
     assert 'error' in response.get_json()
 
-  # fileName must not contain '/' or '..' (nor be empty).
-  for bad_name in ('../a.png', 'a/../b.png', '/abs.png', 'sub/dir.png', ''):
+  # fileName must not contain '/' or '..' (nor be empty), exceed 255 chars, or contain '\'.
+  for bad_name in (
+      '../a.png',
+      'a/../b.png',
+      '/abs.png',
+      'sub/dir.png',
+      '',
+      'a' * 256,
+      'a\\b.png',
+  ):
     response = client.post(
         '/api/uploadUrl',
         json={
@@ -624,6 +660,17 @@ def test_sign_url_ttl_param_clamped(monkeypatch, orchestrator_module):
         '/api/signUrl', query_string={'path': 'remix-input/a.png', 'ttl': bad_ttl}
     )
     assert response.status_code == 400, bad_ttl
+
+
+def test_sign_url_rejects_task_completions_prefix(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, _, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  response = client.get('/api/signUrl?path=_task-completions/secret.json')
+  assert response.status_code == 400
+  assert 'error' in response.get_json()
 
 
 def test_sign_url_caps_and_deduplicates_paths(monkeypatch, orchestrator_module):
@@ -997,6 +1044,37 @@ def test_post_project_rejects_450_scenes_before_any_write(
   assert '449' in body['error']
   assert 'too-big' not in fake_db.collection('projects').docs
   assert _scenes_docs(fake_db, 'too-big') == {}
+
+
+def test_patch_project_rejects_450_scenes_before_any_write(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  res = client.post('/api/projects', json={'id': 'p1', 'name': 'p1'})
+  assert res.status_code == 200
+
+  def fail_batch():
+    raise AssertionError('no batch should be created for a rejected PATCH')
+
+  monkeypatch.setattr(fake_db, 'batch', fail_batch)
+
+  scenes = [{'description': f'scene-{i}'} for i in range(450)]
+  response = client.patch(
+      '/api/projects/p1',
+      json={'storyboard': scenes},
+  )
+  assert response.status_code == 400
+  assert '449' in response.get_json()['error']
+
+  response_editor = client.patch(
+      '/api/projects/p1/editor',
+      json={'storyboard': scenes},
+  )
+  assert response_editor.status_code == 400
+  assert '449' in response_editor.get_json()['error']
 
 
 def test_post_project_does_not_scan_existing_scenes_on_create(
@@ -1668,6 +1746,32 @@ def test_templates_crud_and_read_only_guard(monkeypatch, orchestrator_module):
   # DELETE of a writable template succeeds.
   assert client.delete(f'/api/templates/{template_id}').status_code == 200
   assert template_id not in docs
+
+
+def test_templates_get_limits_stream_and_post_rejects_oversized_payload(
+    monkeypatch, orchestrator_module
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+
+  for i in range(205):
+    fake_db.collection('creativeTemplates').docs[f'tpl-{i:03d}'] = {
+        'name': f'Template {i}',
+        'createdAt': i,
+    }
+
+  response = client.get('/api/templates')
+  assert response.status_code == 200
+  assert len(response.get_json()['templates']) == 200
+
+  # Call POST /api/templates with a 300 KiB payload
+  big_payload = {'name': 'big', 'padding': 'x' * (300 * 1024)}
+  post_resp = client.post('/api/templates', json=big_payload)
+  assert post_resp.status_code == 400
+
+  patch_resp = client.patch('/api/templates/tpl-000', json=big_payload)
+  assert patch_resp.status_code == 400
 
 
 # ---------------------------------------------------------------------------
