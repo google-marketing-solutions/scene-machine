@@ -124,7 +124,23 @@ describe('Setup full-load failure', () => {
     ).not.toBeNull();
   });
 
-  it('does not synthesize blank inputConfig or issue full PATCH on 404 with unsettled save', async () => {
+  it('does not show an error before a project load or while the load is pending', () => {
+    expect(config.setupInputsError()).toBe(false);
+    expect(fixture.nativeElement.textContent).not.toContain(
+      'Could not load this project',
+    );
+    config.loadProjectConfig('pending-project', 'full');
+    expect(config.setupInputsError()).toBe(false);
+    TestBed.tick();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('mat-spinner')).not.toBeNull();
+    expect(config.setupInputsError()).toBe(false);
+    http
+      .expectOne('/api/projects/pending-project')
+      .flush('failed', {status: 500, statusText: 'Server Error'});
+  });
+
+  it('offers recovery without blank inputs or full PATCH after both load and pending save return 404', async () => {
     (
       config as unknown as {persistedProjectIds: Set<string>}
     ).persistedProjectIds.add('proj-unsettled');
@@ -156,7 +172,9 @@ describe('Setup full-load failure', () => {
     const inFlightPatch = http.expectOne('/api/projects/proj-unsettled/editor');
 
     config.loadProjectConfig('proj-unsettled', 'full');
+    expect(config.setupInputsError()).toBe(false);
     TestBed.tick();
+    expect(config.setupInputsError()).toBe(false);
     const fullGet = http.expectOne('/api/projects/proj-unsettled');
     fullGet.flush('Not found', {status: 404, statusText: 'Not Found'});
     TestBed.tick();
@@ -167,7 +185,22 @@ describe('Setup full-load failure', () => {
     expect(config.projectConfig.value().inputConfig).toBeUndefined();
     http.expectNone('/api/projects/proj-unsettled');
 
-    inFlightPatch.flush({});
+    inFlightPatch.flush('Not found', {status: 404, statusText: 'Not Found'});
+    TestBed.tick();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(config.projectLoadError()).toBe(false);
+    expect(config.setupInputsError()).toBe(true);
+    expect(fixture.nativeElement.querySelector('mat-spinner')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain(
+      'Could not load this project',
+    );
+    const home = fixture.nativeElement.querySelector('a[href="/"]');
+    expect(home?.textContent).toContain('Back to projects');
+    expect(fixture.nativeElement.querySelector('.setup-container')).toBeNull();
+    expect(config.projectConfig.value().inputConfig).toBeUndefined();
+    http.expectNone('/api/projects/proj-unsettled');
   });
 });
 

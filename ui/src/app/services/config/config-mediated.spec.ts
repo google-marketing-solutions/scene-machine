@@ -1152,10 +1152,8 @@ describe('ConfigService (mediated data plane)', () => {
       expect(service.setupInputsLoaded()).toBe(false);
       expect(service.projectConfig.value().id).toBe('proj-hydrate');
       expect(service.projectConfig.value().inputConfig).toBeUndefined();
-      expect(httpClientMock.patch).not.toHaveBeenCalledWith(
-        '/api/projects/proj-hydrate',
-        expect.anything(),
-      );
+      expect(service.setupInputsError()).toBe(true);
+      expect(service.projectLoadError()).toBe(false);
     });
 
     it('navigates home and resets project on 404 without local copy', async () => {
@@ -1176,6 +1174,7 @@ describe('ConfigService (mediated data plane)', () => {
 
       expect(service.setupInputsLoaded()).toBe(false);
       expect(service.projectConfig.value().id).toBe('');
+      expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(['/']);
       errorSpy.mockRestore();
     });
 

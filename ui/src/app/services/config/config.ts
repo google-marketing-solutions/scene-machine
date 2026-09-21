@@ -1019,7 +1019,13 @@ export class ConfigService {
       (!!this.projectLoadErrorValue() || !!this.projectConfig.error()),
   );
   readonly setupInputsError = computed(
-    () => this.projectView() === 'full' && this.projectLoadError(),
+    () =>
+      this.projectView() === 'full' &&
+      (this.projectLoadError() ||
+        (this.projectId() !== null &&
+          !this.projectConfig.isLoading() &&
+          this.projectConfig.value().id === this.projectId() &&
+          !this.setupInputsHydrated())),
   );
   /**
    * Setup may expose its input fields only when the current project's
