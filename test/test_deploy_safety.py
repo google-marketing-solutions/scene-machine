@@ -615,6 +615,61 @@ printf "%s\\n" "$DICTATION_ENABLED"
     assert expected_err in result.stderr
 
 
+def test_first_deploy_dictation_probe_runs_after_api_enablement(tmp_path):
+  """A first deploy must enable Cloud Run before probing the absent service."""
+  text = _deploy_sh()
+  enable_start = text.index('# --- Enable services')
+  enable_call = text.index('gcloud services enable $TO_ENABLE', enable_start)
+  explicit_validation = text.index(
+      'if [ -n "${DICTATION_ENABLED:-}" ] && [[',
+  )
+  confirmation = text.index('read -r -p "Proceed and deploy')
+  assert explicit_validation < confirmation < enable_start
+  probe_start = text.index('if [ -z "${DICTATION_ENABLED:-}" ]; then')
+  assert enable_call < probe_start
+
+  enable_block = text[enable_start:text.index(
+      '# Warm up Vertex AI service agent.', enable_call
+  )]
+  script = f'''\
+gcloud() {{
+  if [ "$1" = services ] && [ "$2" = list ]; then
+    printf '%s\\n' "$ENABLED_APIS"
+  elif [ "$1" = services ] && [ "$2" = enable ]; then
+    printf 'services-enable\\n' >> "$TRACE_FILE"
+  elif [ "$1" = run ] && [ "$2" = services ] && [ "$3" = list ]; then
+    printf 'run-list\\n' >> "$TRACE_FILE"
+  else
+    printf 'unexpected gcloud call: %s\\n' "$*" >&2
+    return 1
+  fi
+}}
+phase() {{ :; }}
+PROJECT=test-project
+REGION=us-central1
+REQUIRED_APIS="run.googleapis.com"
+ENABLED_APIS=
+{enable_block}
+printf 'value=%s\\n' "$DICTATION_ENABLED"
+'''
+  environment = os.environ.copy()
+  environment['TRACE_FILE'] = str(tmp_path / 'trace')
+  environment.pop('DICTATION_ENABLED', None)
+  trace_path = pathlib.Path(environment['TRACE_FILE'])
+  trace_path.unlink(missing_ok=True)
+  try:
+    result = subprocess.run(
+        ['bash', '-c', script], env=environment, capture_output=True,
+        text=True, check=False,
+    )
+    trace = trace_path.read_text(encoding='utf-8')
+  finally:
+    trace_path.unlink(missing_ok=True)
+  assert result.returncode == 0, result.stderr
+  assert result.stdout.rstrip().endswith('value=1')
+  assert trace.splitlines() == ['services-enable', 'run-list']
+
+
 @pytest.mark.parametrize(
     "line, expected_match",
     [
@@ -622,6 +677,8 @@ printf "%s\\n" "$DICTATION_ENABLED"
         ("export PROJECT=my-project", True),
         ("PROJECT=\"my-project\"", True),
         ("export PROJECT=\"my-project\"", True),
+        ("REGION=\"us central1\"", False),
+        ("export REGION=\"us central1\"", False),
         ("export GCS_BUCKET=\"${PROJECT}-scene-machine\"", True),
         ("export GCS_BUCKET=${PROJECT}-scene-machine", True),
         ("PROJECT=", False),
