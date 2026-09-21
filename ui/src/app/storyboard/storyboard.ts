@@ -1150,6 +1150,12 @@ export class Storyboard {
     if (scene.candidates && scene.candidates[index]) {
       const candidate = scene.candidates[index];
       candidate.isArchived = !candidate.isArchived;
+      // Archiving the candidate that is currently selected must also clear the
+      // selection. Leaving the index in place keeps the archived clip in the
+      // composition playlist and renders it into the final video.
+      if (candidate.isArchived && scene.selectedCandidateIndex === index) {
+        scene.selectedCandidateIndex = undefined;
+      }
       this.updateScenes();
       if (candidate.isArchived && candidate.video?.path) {
         void this.candidateVideoCache.invalidateCandidate(
@@ -1162,6 +1168,7 @@ export class Storyboard {
         for (const path of [
           candidate.highQualityThumbnail?.path,
           candidate.referenceImage?.path,
+          candidate.referenceImage?.preview?.path,
         ]) {
           if (path)
             void this.thumbnailCache.invalidateCandidate(projectId, path);

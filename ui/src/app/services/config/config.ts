@@ -464,6 +464,14 @@ export function resolveSceneRenderClip(
     if (!candidate) {
       return {state: 'invalid'};
     }
+    // An archived candidate must never reach the render workflow, even while
+    // it is still the selected index. Archiving removes the card from the
+    // storyboard, so reporting 'not-selected' keeps the rendered output
+    // consistent with what the user can still see. 'invalid' would be wrong
+    // here: that state disables the Render button for the whole project.
+    if (candidate.isArchived) {
+      return {state: 'not-selected'};
+    }
     video = candidate.video;
     sourceDuration = candidate.durationSeconds;
     trim = candidate.trim;
