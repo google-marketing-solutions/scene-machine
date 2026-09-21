@@ -630,6 +630,12 @@
 
         &.archived {
           opacity: 0.5;
+          cursor: default;
+
+          &:hover {
+            transform: none;
+            box-shadow: none;
+          }
         }
 
         &.selected {
