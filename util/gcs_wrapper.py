@@ -76,6 +76,7 @@ def get_signing_context():
             'See DEVELOPING.md ("The local loop") for details.'
         )
       cred.refresh(auth_request)  # pyright: ignore[reportAttributeAccessIssue]
+      sa_email = cred.service_account_email
       signer = iam.Signer(
           auth_request,
           cred,
