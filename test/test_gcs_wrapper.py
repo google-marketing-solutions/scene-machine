@@ -113,18 +113,24 @@ def test_get_signed_url_flask_context_caches_client_and_credentials_until_expire
 
   mock_cred = mock.Mock()
   mock_cred.service_account_email = 'sa@example.com'
+  future_expiry = datetime.datetime.now() + datetime.timedelta(hours=1)
+  mock_cred.expiry = future_expiry
   mock_default = mock.Mock(return_value=(mock_cred, 'project-id'))
 
   with mock.patch(
       'util.gcs_wrapper.storage.Client', return_value=mock_client
   ) as client_factory, mock.patch(
       'util.gcs_wrapper.default', mock_default
-  ):
+  ), mock.patch(
+      'util.gcs_wrapper.iam.Signer'
+  ) as signer_factory:
     # First call initializes client and credentials
     url1 = gcs_wrapper.get_signed_url('bucket', 'a.mp4', flask_context=True)
     assert url1 == 'https://storage.googleapis.com/signed'
     assert client_factory.call_count == 1
     assert mock_cred.refresh.call_count == 1
+    assert signer_factory.call_count == 1
+    assert gcs_wrapper._CACHED_SIGNING_CREDENTIALS.expiry == future_expiry
 
     # Second call reuses cached client and credentials (not expired)
     url2 = gcs_wrapper.get_signed_url('bucket', 'b.mp4', flask_context=True)
@@ -132,14 +138,11 @@ def test_get_signed_url_flask_context_caches_client_and_credentials_until_expire
     assert client_factory.call_count == 1
     assert mock_cred.refresh.call_count == 1
 
-    # Now expire credentials; refresh must be called a second time
-    with mock.patch.object(
-        type(gcs_wrapper._CACHED_SIGNING_CREDENTIALS),
-        'expired',
-        new_callable=mock.PropertyMock,
-        return_value=True,
-    ):
-      url3 = gcs_wrapper.get_signed_url('bucket', 'c.mp4', flask_context=True)
-      assert url3 == 'https://storage.googleapis.com/signed'
-      assert client_factory.call_count == 1
-      assert mock_cred.refresh.call_count == 2
+    # Now expire credentials via real expiry; refresh must be called a second time
+    gcs_wrapper._CACHED_SIGNING_CREDENTIALS.expiry = (
+        datetime.datetime.now() - datetime.timedelta(minutes=5)
+    )
+    url3 = gcs_wrapper.get_signed_url('bucket', 'c.mp4', flask_context=True)
+    assert url3 == 'https://storage.googleapis.com/signed'
+    assert client_factory.call_count == 1
+    assert mock_cred.refresh.call_count == 2

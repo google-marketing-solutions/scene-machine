@@ -1034,8 +1034,24 @@ def test_combine_video_and_convert_video_resolution_validated():
       == 'RESOLUTION_NOT_ALLOWED'
   )
   assert (
+      _code(_sub('combine_video', {'resolution': '１２８０:７２０', 'encoding_speed': 6, 'quality_level': 20}))
+      == 'RESOLUTION_NOT_ALLOWED'
+  )
+  assert (
+      _code(_sub('combine_video', {'resolution': '00:00', 'encoding_speed': 6, 'quality_level': 20}))
+      == 'RESOLUTION_NOT_ALLOWED'
+  )
+  assert (
+      _code(_sub('combine_video', {'resolution': '1280:720', 'encoding_speed': 6}))
+      == 'MALFORMED_SUBMISSION'
+  )
+  assert (
       _code(_sub('convert_video', {'output_file_dimension': 'bad'}))
       == 'RESOLUTION_NOT_ALLOWED'
+  )
+  assert (
+      _code(_sub('convert_video', {'output_file_dimension': '1280:720'}))
+      == 'MALFORMED_SUBMISSION'
   )
   assert (
       _code(
@@ -1066,7 +1082,16 @@ def test_combine_video_and_convert_video_resolution_validated():
 
 @pytest.mark.parametrize(
     'bad_path',
-    ('../secret.json', '/etc/passwd', '_task-completions/abc.json', '_task-completions'),
+    (
+        '../secret.json',
+        '/etc/passwd',
+        '_task-completions/abc.json',
+        '_task-completions',
+        ' images/pic.png',
+        'images/pic.png\n',
+        'images\\pic.png',
+        'images/\x00pic.png',
+    ),
 )
 def test_input_files_rejects_traversal_leading_slash_and_task_completions(
     bad_path,

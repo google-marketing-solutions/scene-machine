@@ -247,19 +247,20 @@ def _capability_violation(
   return None
 
 
-_FFMPEG_RESOLUTION_RE = re.compile(r'^\d{2,5}:\d{2,5}$')
+_FFMPEG_RESOLUTION_RE = re.compile(r'^[1-9][0-9]{1,4}:[1-9][0-9]{1,4}$')
 _FFMPEG_EXT_RE = re.compile(r'^[a-zA-Z0-9]{1,10}$')
 
 
 def _is_safe_input_file_path(value: str) -> bool:
-  stripped = value.strip()
-  if not stripped:
+  if not value or value != value.strip():
     return False
-  if stripped.startswith('/'):
+  if value.startswith('/') or '\\' in value:
     return False
-  if '..' in stripped:
+  if any(ord(c) < 32 or ord(c) == 127 for c in value):
     return False
-  if '_task-completions' in stripped.split('/'):
+  if '..' in value:
+    return False
+  if '_task-completions' in value.split('/'):
     return False
   return True
 
@@ -268,42 +269,62 @@ def _ffmpeg_action_violation(
     node_id: str, action: str, params: dict
 ) -> tuple[str, str] | None:
   if action == 'combine_video':
-    if 'resolution' in params:
-      for value in _as_values(params['resolution']):
-        if not isinstance(value, str) or not _FFMPEG_RESOLUTION_RE.fullmatch(value):
-          return (
-              f'Node {node_id!r}: combine_video resolution {value!r} is not allowed',
-              'RESOLUTION_NOT_ALLOWED',
-          )
-    if 'encoding_speed' in params:
-      for value in _as_values(params['encoding_speed']):
-        if isinstance(value, bool) or not isinstance(value, int) or not (0 <= value <= 8):
-          return (
-              f'Node {node_id!r}: combine_video encoding_speed {value!r} must be an integer in 0..8',
-              'MALFORMED_SUBMISSION',
-          )
-    if 'quality_level' in params:
-      for value in _as_values(params['quality_level']):
-        if isinstance(value, bool) or not isinstance(value, int) or not (0 <= value <= 63):
-          return (
-              f'Node {node_id!r}: combine_video quality_level {value!r} must be an integer in 0..63',
-              'MALFORMED_SUBMISSION',
-          )
+    if 'resolution' not in params:
+      return (
+          f'Node {node_id!r}: combine_video requires resolution',
+          'MALFORMED_SUBMISSION',
+      )
+    for value in _as_values(params['resolution']):
+      if not isinstance(value, str) or not _FFMPEG_RESOLUTION_RE.fullmatch(value):
+        return (
+            f'Node {node_id!r}: combine_video resolution {value!r} is not allowed',
+            'RESOLUTION_NOT_ALLOWED',
+        )
+    if 'encoding_speed' not in params:
+      return (
+          f'Node {node_id!r}: combine_video requires encoding_speed',
+          'MALFORMED_SUBMISSION',
+      )
+    for value in _as_values(params['encoding_speed']):
+      if isinstance(value, bool) or not isinstance(value, int) or not (0 <= value <= 8):
+        return (
+            f'Node {node_id!r}: combine_video encoding_speed {value!r} must be an integer in 0..8',
+            'MALFORMED_SUBMISSION',
+        )
+    if 'quality_level' not in params:
+      return (
+          f'Node {node_id!r}: combine_video requires quality_level',
+          'MALFORMED_SUBMISSION',
+      )
+    for value in _as_values(params['quality_level']):
+      if isinstance(value, bool) or not isinstance(value, int) or not (0 <= value <= 63):
+        return (
+            f'Node {node_id!r}: combine_video quality_level {value!r} must be an integer in 0..63',
+            'MALFORMED_SUBMISSION',
+        )
   elif action == 'convert_video':
-    if 'output_file_dimension' in params:
-      for value in _as_values(params['output_file_dimension']):
-        if not isinstance(value, str) or not _FFMPEG_RESOLUTION_RE.fullmatch(value):
-          return (
-              f'Node {node_id!r}: convert_video output_file_dimension {value!r} is not allowed',
-              'RESOLUTION_NOT_ALLOWED',
-          )
-    if 'output_file_extension' in params:
-      for value in _as_values(params['output_file_extension']):
-        if not isinstance(value, str) or not _FFMPEG_EXT_RE.fullmatch(value):
-          return (
-              f'Node {node_id!r}: convert_video output_file_extension {value!r} is not allowed',
-              'MALFORMED_SUBMISSION',
-          )
+    if 'output_file_dimension' not in params:
+      return (
+          f'Node {node_id!r}: convert_video requires output_file_dimension',
+          'MALFORMED_SUBMISSION',
+      )
+    for value in _as_values(params['output_file_dimension']):
+      if not isinstance(value, str) or not _FFMPEG_RESOLUTION_RE.fullmatch(value):
+        return (
+            f'Node {node_id!r}: convert_video output_file_dimension {value!r} is not allowed',
+            'RESOLUTION_NOT_ALLOWED',
+        )
+    if 'output_file_extension' not in params:
+      return (
+          f'Node {node_id!r}: convert_video requires output_file_extension',
+          'MALFORMED_SUBMISSION',
+      )
+    for value in _as_values(params['output_file_extension']):
+      if not isinstance(value, str) or not _FFMPEG_EXT_RE.fullmatch(value):
+        return (
+            f'Node {node_id!r}: convert_video output_file_extension {value!r} is not allowed',
+            'MALFORMED_SUBMISSION',
+        )
   return None
 
 

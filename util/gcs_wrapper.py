@@ -23,12 +23,14 @@ import hashlib
 import io
 import pathlib
 import re
+import threading
 from typing import Iterable
 from typing import Union
 
 from common import logger
 from google.auth import compute_engine
 from google.auth import default
+from google.auth import iam
 from google.auth.transport import requests as transport_requests
 from google.cloud import storage
 
@@ -43,28 +45,41 @@ _CACHED_STORAGE_CLIENT = None
 _CACHED_CLIENT_FACTORY = None
 _CACHED_SIGNING_CREDENTIALS = None
 _CACHED_AUTH_FACTORY = None
+_SIGNING_CONTEXT_LOCK = threading.Lock()
 
 
 def _get_cached_signing_context():
   global _CACHED_STORAGE_CLIENT, _CACHED_CLIENT_FACTORY
   global _CACHED_SIGNING_CREDENTIALS, _CACHED_AUTH_FACTORY
 
-  if _CACHED_STORAGE_CLIENT is None or _CACHED_CLIENT_FACTORY is not storage.Client:
-    _CACHED_STORAGE_CLIENT = storage.Client()
-    _CACHED_CLIENT_FACTORY = storage.Client
-  if (
-      _CACHED_SIGNING_CREDENTIALS is None
-      or _CACHED_SIGNING_CREDENTIALS.expired
-      or _CACHED_AUTH_FACTORY is not default
-  ):
-    auth_request = transport_requests.Request()
-    cred, _ = default()
-    cred.refresh(auth_request)  # pyright: ignore[reportAttributeAccessIssue]
-    _CACHED_SIGNING_CREDENTIALS = compute_engine.IDTokenCredentials(
-        auth_request, '', service_account_email=cred.service_account_email  # pyright: ignore[reportAttributeAccessIssue], pylint: disable=linetoolong
-    )
-    _CACHED_AUTH_FACTORY = default
-  return _CACHED_STORAGE_CLIENT, _CACHED_SIGNING_CREDENTIALS
+  with _SIGNING_CONTEXT_LOCK:
+    if _CACHED_STORAGE_CLIENT is None or _CACHED_CLIENT_FACTORY is not storage.Client:
+      _CACHED_STORAGE_CLIENT = storage.Client()
+      _CACHED_CLIENT_FACTORY = storage.Client
+    if (
+        _CACHED_SIGNING_CREDENTIALS is None
+        or _CACHED_SIGNING_CREDENTIALS.expired
+        or _CACHED_AUTH_FACTORY is not default
+    ):
+      auth_request = transport_requests.Request()
+      cred, _ = default()
+      cred.refresh(auth_request)  # pyright: ignore[reportAttributeAccessIssue]
+      signer = iam.Signer(
+          auth_request,
+          cred,
+          cred.service_account_email,  # pyright: ignore[reportAttributeAccessIssue]
+      )
+      signing_creds = compute_engine.IDTokenCredentials(
+          auth_request,
+          '',
+          service_account_email=cred.service_account_email,  # pyright: ignore[reportAttributeAccessIssue]
+          signer=signer,
+      )
+      if isinstance(getattr(cred, 'expiry', None), datetime.datetime):
+        signing_creds.expiry = cred.expiry
+      _CACHED_SIGNING_CREDENTIALS = signing_creds
+      _CACHED_AUTH_FACTORY = default
+    return _CACHED_STORAGE_CLIENT, _CACHED_SIGNING_CREDENTIALS
 
 
 def get_signed_url(

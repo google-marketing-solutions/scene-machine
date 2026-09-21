@@ -124,20 +124,28 @@ def _validate_task_instance_url(instance: str) -> str:
   """
   if not isinstance(instance, str) or not instance:
     raise ValueError('Instance URL must be a non-empty string')
-  if '@' in instance or '?' in instance or '#' in instance:
-    raise ValueError('Instance URL must not contain userinfo, query, or fragment')
+  if (
+      instance != instance.strip()
+      or any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in instance)
+      or any(ch in instance for ch in ('@', '?', '#', ';'))
+  ):
+    raise ValueError(
+        'Instance URL must not contain whitespace, control characters,'
+        ' userinfo, params, query, or fragment'
+    )
 
   parsed = urllib.parse.urlparse(instance)
   if parsed.scheme not in ('http', 'https'):
     raise ValueError(f'Invalid instance URL scheme: {parsed.scheme}')
-  if parsed.path not in ('', '/'):
-    raise ValueError(f'Instance URL must not have a path: {parsed.path}')
+  if parsed.path not in ('', '/') or parsed.params:
+    raise ValueError(f'Instance URL must not have a path or params: {parsed.path}')
   if not parsed.netloc or not _VALID_HOST_RE.fullmatch(parsed.netloc):
     raise ValueError(f'Invalid instance URL host: {parsed.netloc}')
 
+  normalized = f'{parsed.scheme}://{parsed.netloc}'
   configured_worker_url = os.environ.get('WORKER_URL')
   if configured_worker_url:
-    if instance.rstrip('/') != configured_worker_url.rstrip('/'):
+    if normalized != configured_worker_url.rstrip('/'):
       raise ValueError(
           f'Instance URL "{instance}" does not match configured WORKER_URL'
           f' "{configured_worker_url}"'
@@ -152,7 +160,7 @@ def _validate_task_instance_url(instance: str) -> str:
           f'Instance URL hostname "{hostname}" must end with .run.app or be localhost'
       )
 
-  return instance.rstrip('/')
+  return normalized
 
 
 def supply_node(

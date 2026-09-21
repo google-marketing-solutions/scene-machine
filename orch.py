@@ -652,8 +652,12 @@ def get_status_handler() -> flask_response:
   # is the server's own configured bucket, matching the other mediated handlers.
   gcs_bucket_name = config.get('gcsBucket')
   sign_urls = flask_request.args.get(Key.SIGN_URLS.value) == 'true'
-  if not execution_id or not submission_validation._is_firestore_segment(
-      execution_id, max_bytes=submission_validation._MAX_FIRESTORE_SEGMENT_BYTES
+  if (
+      not execution_id
+      or execution_id == 'cloudTasks'
+      or not submission_validation._is_firestore_segment(
+          execution_id, max_bytes=submission_validation._MAX_FIRESTORE_SEGMENT_BYTES
+      )
   ):
     return flask_response(
         json.dumps({'error': 'Incomplete parameters for status request'}),

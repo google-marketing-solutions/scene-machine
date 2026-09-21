@@ -27,7 +27,7 @@ from common import logger
 FFMPEG_PATH = 'ffmpeg'
 FFPROBE_PATH = 'ffprobe'
 
-_RESOLUTION_RE = re.compile(r'^\d{2,5}:\d{2,5}$')
+_RESOLUTION_RE = re.compile(r'^[1-9][0-9]{1,4}:[1-9][0-9]{1,4}$')
 _EXTENSION_RE = re.compile(r'^[a-zA-Z0-9]{1,10}$')
 _XFADE_TRANSITIONS = frozenset({
     'fade',
