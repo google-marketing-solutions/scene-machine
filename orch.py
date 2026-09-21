@@ -1399,7 +1399,9 @@ def project_detail_handler(
 
   The default PATCH is the faithful port of the UI's whole-document autosave:
   a full set() with createdBy stripped from the payload (immutable; the stored
-  owner is preserved) and lastEdited refreshed server-side. PATCH
+  owner is preserved) and lastEdited refreshed server-side. An omitted
+  storyboard preserves scenes; other omitted mutable root fields are removed.
+  PATCH
   ?view=editor is the legacy form of the explicit editor exception. The
   dedicated PATCH /api/projects/<id>/editor route is the preferred form; both
   use field updates so the omitted Setup inputConfig cannot be overwritten by

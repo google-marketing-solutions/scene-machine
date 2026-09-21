@@ -251,7 +251,9 @@ Editor saves without inputs use `PATCH /api/projects/:id/editor`. Its root
 field updates leave stored `inputConfig` untouched, including a concurrent
 Setup update. Do not copy an earlier Setup snapshot into a replacement write.
 Full GET/PATCH remains the Setup and legacy detail contract; full PATCH keeps
-its replacement semantics. All editor candidates remain available for counts,
+its replacement semantics, except that an omitted `storyboard` leaves stored
+scenes unchanged. Other omitted root fields, including `inputConfig`, are removed.
+All editor candidates remain available for counts,
 selection, generation and composition.
 
 The dedicated editor PATCH path is also a rollback safety boundary: a

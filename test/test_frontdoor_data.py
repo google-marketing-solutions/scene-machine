@@ -1686,6 +1686,7 @@ def test_project_patch_omitting_storyboard_leaves_scenes_intact(
           json={
               'id': project_id,
               'name': 'Original',
+              'inputConfig': {'productDescription': 'Keep for editor saves'},
               'storyboard': [{'d': '0'}, {'d': '1'}, {'d': '2'}],
           },
       ).status_code
@@ -1705,6 +1706,14 @@ def test_project_patch_omitting_storyboard_leaves_scenes_intact(
   body = client.get(f'/api/projects/{project_id}').get_json()
   assert body['name'] == 'Renamed'
   assert [s['d'] for s in body['storyboard']] == ['0', '1', '2']
+
+  if path_template == '/api/projects/{id}':
+    # Full PATCH replaces root fields; only an omitted storyboard is preserved.
+    assert 'inputConfig' not in body
+  else:
+    assert body['inputConfig'] == {
+        'productDescription': 'Keep for editor saves'
+    }
 
 
 @pytest.mark.parametrize(
