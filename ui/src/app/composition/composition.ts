@@ -387,6 +387,7 @@ export class Composition {
     } catch (error: unknown) {
       if (this.isCurrentSource(epoch, key)) {
         console.error(`Failed to resolve video src for ${ref.path}`, error);
+        this.setResolvedSource(epoch, key, null);
       }
     }
   }

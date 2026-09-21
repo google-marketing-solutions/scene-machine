@@ -838,6 +838,98 @@ describe('CompositionComponent', () => {
       expect(component.currentPlaylistIndex()).toBe(1);
     });
 
+    it('clears the resolved source to null and releases retiring lease when resolve fails', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const releaseClip1 = vi.fn();
+      mockCandidateVideoCache.acquireCached.mockImplementation(
+        (_scope: unknown, file: {path?: string}) =>
+          file.path === 'videos/clip1.mp4'
+            ? Promise.resolve({url: 'blob:cached-clip1', release: releaseClip1})
+            : Promise.resolve(null),
+      );
+      mockMediaService.getCachedUrl.mockReturnValue('https://signed/warm-url');
+      let rejectClip2!: (error: unknown) => void;
+      mockMediaService.resolve.mockImplementation(
+        () =>
+          new Promise<string>((_, reject) => {
+            rejectClip2 = reject;
+          }),
+      );
+
+      loadTwoClipStoryboard();
+      await vi.waitFor(() =>
+        expect(component.heldVideoSrc()).toBe('blob:cached-clip1'),
+      );
+
+      seekTo(12);
+
+      expect(component.currentPlaylistIndex()).toBe(1);
+      await vi.waitFor(() =>
+        expect(mockMediaService.resolve).toHaveBeenCalledWith(
+          expect.objectContaining({path: 'videos/clip2.mp4'}),
+        ),
+      );
+
+      expect(component.heldVideoSrc()).toBe('blob:cached-clip1');
+      rejectClip2(new Error('Resolution failed'));
+
+      await vi.waitFor(() => {
+        expect(component.heldVideoSrc()).toBeNull();
+      });
+      fixture.detectChanges();
+      const video = fixture.nativeElement.querySelector(
+        '.preview-video',
+      ) as HTMLVideoElement;
+      expect(video.src).not.toContain('blob:cached-clip1');
+      expect(component.currentClipSourceReady()).toBe(false);
+      expect(releaseClip1).toHaveBeenCalled();
+    });
+
+    it('binds the resolved URL and releases retiring lease when resolve succeeds (control)', async () => {
+      const releaseClip1 = vi.fn();
+      mockCandidateVideoCache.acquireCached.mockImplementation(
+        (_scope: unknown, file: {path?: string}) =>
+          file.path === 'videos/clip1.mp4'
+            ? Promise.resolve({url: 'blob:cached-clip1', release: releaseClip1})
+            : Promise.resolve(null),
+      );
+      mockMediaService.getCachedUrl.mockReturnValue('https://signed/warm-url');
+      let resolveClip2!: (url: string) => void;
+      mockMediaService.resolve.mockImplementation(
+        () =>
+          new Promise<string>(resolve => {
+            resolveClip2 = resolve;
+          }),
+      );
+
+      loadTwoClipStoryboard();
+      await vi.waitFor(() =>
+        expect(component.heldVideoSrc()).toBe('blob:cached-clip1'),
+      );
+
+      seekTo(12);
+
+      expect(component.currentPlaylistIndex()).toBe(1);
+      await vi.waitFor(() =>
+        expect(mockMediaService.resolve).toHaveBeenCalledWith(
+          expect.objectContaining({path: 'videos/clip2.mp4'}),
+        ),
+      );
+
+      resolveClip2('https://signed/clip2');
+
+      await vi.waitFor(() => {
+        expect(component.heldVideoSrc()).toBe('https://signed/clip2');
+      });
+      fixture.detectChanges();
+      const video = fixture.nativeElement.querySelector(
+        '.preview-video',
+      ) as HTMLVideoElement;
+      expect(video.src).toContain('https://signed/clip2');
+      expect(component.currentClipSourceReady()).toBe(true);
+      expect(releaseClip1).toHaveBeenCalled();
+    });
+
     it('becomes ready after a cache-miss resolve so an audio-enabled clip unmutes', async () => {
       mockCandidateVideoCache.acquireCached.mockImplementation(
         (_scope: unknown, file: {path?: string}) =>

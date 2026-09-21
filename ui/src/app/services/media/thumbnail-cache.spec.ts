@@ -335,7 +335,7 @@ describe.sequential('MediaCacheEngine thumbnail policy', () => {
     second.release();
   });
 
-  it('falls back to the direct URL when Cache Storage is unavailable or quota rejects a write', async () => {
+  it('falls back to the direct URL when Cache Storage is unavailable and retains blob when quota rejects a write', async () => {
     fetchMock.mockResolvedValue(response(new Uint8Array([1])));
     vi.stubGlobal('caches', {
       open: vi.fn().mockRejectedValue(new Error('unavailable')),
@@ -349,7 +349,7 @@ describe.sequential('MediaCacheEngine thumbnail policy', () => {
     const quota = await createService().acquire(scope, {
       path: 'thumbnails/quota.webp',
     });
-    expect(quota.url).toBe('https://signed.example/a.webp');
+    expect(quota.url).toBe('blob:thumbnail');
     quota.release();
   });
 

@@ -808,24 +808,6 @@ describe('CandidateVideoCacheService', () => {
     lease.release();
   });
 
-  it('falls back to the signed URL when Cache Storage rejects a write', async () => {
-    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
-    fetchMock.mockResolvedValue(
-      new Response(new Uint8Array([1]), {status: 200}),
-    );
-    vi.spyOn(cache, 'put').mockRejectedValue(new Error('quota exceeded'));
-
-    const lease = await service.acquire(
-      {bucket: 'bucket-a', projectId: 'project-a'},
-      {path: 'videos/a.mp4'},
-      true,
-    );
-
-    expect(lease.url).toBe('https://signed.example/a.mp4');
-    expect(cache.values.size).toBe(0);
-    lease.release();
-  });
-
   it('does not repopulate a candidate after invalidation races its download', async () => {
     let resolveFetch!: (response: Response) => void;
     fetchMock.mockReturnValue(
@@ -945,5 +927,72 @@ describe('CandidateVideoCacheService', () => {
     expect(cache.values.size).toBe(1);
     expect([...cache.values.keys()][0]).toContain('/project-b/');
     leases.forEach(lease => lease.release());
+  });
+
+  it('returns the downloaded blob lease and does not re-fetch when cache.put throws', async () => {
+    vi.spyOn(cache, 'put').mockRejectedValue(new Error('QuotaExceededError'));
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
+    fetchMock.mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: {'content-type': 'video/mp4'},
+      }),
+    );
+
+    const scope = {bucket: 'bucket-a', projectId: 'project-a'};
+    const file = {path: 'videos/a.mp4'};
+    const lease = await service.acquire(scope, file, true);
+
+    expect(lease.url).toBe('blob:lease');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(cache.values.size).toBe(0);
+    lease.release();
+  });
+
+  it('returns the downloaded blob lease and does not re-fetch when enqueueMutation throws', async () => {
+    vi.stubGlobal('navigator', {
+      locks: {
+        request: vi
+          .fn()
+          .mockRejectedValue(new Error('Lock acquisition failed')),
+      },
+    });
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
+    fetchMock.mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: {'content-type': 'video/mp4'},
+      }),
+    );
+
+    const scope = {bucket: 'bucket-a', projectId: 'project-a'};
+    const file = {path: 'videos/a.mp4'};
+    const lease = await service.acquire(scope, file, true);
+
+    expect(lease.url).toBe('blob:lease');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    lease.release();
+  });
+
+  it('stores the entry and returns the downloaded blob lease when cache write succeeds (control)', async () => {
+    mediaServiceMock.resolve.mockResolvedValue('https://signed.example/a.mp4');
+    fetchMock.mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), {
+        status: 200,
+        headers: {'content-type': 'video/mp4'},
+      }),
+    );
+
+    const scope = {bucket: 'bucket-a', projectId: 'project-a'};
+    const file = {path: 'videos/a.mp4'};
+    const lease = await service.acquire(scope, file, true);
+
+    expect(lease.url).toBe('blob:lease');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(cache.values.size).toBe(1);
+    lease.release();
   });
 });
