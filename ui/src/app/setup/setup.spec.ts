@@ -123,6 +123,52 @@ describe('Setup full-load failure', () => {
       fixture.nativeElement.querySelector('.setup-container'),
     ).not.toBeNull();
   });
+
+  it('does not synthesize blank inputConfig or issue full PATCH on 404 with unsettled save', async () => {
+    (
+      config as unknown as {persistedProjectIds: Set<string>}
+    ).persistedProjectIds.add('proj-unsettled');
+
+    config.loadProjectConfig('proj-unsettled', 'editor');
+    TestBed.tick();
+    const editorReq = http.expectOne(
+      '/api/projects/proj-unsettled?view=editor',
+    );
+    editorReq.flush({
+      id: 'proj-unsettled',
+      name: 'Editor Project',
+      aspectRatio: '16:9',
+      resolution: '720p',
+      candidateDurationSeconds: 4,
+      generateAudio: false,
+      numberOfCandidates: 1,
+      model: 'veo-default',
+      inputConfig: undefined,
+      storyboard: [],
+      audioTracks: [],
+      visualOverlays: [],
+    });
+    TestBed.tick();
+    await fixture.whenStable();
+
+    config.updateProjectConfig({name: 'In-Flight'});
+    config.saveNow();
+    const inFlightPatch = http.expectOne('/api/projects/proj-unsettled/editor');
+
+    config.loadProjectConfig('proj-unsettled', 'full');
+    TestBed.tick();
+    const fullGet = http.expectOne('/api/projects/proj-unsettled');
+    fullGet.flush('Not found', {status: 404, statusText: 'Not Found'});
+    TestBed.tick();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(config.setupInputsLoaded()).toBe(false);
+    expect(config.projectConfig.value().inputConfig).toBeUndefined();
+    http.expectNone('/api/projects/proj-unsettled');
+
+    inFlightPatch.flush({});
+  });
 });
 
 describe('Setup image upload', () => {
