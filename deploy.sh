@@ -304,19 +304,29 @@ if ! [[ "$APP_MIN_INSTANCES" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 if [ -z "${DICTATION_ENABLED:-}" ]; then
-  # Read live value from the deployed app service, if it exists, to preserve
-  # explicit disabled states (0) across redeploys that omit the flag.
-  LIVE_DICTATION=$(gcloud run services describe app \
+  # When DICTATION_ENABLED is omitted in config.txt, preserve live deployed
+  # setting (0 or 1). Only fall back to default 1 on first deploy (service absent).
+  if ! APP_EXISTS=$(gcloud run services list \
     --region="$REGION" --project="$PROJECT" \
-    --format='value(spec.template.spec.containers[0].env)' 2>/dev/null \
-    | python3 -c '
-import re, sys
-m = re.search(r"[\x27\"]?DICTATION_ENABLED[\x27\"]?\s*[,:]\s*[\x27\"]?value[\x27\"]?\s*[:=]\s*[\x27\"]?([01])[\x27\"]?", sys.stdin.read())
-if m:
-    print(m.group(1))
-' 2>/dev/null || true)
-  if [ -n "$LIVE_DICTATION" ]; then
-    DICTATION_ENABLED="$LIVE_DICTATION"
+    --filter="metadata.name=app" \
+    --format="value(metadata.name)"); then
+    echo "ERROR: Failed to query Cloud Run services in ${PROJECT}/${REGION}." >&2
+    echo "       Set DICTATION_ENABLED explicitly in config.txt or check gcloud credentials." >&2
+    echo "Validation failed. Please fix config.txt and try again." >&2
+    exit 1
+  fi
+  if [ -n "$APP_EXISTS" ]; then
+    if ! LIVE_DICTATION=$(gcloud run services describe app \
+      --region="$REGION" --project="$PROJECT" \
+      --format='value(spec.template.spec.containers[0].env.filter(name=DICTATION_ENABLED).extract(value).flatten())'); then
+      echo "ERROR: Failed to read environment from existing 'app' service in ${PROJECT}/${REGION}." >&2
+      echo "       Set DICTATION_ENABLED explicitly in config.txt or check gcloud credentials." >&2
+      echo "Validation failed. Please fix config.txt and try again." >&2
+      exit 1
+    fi
+    if [ -n "$LIVE_DICTATION" ]; then
+      DICTATION_ENABLED="$LIVE_DICTATION"
+    fi
   fi
 fi
 DICTATION_ENABLED="${DICTATION_ENABLED:-1}"

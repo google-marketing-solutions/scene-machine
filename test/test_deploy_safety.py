@@ -466,3 +466,136 @@ def test_announcement_seed_is_not_enabled_on_worker():
       'gcloud run deploy app', 1
   )[0]
   assert 'ANNOUNCEMENT' not in worker_block
+
+
+@pytest.mark.parametrize(
+    "config_val, mock_responses, expected_rc, expected_val, expected_err",
+    [
+        # Config value wins over live value (both 1 over live 0, and 0 over live 1)
+        ("1", {"list": "app", "describe": "0"}, 0, "1", ""),
+        ("0", {"list": "app", "describe": "1"}, 0, "0", ""),
+        # Live 0 is preserved when config omits the flag
+        (None, {"list": "app", "describe": "0"}, 0, "0", ""),
+        # Live 1 is preserved when config omits the flag
+        (None, {"list": "app", "describe": "1"}, 0, "1", ""),
+        # Service-absent (first deploy) falls back to 1
+        (None, {"list": "", "describe": None}, 0, "1", ""),
+        # Existing service with no DICTATION_ENABLED env var falls back to 1
+        (None, {"list": "app", "describe": ""}, 0, "1", ""),
+        # Describe-failure aborts rather than defaulting
+        (
+            None,
+            {"list": "app", "describe_fail": True},
+            1,
+            None,
+            "Failed to read environment from existing 'app' service",
+        ),
+        # List-failure aborts rather than defaulting
+        (
+            None,
+            {"list_fail": True},
+            1,
+            None,
+            "Failed to query Cloud Run services",
+        ),
+    ],
+)
+def test_dictation_env_preservation_precedence_and_failure_modes(
+    config_val, mock_responses, expected_rc, expected_val, expected_err
+):
+  """Verify live dictation preservation, precedence, and fail-closed behavior."""
+  text = _deploy_sh()
+  match = re.search(
+      r"(?ms)^(if \[ -z \"\$\{DICTATION_ENABLED:-\}\" \]; then\n"
+      r".*?\n"
+      r"DICTATION_ENABLED=\"\$\{DICTATION_ENABLED:-1\}\"\n"
+      r"if \[\[.*?^fi)$",
+      text,
+  )
+  assert match, "DICTATION_ENABLED preservation and validation block not found"
+  block = match.group(1)
+
+  mock_parts = ["gcloud() {"]
+  if mock_responses.get("list_fail"):
+    mock_parts.append(
+        "  if [ \"$1\" = \"run\" ] && [ \"$2\" = \"services\" ] && [ \"$3\" = \"list\" ]; then return 1; fi"
+    )
+  elif "list" in mock_responses:
+    mock_parts.append(
+        f"  if [ \"$1\" = \"run\" ] && [ \"$2\" = \"services\" ] && [ \"$3\" = \"list\" ]; then echo \"{mock_responses['list']}\"; return 0; fi"
+    )
+
+  if mock_responses.get("describe_fail"):
+    mock_parts.append(
+        "  if [ \"$1\" = \"run\" ] && [ \"$2\" = \"services\" ] && [ \"$3\" = \"describe\" ]; then return 1; fi"
+    )
+  elif "describe" in mock_responses and mock_responses["describe"] is not None:
+    mock_parts.append(
+        f"  if [ \"$1\" = \"run\" ] && [ \"$2\" = \"services\" ] && [ \"$3\" = \"describe\" ]; then echo \"{mock_responses['describe']}\"; return 0; fi"
+    )
+
+  mock_parts.append("  return 1\n}")
+  mock_func = "\n".join(mock_parts)
+
+  script = f"""{mock_func}
+{block}
+printf "%s\\n" "$DICTATION_ENABLED"
+"""
+  environment = os.environ.copy()
+  environment["REGION"] = "us-central1"
+  environment["PROJECT"] = "test-project"
+  environment.pop("DICTATION_ENABLED", None)
+  if config_val is not None:
+    environment["DICTATION_ENABLED"] = config_val
+
+  result = subprocess.run(
+      ["bash", "-c", script],
+      env=environment,
+      capture_output=True,
+      text=True,
+      check=False,
+  )
+  assert result.returncode == expected_rc
+  if expected_val is not None:
+    assert result.stdout.strip() == expected_val
+  if expected_err:
+    assert expected_err in result.stderr
+
+
+@pytest.mark.parametrize(
+    "line, expected_match",
+    [
+        ("PROJECT=my-project", True),
+        ("export PROJECT=my-project", True),
+        ("PROJECT=\"my-project\"", True),
+        ("export PROJECT=\"my-project\"", True),
+        ("export GCS_BUCKET=\"${PROJECT}-scene-machine\"", True),
+        ("export GCS_BUCKET=${PROJECT}-scene-machine", True),
+        ("PROJECT=", False),
+        ("export PROJECT=", False),
+        ("PROJECT=\"\"", False),
+        ("export PROJECT=\"\"", False),
+        ("PROJECT='my-project'", False),
+        ("export PROJECT='my-project'", False),
+    ],
+)
+def test_config_validation_regex_accepts_quoted_and_rejects_empty(
+    line, expected_match
+):
+  """Preflight regex accepts double-quoted config values but rejects empty."""
+  text = _deploy_sh()
+  match = re.search(
+      r'grep -qE "\^\(export \)\?\$\{var\}=\((.*?)\)" \./config\.txt',
+      text,
+  )
+  assert match, "Config validation grep regex not found in deploy.sh"
+  pattern = match.group(1).replace(r"\"", "\"")
+  var = "GCS_BUCKET" if "GCS_BUCKET" in line else "PROJECT"
+  full_regex = f"^(export )?{var}=({pattern})"
+  proc = subprocess.run(
+      ["grep", "-qE", full_regex],
+      input=line,
+      text=True,
+      check=False,
+  )
+  assert (proc.returncode == 0) == expected_match
