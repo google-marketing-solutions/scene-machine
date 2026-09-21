@@ -472,23 +472,69 @@ def test_announcement_seed_is_not_enabled_on_worker():
     "config_val, mock_responses, expected_rc, expected_val, expected_err",
     [
         # Config value wins over live value (both 1 over live 0, and 0 over live 1)
-        ("1", {"list": "app", "describe": "0"}, 0, "1", ""),
-        ("0", {"list": "app", "describe": "1"}, 0, "0", ""),
+        (
+            "1",
+            {"list": "app", "full_env": "ROLE,DICTATION_ENABLED", "describe": "0"},
+            0,
+            "1",
+            "",
+        ),
+        (
+            "0",
+            {"list": "app", "full_env": "ROLE,DICTATION_ENABLED", "describe": "1"},
+            0,
+            "0",
+            "",
+        ),
         # Live 0 is preserved when config omits the flag
-        (None, {"list": "app", "describe": "0"}, 0, "0", ""),
-        # Live 1 is preserved when config omits the flag
-        (None, {"list": "app", "describe": "1"}, 0, "1", ""),
-        # Service-absent (first deploy) falls back to 1
-        (None, {"list": "", "describe": None}, 0, "1", ""),
-        # Existing service with no DICTATION_ENABLED env var falls back to 1
-        (None, {"list": "app", "describe": ""}, 0, "1", ""),
-        # Describe-failure aborts rather than defaulting
         (
             None,
-            {"list": "app", "describe_fail": True},
+            {"list": "app", "full_env": "ROLE,DICTATION_ENABLED", "describe": "0"},
+            0,
+            "0",
+            "",
+        ),
+        # Live 1 is preserved when config omits the flag
+        (
+            None,
+            {"list": "app", "full_env": "ROLE,DICTATION_ENABLED", "describe": "1"},
+            0,
+            "1",
+            "",
+        ),
+        # Service-absent (first deploy) falls back to 1
+        (None, {"list": ""}, 0, "1", ""),
+        # Full-env non-empty but no DICTATION_ENABLED falls back to 1
+        (
+            None,
+            {"list": "app", "full_env": "ROLE,AUTH_MODE", "describe": ""},
+            0,
+            "1",
+            "",
+        ),
+        # Full-env extraction returns empty -> abort, non-zero exit, actionable stderr
+        (
+            None,
+            {"list": "app", "full_env": "", "describe": ""},
+            1,
+            None,
+            "Could not extract environment from existing 'app' service",
+        ),
+        # Full-env describe-failure aborts rather than defaulting
+        (
+            None,
+            {"list": "app", "full_env_fail": True},
             1,
             None,
             "Failed to read environment from existing 'app' service",
+        ),
+        # Dictation describe-failure aborts rather than defaulting
+        (
+            None,
+            {"list": "app", "full_env": "ROLE,AUTH_MODE", "describe_fail": True},
+            1,
+            None,
+            "Failed to read DICTATION_ENABLED from existing 'app' service",
         ),
         # List-failure aborts rather than defaulting
         (
@@ -525,15 +571,22 @@ def test_dictation_env_preservation_precedence_and_failure_modes(
         f"  if [ \"$1\" = \"run\" ] && [ \"$2\" = \"services\" ] && [ \"$3\" = \"list\" ]; then echo \"{mock_responses['list']}\"; return 0; fi"
     )
 
-  if mock_responses.get("describe_fail"):
-    mock_parts.append(
-        "  if [ \"$1\" = \"run\" ] && [ \"$2\" = \"services\" ] && [ \"$3\" = \"describe\" ]; then return 1; fi"
-    )
-  elif "describe" in mock_responses and mock_responses["describe"] is not None:
-    mock_parts.append(
-        f"  if [ \"$1\" = \"run\" ] && [ \"$2\" = \"services\" ] && [ \"$3\" = \"describe\" ]; then echo \"{mock_responses['describe']}\"; return 0; fi"
-    )
+  mock_parts.append('  if [ "$1" = "run" ] && [ "$2" = "services" ] && [ "$3" = "describe" ]; then')
+  mock_parts.append('    case "$*" in')
+  if mock_responses.get("full_env_fail"):
+    mock_parts.append('      *"extract(name)"*) return 1 ;;')
+  else:
+    full_env_val = mock_responses.get("full_env", "ROLE,AUTH_MODE")
+    mock_parts.append(f'      *"extract(name)"*) echo "{full_env_val}"; return 0 ;;')
 
+  if mock_responses.get("describe_fail"):
+    mock_parts.append('      *"filter(name=DICTATION_ENABLED)"*) return 1 ;;')
+  else:
+    desc_val = mock_responses.get("describe", "")
+    mock_parts.append(f'      *"filter(name=DICTATION_ENABLED)"*) echo "{desc_val}"; return 0 ;;')
+
+  mock_parts.append('    esac')
+  mock_parts.append('  fi')
   mock_parts.append("  return 1\n}")
   mock_func = "\n".join(mock_parts)
 

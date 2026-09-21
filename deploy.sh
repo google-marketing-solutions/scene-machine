@@ -316,10 +316,26 @@ if [ -z "${DICTATION_ENABLED:-}" ]; then
     exit 1
   fi
   if [ -n "$APP_EXISTS" ]; then
+    # Sanity check: the deployed app service always has env vars (e.g. ROLE, AUTH_MODE).
+    # If the env list is empty, format extraction is broken; fail closed.
+    if ! LIVE_ENV_VARS=$(gcloud run services describe app \
+      --region="$REGION" --project="$PROJECT" \
+      --format='value(spec.template.spec.containers[0].env.extract(name).flatten())'); then
+      echo "ERROR: Failed to read environment from existing 'app' service in ${PROJECT}/${REGION}." >&2
+      echo "       Set DICTATION_ENABLED explicitly in config.txt or check gcloud credentials." >&2
+      echo "Validation failed. Please fix config.txt and try again." >&2
+      exit 1
+    fi
+    if [ -z "$LIVE_ENV_VARS" ]; then
+      echo "ERROR: Could not extract environment from existing 'app' service in ${PROJECT}/${REGION}." >&2
+      echo "       Field path or formatting may be unsupported. Set DICTATION_ENABLED explicitly in config.txt." >&2
+      echo "Validation failed. Please fix config.txt and try again." >&2
+      exit 1
+    fi
     if ! LIVE_DICTATION=$(gcloud run services describe app \
       --region="$REGION" --project="$PROJECT" \
       --format='value(spec.template.spec.containers[0].env.filter(name=DICTATION_ENABLED).extract(value).flatten())'); then
-      echo "ERROR: Failed to read environment from existing 'app' service in ${PROJECT}/${REGION}." >&2
+      echo "ERROR: Failed to read DICTATION_ENABLED from existing 'app' service in ${PROJECT}/${REGION}." >&2
       echo "       Set DICTATION_ENABLED explicitly in config.txt or check gcloud credentials." >&2
       echo "Validation failed. Please fix config.txt and try again." >&2
       exit 1
