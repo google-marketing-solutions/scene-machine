@@ -564,6 +564,26 @@ def test_announcement_seed_is_not_enabled_on_worker():
             None,
             "Failed to query Cloud Run services",
         ),
+        # Prefix/substring service names (e.g. my-app) do not match exact 'app'
+        (
+            None,
+            {"list": "my-app\nscene-machine-app", "full_env_fail": True},
+            0,
+            "1",
+            "",
+        ),
+        # Invalid live DICTATION_ENABLED value on existing service aborts
+        (
+            None,
+            {
+                "list": "app",
+                "full_env": "ROLE,DICTATION_ENABLED",
+                "describe": "invalid",
+            },
+            1,
+            None,
+            "DICTATION_ENABLED must be 0 or 1",
+        ),
     ],
 )
 def test_dictation_env_preservation_precedence_and_failure_modes(
@@ -663,12 +683,15 @@ def test_first_deploy_dictation_probe_runs_after_api_enablement(tmp_path):
       '# Warm up Vertex AI service agent.', enable_call
   )]
   script = f'''\
+set -euo pipefail
 gcloud() {{
-  if [ "$1" = services ] && [ "$2" = list ]; then
+  if [ "${{1:-}}" = services ] && [ "${{2:-}}" = list ]; then
     printf '%s\\n' "$ENABLED_APIS"
-  elif [ "$1" = services ] && [ "$2" = enable ]; then
+  elif [ "${{1:-}}" = services ] && [ "${{2:-}}" = enable ] && \
+      [[ " $* " == *" run.googleapis.com "* ]]; then
     printf 'services-enable\\n' >> "$TRACE_FILE"
-  elif [ "$1" = run ] && [ "$2" = services ] && [ "$3" = list ]; then
+  elif [ "${{1:-}}" = run ] && [ "${{2:-}}" = services ] && \
+      [ "${{3:-}}" = list ]; then
     printf 'run-list\\n' >> "$TRACE_FILE"
   else
     printf 'unexpected gcloud call: %s\\n' "$*" >&2
@@ -678,7 +701,6 @@ gcloud() {{
 phase() {{ :; }}
 PROJECT=test-project
 REGION=us-central1
-REQUIRED_APIS="run.googleapis.com"
 ENABLED_APIS=
 {enable_block}
 printf 'value=%s\\n' "$DICTATION_ENABLED"
@@ -710,6 +732,10 @@ printf 'value=%s\\n' "$DICTATION_ENABLED"
         ("export PROJECT=\"my-project\"", True),
         ("REGION=\"us central1\"", False),
         ("export REGION=\"us central1\"", False),
+        ("export REGION=us central1", False),
+        ("export PROJECT=\"my-project\" extra", False),
+        ("export PROJECT=\"<YOUR_PROJECT_ID>\"", False),
+        ("export REGION=us-central1 # inline comment", True),
         ("export GCS_BUCKET=\"${PROJECT}-scene-machine\"", True),
         ("export GCS_BUCKET=${PROJECT}-scene-machine", True),
         ("PROJECT=", False),

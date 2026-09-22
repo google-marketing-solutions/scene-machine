@@ -264,7 +264,7 @@ REQUIRED_VARS=(
 )
 MISSING=0
 for var in "${REQUIRED_VARS[@]}"; do
-  if ! grep -qE "^(export )?${var}=(\"[^\"[:space:]]+\"|[A-Za-z0-9._\$-]+)" ./config.txt; then
+  if ! grep -qE "^(export )?${var}=((\"[A-Za-z0-9._${}-]+\"|[A-Za-z0-9._${}-]+)([[:space:]]*(#.*)?)?$)" ./config.txt; then
     echo "ERROR: $var is missing, empty, or has invalid characters in config.txt (use double quotes if quoting)" >&2
     MISSING=$((MISSING + 1))
   fi
@@ -465,7 +465,7 @@ if [ -z "${DICTATION_ENABLED:-}" ]; then
     echo "Validation failed. Please fix config.txt and try again." >&2
     exit 1
   fi
-  if [ -n "$APP_EXISTS" ]; then
+  if printf '%s\n' "$APP_EXISTS" | grep -Fxq "app"; then
     # Sanity check: the deployed app service always has env vars (e.g. ROLE, AUTH_MODE).
     # If the env list is empty, format extraction is broken; fail closed.
     if ! LIVE_ENV_VARS=$(gcloud run services describe app \
