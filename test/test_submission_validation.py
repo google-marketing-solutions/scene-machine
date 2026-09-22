@@ -1120,14 +1120,14 @@ def test_input_files_allows_safe_relative_and_gs_paths():
 # --- SM-11: fail closed on missing required params, duration caps, audio bool --
 
 _FULL_VALID_VIDEO = {
-    'video_variant_quantity': 1,
-    'aspect_ratio': '16:9',
-    'duration_seconds': 8,
-    'gcp_project': '',
-    'gcp_location': 'global',
-    'model': 'veo-3.1-generate-001',
-    'generate_audio': False,
-    'resolution': '720p',
+  'video_variant_quantity': 1,
+  'aspect_ratio': '16:9',
+  'duration_seconds': 8,
+  'gcp_project': '',
+  'gcp_location': 'global',
+  'model': 'veo-3.1-generate-001',
+  'generate_audio': False,
+  'resolution': '720p',
 }
 
 
@@ -1161,4 +1161,10 @@ def test_non_bool_generate_audio_rejected(bad_audio):
 @pytest.mark.parametrize('good_audio', (True, False))
 def test_bool_generate_audio_passes(good_audio):
   params = {**_FULL_VALID_VIDEO, 'generate_audio': good_audio}
+  assert validate_submission(_sub('generate_video', params)) is None
+
+
+def test_duration_within_union_passes_when_resolution_omitted():
+  params = {k: v for k, v in _FULL_VALID_VIDEO.items() if k != 'resolution'}
+  params['duration_seconds'] = 4
   assert validate_submission(_sub('generate_video', params)) is None

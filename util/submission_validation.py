@@ -245,14 +245,6 @@ def _capability_violation(
               'DURATION_NOT_ALLOWED',
           )
 
-  if 'generate_audio' in params:
-    for value in _as_values(params['generate_audio']):
-      if not isinstance(value, bool):
-        return (
-            f'Node {node_id!r}: {action} generate_audio must be a boolean',
-            'MALFORMED_SUBMISSION',
-        )
-
   if caps.get('audio_always_on') is True and 'generate_audio' in action_params:
     if 'generate_audio' not in params:
       return (
@@ -594,6 +586,13 @@ def validate_submission(
       continue  # only model-parameterized actions get the model/location checks
 
     action_params = _action_params(action, actions_json)
+    if 'generate_audio' in params:
+      for value in _as_values(params['generate_audio']):
+        if not isinstance(value, bool):
+          return (
+              f'Node {node_id!r}: {action} generate_audio must be a boolean',
+              'MALFORMED_SUBMISSION',
+          )
     model_param = _model_param_name(action, actions_json)
     model_value = params.get(model_param) if model_param else None
     model_list = model_value if isinstance(model_value, list) else [model_value]
