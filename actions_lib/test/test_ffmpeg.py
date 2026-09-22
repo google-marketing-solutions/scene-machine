@@ -273,7 +273,7 @@ class TestFFMPEG(unittest.TestCase):
     )
     self.assertEqual(ffmpeg1.inputs[0]['duration'], 7.0)
 
-    # Case 2: skip_time=3, duration=10 also yields 7.0 s (the second broken branch)
+    # Case 2: skip_time=3, duration=10 also yields 7.0 s (second branch)
     ffmpeg2 = FFMPEG()
     ffmpeg2.add_video(
         path='clip.mp4',
@@ -307,7 +307,9 @@ class TestFFMPEG(unittest.TestCase):
     self.assertEqual(ffmpeg4.inputs[0]['duration'], 7.0)
 
   @mock.patch('actions_lib.ffmpeg.get_video_properties')
-  def test_unknown_source_duration_uses_requested_duration(self, mock_get_props):
+  def test_unknown_source_duration_uses_requested_duration(
+      self, mock_get_props
+  ):
     mock_get_props.return_value = {
         'duration': 0.0,
         'dimensions': '1280:720',

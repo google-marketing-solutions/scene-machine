@@ -99,7 +99,17 @@ def _clean_duration(
     source_duration: float,
     target_fps: float,
 ) -> float:
-  """Clamps clip duration to known footage and aligns it to frame boundaries."""
+  """Clamps clip duration to known footage and aligns it to frame boundaries.
+
+  Args:
+    duration: Caller-requested duration in seconds (<= 0 means use remaining).
+    available_duration: Remaining footage after skip_time in seconds.
+    source_duration: Probed source container duration in seconds (0 if unknown).
+    target_fps: Output frame rate used to quantize duration to whole frames.
+
+  Returns:
+    Frame-aligned clip duration in seconds.
+  """
   frame_duration = 1.0 / target_fps
   if duration > 0:
     effective_duration = (
