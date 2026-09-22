@@ -264,7 +264,7 @@ REQUIRED_VARS=(
 )
 MISSING=0
 for var in "${REQUIRED_VARS[@]}"; do
-  if ! grep -qE "^(export )?${var}=((\"[A-Za-z0-9._{}\$-]+\"|[A-Za-z0-9._{}\$-]+)([[:space:]]*(#.*)?)?$)" ./config.txt; then
+  if ! grep -qE "^(export )?${var}=((\"[-A-Za-z0-9._{}$]+\"|[-A-Za-z0-9._{}$]+)([[:space:]]*(#.*)?)?$)" ./config.txt; then
     echo "ERROR: $var is missing, empty, or has invalid characters in config.txt (use double quotes if quoting)" >&2
     MISSING=$((MISSING + 1))
   fi
