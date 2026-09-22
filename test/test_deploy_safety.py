@@ -471,17 +471,25 @@ def test_announcement_seed_is_not_enabled_on_worker():
 @pytest.mark.parametrize(
     "config_val, mock_responses, expected_rc, expected_val, expected_err",
     [
-        # Config value wins over live value (both 1 over live 0, and 0 over live 1)
+        # Config value wins over live value (1 over live 0, and 0 over live 1)
         (
             "1",
-            {"list": "app", "full_env": "ROLE,DICTATION_ENABLED", "describe": "0"},
+            {
+                "list": "app",
+                "full_env": "ROLE,DICTATION_ENABLED",
+                "describe": "0",
+            },
             0,
             "1",
             "",
         ),
         (
             "0",
-            {"list": "app", "full_env": "ROLE,DICTATION_ENABLED", "describe": "1"},
+            {
+                "list": "app",
+                "full_env": "ROLE,DICTATION_ENABLED",
+                "describe": "1",
+            },
             0,
             "0",
             "",
@@ -489,7 +497,11 @@ def test_announcement_seed_is_not_enabled_on_worker():
         # Live 0 is preserved when config omits the flag
         (
             None,
-            {"list": "app", "full_env": "ROLE,DICTATION_ENABLED", "describe": "0"},
+            {
+                "list": "app",
+                "full_env": "ROLE,DICTATION_ENABLED",
+                "describe": "0",
+            },
             0,
             "0",
             "",
@@ -497,7 +509,11 @@ def test_announcement_seed_is_not_enabled_on_worker():
         # Live 1 is preserved when config omits the flag
         (
             None,
-            {"list": "app", "full_env": "ROLE,DICTATION_ENABLED", "describe": "1"},
+            {
+                "list": "app",
+                "full_env": "ROLE,DICTATION_ENABLED",
+                "describe": "1",
+            },
             0,
             "1",
             "",
@@ -512,7 +528,7 @@ def test_announcement_seed_is_not_enabled_on_worker():
             "1",
             "",
         ),
-        # Full-env extraction returns empty -> abort, non-zero exit, actionable stderr
+        # Full-env extraction returns empty -> abort, non-zero exit
         (
             None,
             {"list": "app", "full_env": "", "describe": ""},
@@ -531,7 +547,11 @@ def test_announcement_seed_is_not_enabled_on_worker():
         # Dictation describe-failure aborts rather than defaulting
         (
             None,
-            {"list": "app", "full_env": "ROLE,AUTH_MODE", "describe_fail": True},
+            {
+                "list": "app",
+                "full_env": "ROLE,AUTH_MODE",
+                "describe_fail": True,
+            },
             1,
             None,
             "Failed to read DICTATION_ENABLED from existing 'app' service",
@@ -549,7 +569,7 @@ def test_announcement_seed_is_not_enabled_on_worker():
 def test_dictation_env_preservation_precedence_and_failure_modes(
     config_val, mock_responses, expected_rc, expected_val, expected_err
 ):
-  """Verify live dictation preservation, precedence, and fail-closed behavior."""
+  """Verify live dictation preservation, precedence, and fail-closed checks."""
   text = _deploy_sh()
   match = re.search(
       r"(?ms)^(if \[ -z \"\$\{DICTATION_ENABLED:-\}\" \]; then\n"
@@ -564,26 +584,37 @@ def test_dictation_env_preservation_precedence_and_failure_modes(
   mock_parts = ["gcloud() {"]
   if mock_responses.get("list_fail"):
     mock_parts.append(
-        "  if [ \"$1\" = \"run\" ] && [ \"$2\" = \"services\" ] && [ \"$3\" = \"list\" ]; then return 1; fi"
+        '  if [ "$1" = "run" ] && [ "$2" = "services" ] && '
+        '[ "$3" = "list" ]; then return 1; fi'
     )
   elif "list" in mock_responses:
+    list_val = mock_responses["list"]
     mock_parts.append(
-        f"  if [ \"$1\" = \"run\" ] && [ \"$2\" = \"services\" ] && [ \"$3\" = \"list\" ]; then echo \"{mock_responses['list']}\"; return 0; fi"
+        '  if [ "$1" = "run" ] && [ "$2" = "services" ] && '
+        f'[ "$3" = "list" ]; then echo "{list_val}"; return 0; fi'
     )
 
-  mock_parts.append('  if [ "$1" = "run" ] && [ "$2" = "services" ] && [ "$3" = "describe" ]; then')
+  mock_parts.append(
+      '  if [ "$1" = "run" ] && [ "$2" = "services" ] && '
+      '[ "$3" = "describe" ]; then'
+  )
   mock_parts.append('    case "$*" in')
   if mock_responses.get("full_env_fail"):
     mock_parts.append('      *"extract(name)"*) return 1 ;;')
   else:
     full_env_val = mock_responses.get("full_env", "ROLE,AUTH_MODE")
-    mock_parts.append(f'      *"extract(name)"*) echo "{full_env_val}"; return 0 ;;')
+    mock_parts.append(
+        f'      *"extract(name)"*) echo "{full_env_val}"; return 0 ;;'
+    )
 
   if mock_responses.get("describe_fail"):
     mock_parts.append('      *"filter(name=DICTATION_ENABLED)"*) return 1 ;;')
   else:
     desc_val = mock_responses.get("describe", "")
-    mock_parts.append(f'      *"filter(name=DICTATION_ENABLED)"*) echo "{desc_val}"; return 0 ;;')
+    mock_parts.append(
+        '      *"filter(name=DICTATION_ENABLED)"*) '
+        f'echo "{desc_val}"; return 0 ;;'
+    )
 
   mock_parts.append('    esac')
   mock_parts.append('  fi')
@@ -700,7 +731,8 @@ def test_config_validation_regex_accepts_quoted_and_rejects_empty(
   )
   assert match, "Config validation grep regex not found in deploy.sh"
   pattern = match.group(1).replace(r"\"", "\"")
-  var = "GCS_BUCKET" if "GCS_BUCKET" in line else "PROJECT"
+  var_match = re.match(r"^(?:export\s+)?([A-Za-z_]+)=", line)
+  var = var_match.group(1) if var_match else "PROJECT"
   full_regex = f"^(export )?{var}=({pattern})"
   proc = subprocess.run(
       ["grep", "-qE", full_regex],
