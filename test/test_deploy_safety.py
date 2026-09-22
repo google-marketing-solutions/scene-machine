@@ -466,3 +466,306 @@ def test_announcement_seed_is_not_enabled_on_worker():
       'gcloud run deploy app', 1
   )[0]
   assert 'ANNOUNCEMENT' not in worker_block
+
+
+@pytest.mark.parametrize(
+    "config_val, mock_responses, expected_rc, expected_val, expected_err",
+    [
+        # Config value wins over live value (1 over live 0, and 0 over live 1)
+        (
+            "1",
+            {
+                "list": "app",
+                "full_env": "ROLE,DICTATION_ENABLED",
+                "describe": "0",
+            },
+            0,
+            "1",
+            "",
+        ),
+        (
+            "0",
+            {
+                "list": "app",
+                "full_env": "ROLE,DICTATION_ENABLED",
+                "describe": "1",
+            },
+            0,
+            "0",
+            "",
+        ),
+        # Live 0 is preserved when config omits the flag
+        (
+            None,
+            {
+                "list": "app",
+                "full_env": "ROLE,DICTATION_ENABLED",
+                "describe": "0",
+            },
+            0,
+            "0",
+            "",
+        ),
+        # Live 1 is preserved when config omits the flag
+        (
+            None,
+            {
+                "list": "app",
+                "full_env": "ROLE,DICTATION_ENABLED",
+                "describe": "1",
+            },
+            0,
+            "1",
+            "",
+        ),
+        # Service-absent (first deploy) falls back to 1
+        (None, {"list": ""}, 0, "1", ""),
+        # Full-env non-empty but no DICTATION_ENABLED falls back to 1
+        (
+            None,
+            {"list": "app", "full_env": "ROLE,AUTH_MODE", "describe": ""},
+            0,
+            "1",
+            "",
+        ),
+        # Full-env extraction returns empty -> abort, non-zero exit
+        (
+            None,
+            {"list": "app", "full_env": "", "describe": ""},
+            1,
+            None,
+            "Could not extract environment from existing 'app' service",
+        ),
+        # Full-env describe-failure aborts rather than defaulting
+        (
+            None,
+            {"list": "app", "full_env_fail": True},
+            1,
+            None,
+            "Failed to read environment from existing 'app' service",
+        ),
+        # Dictation describe-failure aborts rather than defaulting
+        (
+            None,
+            {
+                "list": "app",
+                "full_env": "ROLE,AUTH_MODE",
+                "describe_fail": True,
+            },
+            1,
+            None,
+            "Failed to read DICTATION_ENABLED from existing 'app' service",
+        ),
+        # List-failure aborts rather than defaulting
+        (
+            None,
+            {"list_fail": True},
+            1,
+            None,
+            "Failed to query Cloud Run services",
+        ),
+        # Prefix/substring service names (e.g. my-app) do not match exact 'app'
+        (
+            None,
+            {"list": "my-app\nscene-machine-app", "full_env_fail": True},
+            0,
+            "1",
+            "",
+        ),
+        # Invalid live DICTATION_ENABLED value on existing service aborts
+        (
+            None,
+            {
+                "list": "app",
+                "full_env": "ROLE,DICTATION_ENABLED",
+                "describe": "invalid",
+            },
+            1,
+            None,
+            "DICTATION_ENABLED must be 0 or 1",
+        ),
+    ],
+)
+def test_dictation_env_preservation_precedence_and_failure_modes(
+    config_val, mock_responses, expected_rc, expected_val, expected_err
+):
+  """Verify live dictation preservation, precedence, and fail-closed checks."""
+  text = _deploy_sh()
+  match = re.search(
+      r"(?ms)^(if \[ -z \"\$\{DICTATION_ENABLED:-\}\" \]; then\n"
+      r".*?\n"
+      r"DICTATION_ENABLED=\"\$\{DICTATION_ENABLED:-1\}\"\n"
+      r"if \[\[.*?^fi)$",
+      text,
+  )
+  assert match, "DICTATION_ENABLED preservation and validation block not found"
+  block = match.group(1)
+
+  mock_parts = ["gcloud() {"]
+  if mock_responses.get("list_fail"):
+    mock_parts.append(
+        '  if [ "$1" = "run" ] && [ "$2" = "services" ] && '
+        '[ "$3" = "list" ]; then return 1; fi'
+    )
+  elif "list" in mock_responses:
+    list_val = mock_responses["list"]
+    mock_parts.append(
+        '  if [ "$1" = "run" ] && [ "$2" = "services" ] && '
+        f'[ "$3" = "list" ]; then echo "{list_val}"; return 0; fi'
+    )
+
+  mock_parts.append(
+      '  if [ "$1" = "run" ] && [ "$2" = "services" ] && '
+      '[ "$3" = "describe" ]; then'
+  )
+  mock_parts.append('    case "$*" in')
+  if mock_responses.get("full_env_fail"):
+    mock_parts.append('      *"extract(name)"*) return 1 ;;')
+  else:
+    full_env_val = mock_responses.get("full_env", "ROLE,AUTH_MODE")
+    mock_parts.append(
+        f'      *"extract(name)"*) echo "{full_env_val}"; return 0 ;;'
+    )
+
+  if mock_responses.get("describe_fail"):
+    mock_parts.append('      *"filter(name=DICTATION_ENABLED)"*) return 1 ;;')
+  else:
+    desc_val = mock_responses.get("describe", "")
+    mock_parts.append(
+        '      *"filter(name=DICTATION_ENABLED)"*) '
+        f'echo "{desc_val}"; return 0 ;;'
+    )
+
+  mock_parts.append('    esac')
+  mock_parts.append('  fi')
+  mock_parts.append("  return 1\n}")
+  mock_func = "\n".join(mock_parts)
+
+  script = f"""{mock_func}
+{block}
+printf "%s\\n" "$DICTATION_ENABLED"
+"""
+  environment = os.environ.copy()
+  environment["REGION"] = "us-central1"
+  environment["PROJECT"] = "test-project"
+  environment.pop("DICTATION_ENABLED", None)
+  if config_val is not None:
+    environment["DICTATION_ENABLED"] = config_val
+
+  result = subprocess.run(
+      ["bash", "-c", script],
+      env=environment,
+      capture_output=True,
+      text=True,
+      check=False,
+  )
+  assert result.returncode == expected_rc
+  if expected_val is not None:
+    assert result.stdout.strip() == expected_val
+  if expected_err:
+    assert expected_err in result.stderr
+
+
+def test_first_deploy_dictation_probe_runs_after_api_enablement(tmp_path):
+  """A first deploy must enable Cloud Run before probing the absent service."""
+  text = _deploy_sh()
+  enable_start = text.index('# --- Enable services')
+  enable_call = text.index('gcloud services enable $TO_ENABLE', enable_start)
+  explicit_validation = text.index(
+      'if [ -n "${DICTATION_ENABLED:-}" ] && [[',
+  )
+  confirmation = text.index('read -r -p "Proceed and deploy')
+  assert explicit_validation < confirmation < enable_start
+  probe_start = text.index('if [ -z "${DICTATION_ENABLED:-}" ]; then')
+  assert enable_call < probe_start
+
+  enable_block = text[enable_start:text.index(
+      '# Warm up Vertex AI service agent.', enable_call
+  )]
+  script = f'''\
+set -euo pipefail
+gcloud() {{
+  if [ "${{1:-}}" = services ] && [ "${{2:-}}" = list ]; then
+    printf '%s\\n' "$ENABLED_APIS"
+  elif [ "${{1:-}}" = services ] && [ "${{2:-}}" = enable ] && \
+      [[ " $* " == *" run.googleapis.com "* ]]; then
+    printf 'services-enable\\n' >> "$TRACE_FILE"
+  elif [ "${{1:-}}" = run ] && [ "${{2:-}}" = services ] && \
+      [ "${{3:-}}" = list ]; then
+    printf 'run-list\\n' >> "$TRACE_FILE"
+  else
+    printf 'unexpected gcloud call: %s\\n' "$*" >&2
+    return 1
+  fi
+}}
+phase() {{ :; }}
+PROJECT=test-project
+REGION=us-central1
+ENABLED_APIS=
+{enable_block}
+printf 'value=%s\\n' "$DICTATION_ENABLED"
+'''
+  environment = os.environ.copy()
+  environment['TRACE_FILE'] = str(tmp_path / 'trace')
+  environment.pop('DICTATION_ENABLED', None)
+  trace_path = pathlib.Path(environment['TRACE_FILE'])
+  trace_path.unlink(missing_ok=True)
+  try:
+    result = subprocess.run(
+        ['bash', '-c', script], env=environment, capture_output=True,
+        text=True, check=False,
+    )
+    trace = trace_path.read_text(encoding='utf-8')
+  finally:
+    trace_path.unlink(missing_ok=True)
+  assert result.returncode == 0, result.stderr
+  assert result.stdout.rstrip().endswith('value=1')
+  assert trace.splitlines() == ['services-enable', 'run-list']
+
+
+@pytest.mark.parametrize(
+    "line, expected_match",
+    [
+        ("PROJECT=my-project", True),
+        ("export PROJECT=my-project", True),
+        ("PROJECT=\"my-project\"", True),
+        ("export PROJECT=\"my-project\"", True),
+        ("REGION=\"us central1\"", False),
+        ("export REGION=\"us central1\"", False),
+        ("export REGION=us central1", False),
+        ("export PROJECT=\"my-project\" extra", False),
+        ("export PROJECT=\"<YOUR_PROJECT_ID>\"", False),
+        ("export REGION=us-central1 # inline comment", True),
+        ("export GCS_BUCKET=\"${PROJECT}-scene-machine\"", True),
+        ("export GCS_BUCKET=${PROJECT}-scene-machine", True),
+        ("PROJECT=", False),
+        ("export PROJECT=", False),
+        ("PROJECT=\"\"", False),
+        ("export PROJECT=\"\"", False),
+        ("PROJECT='my-project'", False),
+        ("export PROJECT='my-project'", False),
+    ],
+)
+def test_config_validation_regex_accepts_quoted_and_rejects_empty(
+    line, expected_match
+):
+  """Preflight regex accepts double-quoted config values but rejects empty."""
+  text = _deploy_sh()
+  match = re.search(
+      r'(grep -qE "\^\(export \)\?\$\{var\}=\(.*?\)") \./config\.txt',
+      text,
+  )
+  assert match, "Config validation grep command not found in deploy.sh"
+  grep_cmd = match.group(1)
+  var_match = re.match(r"^(?:export\s+)?([A-Za-z_]+)=", line)
+  var = var_match.group(1) if var_match else "PROJECT"
+  script = f"set -euo pipefail\nvar={var}\n{grep_cmd}\n"
+  proc = subprocess.run(
+      ["bash", "-c", script],
+      input=line,
+      capture_output=True,
+      text=True,
+      check=False,
+  )
+  assert proc.stderr == "", f"Bash error evaluating grep command: {proc.stderr}"
+  assert (proc.returncode == 0) == expected_match

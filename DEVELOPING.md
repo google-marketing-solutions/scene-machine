@@ -281,11 +281,13 @@ results before claiming a production latency improvement.
 ### Dictation feature flag
 
 Microphone dictation is included in deployment and enabled by default. The
-optional `DICTATION_ENABLED` variable defaults to `1` when omitted; deploy
-validation accepts only `0` or `1`. Set `export DICTATION_ENABLED=0` in
-`config.txt` before deploying or redeploying to disable it. Existing explicit
-`0` values are preserved. The flag is passed to the app service only, never
-to the worker; the UI reads the capability from `/api/config`.
+optional `DICTATION_ENABLED` variable preserves the live app setting when
+omitted on redeploy, and defaults to `1` when the app service does not yet
+exist; deploy validation accepts only `0` or `1`. Set
+`export DICTATION_ENABLED=0` in `config.txt` before deploying or redeploying
+to disable it. Existing explicit `0` values are preserved. The flag is
+passed to the app service only, never to the worker; the UI reads the
+capability from `/api/config`.
 The backend uses the fixed `gemini-3.5-transcribe-preview` model in `global`
 with `SMART` transcription by default; there is no runtime model picker or
 fallback. Set `export DICTATION_MODE=VERBATIM` in `config.txt` for word-for-word
