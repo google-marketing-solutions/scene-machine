@@ -42,11 +42,13 @@ class TestGemini(unittest.TestCase):
             "webm": "video/webm",
             "mkv": "video/x-matroska",
         }
+        self.assertCountEqual(expected_mappings, gemini.ALLOWED_MIME_TYPES)
         for ext, expected_mime in expected_mappings.items():
-            self.assertEqual(
-                gemini.get_mime_type(f"gs://bucket/file.{ext}"),
-                expected_mime,
-            )
+            with self.subTest(ext=ext):
+                self.assertEqual(
+                    gemini.get_mime_type(f"gs://bucket/file.{ext}"),
+                    expected_mime,
+                )
 
     def test_get_mime_type_case_insensitive(self):
         """Tests case-insensitivity for file extensions."""
