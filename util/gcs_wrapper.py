@@ -85,7 +85,12 @@ def get_signing_context(
             'details.'
         )
       cred.refresh(auth_request)  # pyright: ignore[reportAttributeAccessIssue]
-      sa_email = cred.service_account_email
+      sa_email = getattr(cred, 'service_account_email', None)
+      if not sa_email or sa_email == 'default':
+        raise RuntimeError(
+            'GCS URL signing requires a resolved service account email, but '
+            f'credential refresh produced {sa_email!r}.'
+        )
       signer = iam.Signer(
           auth_request,
           cred,

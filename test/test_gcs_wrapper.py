@@ -260,3 +260,19 @@ def test_non_service_account_adc_raises_actionable_error():
     assert 'DEVELOPING.md' in err_msg
     assert client_factory.call_count == 1
     assert mock_default.call_count == 1
+
+
+def test_unresolved_default_service_account_email_after_refresh_raises():
+  mock_client = mock.Mock()
+  mock_cred = mock.Mock()
+  mock_cred.service_account_email = 'default'
+  mock_default = mock.Mock(return_value=(mock_cred, 'project-id'))
+
+  with mock.patch(
+      'util.gcs_wrapper.storage.Client', return_value=mock_client
+  ), mock.patch('util.gcs_wrapper.default', mock_default):
+    with pytest.raises(
+        RuntimeError,
+        match="credential refresh produced 'default'",
+    ):
+      gcs_wrapper.get_signing_context()
