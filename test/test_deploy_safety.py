@@ -747,23 +747,33 @@ printf 'value=%s\\n' "$DICTATION_ENABLED"
     ],
 )
 def test_config_validation_regex_accepts_quoted_and_rejects_empty(
-    line, expected_match
+    tmp_path, line, expected_match
 ):
-  """Preflight regex accepts double-quoted config values but rejects empty."""
+  """Preflight validation runs in bash and accepts valid quoted/unquoted values."""
   text = _deploy_sh()
   match = re.search(
-      r'grep -qE "\^\(export \)\?\$\{var\}=\((.*?)\)" \./config\.txt',
+      r"(?ms)^(MISSING=0\nfor var in \"\$\{REQUIRED_VARS\[@\]\}\"; do\n.*?^done)$",
       text,
   )
-  assert match, "Config validation grep regex not found in deploy.sh"
-  pattern = match.group(1).replace(r"\"", "\"")
+  assert match, "REQUIRED_VARS validation loop not found in deploy.sh"
+  loop_block = match.group(1)
   var_match = re.match(r"^(?:export\s+)?([A-Za-z_]+)=", line)
   var = var_match.group(1) if var_match else "PROJECT"
-  full_regex = f"^(export )?{var}=({pattern})"
+  (tmp_path / "config.txt").write_text(line + "\n", encoding="utf-8")
+  script = f"""set -euo pipefail
+REQUIRED_VARS=({var})
+{loop_block}
+exit "$MISSING"
+"""
   proc = subprocess.run(
-      ["grep", "-qE", full_regex],
-      input=line,
+      ["bash", "-c", script],
+      cwd=tmp_path,
+      capture_output=True,
       text=True,
       check=False,
   )
-  assert (proc.returncode == 0) == expected_match
+  if expected_match:
+    assert proc.returncode == 0, proc.stderr
+  else:
+    assert proc.returncode != 0
+    assert "bad substitution" not in proc.stderr
