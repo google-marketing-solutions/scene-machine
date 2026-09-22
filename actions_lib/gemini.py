@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
-import mimetypes
+from types import MappingProxyType
 
 from google import genai
 from google.genai import types
@@ -28,6 +28,21 @@ from common import TrackingType
 
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_MIME_TYPES = MappingProxyType({
+    "png": "image/png",
+    "jpeg": "image/jpeg",
+    "jpg": "image/jpeg",
+    "webp": "image/webp",
+    "avif": "image/avif",
+    "heic": "image/heic",
+    "heif": "image/heif",
+    "mp4": "video/mp4",
+    "mov": "video/quicktime",
+    "avi": "video/x-msvideo",
+    "webm": "video/webm",
+    "mkv": "video/x-matroska",
+})
 
 
 def get_mime_type(uri: str) -> str:
@@ -40,21 +55,8 @@ def get_mime_type(uri: str) -> str:
       the mimetype string.
     """
     file_extension = uri.split(".")[-1].lower()
-    allowed_types = [
-        "png",
-        "jpeg",
-        "jpg",
-        "webp",
-        "heic",
-        "heif",
-        "mp4",
-        "mov",
-        "avi",
-        "webm",
-        "mkv",
-    ]
-    if file_extension in allowed_types:
-        return mimetypes.types_map["." + file_extension]
+    if file_extension in ALLOWED_MIME_TYPES:
+        return ALLOWED_MIME_TYPES[file_extension]
 
     raise ValueError(f"File extension '{file_extension}' ({uri}) is not allowed.")
 
