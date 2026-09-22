@@ -17,10 +17,9 @@
 Follows the fixture pattern of test/test_frontdoor.py: env vars are set
 via monkeypatch BEFORE (re)importing orch, and orchestrator's import-time
 side effects are neutralised by the shared orchestrator_module fixture.
-The GCS and UI-Firestore
-clients are replaced with in-memory fakes by presetting orch's lazy
-module-level singletons, and the cached signing-credentials factory is
-stubbed so no test performs network I/O.
+The UI-Firestore client is replaced with an in-memory fake by presetting
+orch's lazy module-level singleton, and GCS storage/signing context is
+stubbed on util.gcs_wrapper so no test performs network I/O.
 """
 
 import copy
@@ -37,6 +36,7 @@ from google.cloud import firestore
 
 # Reused module-scoped fixture; pytest picks it up from this namespace.
 from test.test_frontdoor import orchestrator_module  # noqa: F401  pylint: disable=unused-import
+from util import gcs_wrapper
 from util import model_allowlist
 
 _REPO = pathlib.Path(__file__).resolve().parent.parent
@@ -376,8 +376,11 @@ def _load_app(monkeypatch, **env):
   fake_db = FakeUiDb()
   fake_storage = FakeStorageClient()
   monkeypatch.setattr(orch, '_ui_db', fake_db)
-  monkeypatch.setattr(orch, '_storage_client', fake_storage)
-  monkeypatch.setattr(orch, '_get_signing_credentials', lambda: None)
+  monkeypatch.setattr(
+      gcs_wrapper,
+      'get_signing_context',
+      lambda: (fake_storage, None),
+  )
   monkeypatch.setitem(orch.config, 'gcsBucket', _BUCKET)
   return orch, fake_db, fake_storage
 
@@ -2041,8 +2044,11 @@ def test_data_endpoints_fail_soft_without_firestore_db_ui(
   assert response.get_json() == {'error': 'FIRESTORE_DB_UI not configured'}
 
   # The storage endpoints do not need the UI database.
-  monkeypatch.setattr(orch, '_storage_client', FakeStorageClient())
-  monkeypatch.setattr(orch, '_get_signing_credentials', lambda: None)
+  monkeypatch.setattr(
+      gcs_wrapper,
+      'get_signing_context',
+      lambda: (FakeStorageClient(), None),
+  )
   monkeypatch.setitem(orch.config, 'gcsBucket', _BUCKET)
   assert client.get('/api/signUrl?path=remix-input/a.png').status_code == 200
 
@@ -2061,3 +2067,37 @@ def test_worker_role_has_no_data_routes(monkeypatch, orchestrator_module):
   assert client.get('/api/projects').status_code == 404
   assert client.post('/api/uploadUrl', json={}).status_code == 404
   assert client.get('/api/config').status_code == 404
+
+
+def test_orch_signed_url_routes_through_gcs_wrapper_without_second_cache(
+    monkeypatch, orchestrator_module
+):
+  """orch delegates signed-URL generation to util.gcs_wrapper with no second cache."""
+  del orchestrator_module
+  orch, _, fake_storage = _load_app(monkeypatch)
+
+  # Assert orch has no duplicate cache state or functions
+  assert not hasattr(orch, '_storage_client')
+  assert not hasattr(orch, '_signing_credentials')
+  assert not hasattr(orch, '_get_signing_credentials')
+
+  blob = fake_storage.bucket(_BUCKET).blob('remix-input/asset.png')
+  sentinel_creds = object()
+  called_with_creds = []
+
+  def fake_get_signing_context():
+    return fake_storage, sentinel_creds
+
+  def fake_generate_signed_url(credentials=None, **kwargs):
+    del kwargs
+    called_with_creds.append(credentials)
+    return 'https://signed.example/url'
+
+  monkeypatch.setattr(
+      gcs_wrapper, 'get_signing_context', fake_get_signing_context
+  )
+  monkeypatch.setattr(blob, 'generate_signed_url', fake_generate_signed_url)
+
+  url = orch._signed_url(blob, 'GET', datetime.timedelta(hours=1))
+  assert url == 'https://signed.example/url'
+  assert called_with_creds == [sentinel_creds]

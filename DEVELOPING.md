@@ -112,7 +112,7 @@ links; raw HTML, images, and other block content are not displayed.
 
 ### The local loop (two terminals)
 
-The local backend talks to a real dev GCP project through your Application Default Credentials, so run `gcloud auth application-default login` once first.
+The local backend talks to a real dev GCP project through your Application Default Credentials. Because GCS URL signing (`/api/signUrl`, `/api/uploadUrl`) requires a service account identity, run `gcloud auth application-default login --impersonate-service-account=<SA_EMAIL>` (or set `GOOGLE_APPLICATION_CREDENTIALS` to a service account key file) once first.
 
 **Terminal 1 - local backend (the `/api` server):**
 
