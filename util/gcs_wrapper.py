@@ -48,8 +48,16 @@ _CACHED_AUTH_FACTORY = None
 _SIGNING_CONTEXT_LOCK = threading.Lock()
 
 
-def get_signing_context():
-  """Returns cached (storage_client, signing_credentials) for GCS URL signing."""
+def get_signing_context(
+) -> tuple[storage.Client, compute_engine.IDTokenCredentials]:
+  """Returns cached (storage_client, signing_credentials) for GCS URL signing.
+
+  Returns:
+    A tuple of (storage.Client, compute_engine.IDTokenCredentials).
+
+  Raises:
+    RuntimeError: If active credentials do not have a service account email.
+  """
   global _CACHED_STORAGE_CLIENT, _CACHED_CLIENT_FACTORY
   global _CACHED_SIGNING_CREDENTIALS, _CACHED_AUTH_FACTORY
 
@@ -67,13 +75,14 @@ def get_signing_context():
       sa_email = getattr(cred, 'service_account_email', None)
       if not sa_email:
         raise RuntimeError(
-            'GCS URL signing requires a service account identity, but the active '
-            'credentials have no service_account_email. User credentials from '
-            '"gcloud auth application-default login" cannot sign URLs; configure '
-            'service account impersonation ("gcloud auth application-default login '
-            '--impersonate-service-account=<SA_EMAIL>") or set '
-            'GOOGLE_APPLICATION_CREDENTIALS to a service account key file. '
-            'See DEVELOPING.md ("The local loop") for details.'
+            'GCS URL signing requires a service account identity, but the '
+            'active credentials have no service_account_email. User '
+            'credentials from "gcloud auth application-default login" cannot '
+            'sign URLs; configure service account impersonation ("gcloud auth '
+            'application-default login --impersonate-service-account='
+            '<SA_EMAIL>") or set GOOGLE_APPLICATION_CREDENTIALS to a service '
+            'account key file. See DEVELOPING.md ("The local loop") for '
+            'details.'
         )
       cred.refresh(auth_request)  # pyright: ignore[reportAttributeAccessIssue]
       sa_email = cred.service_account_email
