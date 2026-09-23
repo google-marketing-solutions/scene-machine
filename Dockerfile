@@ -15,16 +15,14 @@
 # ==============================================================================
 # Stage 1: OS Runtime + FFmpeg (Runs concurrently with Stage 2 under BuildKit!)
 # ==============================================================================
-FROM mirror.gcr.io/library/python:3.13-slim@sha256:c33f0bc4364a6881bed1ec0cc2665e6c53c87a43e774aaeab88e6f17af105e4f AS runtime-base
+FROM python:3.13-slim@sha256:c33f0bc4364a6881bed1ec0cc2665e6c53c87a43e774aaeab88e6f17af105e4f AS runtime-base
 
 ENV PYTHONUNBUFFERED=1
 
-# Speed up dpkg on Cloud Build disks by disabling per-file fsync() during unpack
-# and strictly excluding Debian recommended GUI/X11/Mesa bloat.
-RUN echo "force-unsafe-io" > /etc/dpkg/dpkg.cfg.d/docker-apt-speedup \
-  && apt-get update \
+# Exclude Debian recommended GUI/X11/Mesa packages.
+RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg \
-  && rm -rf /var/lib/apt/lists/* /etc/dpkg/dpkg.cfg.d/docker-apt-speedup \
+  && rm -rf /var/lib/apt/lists/* \
   && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
   && mkdir -p /app \
   && chown appuser:appuser /app
@@ -33,9 +31,9 @@ RUN echo "force-unsafe-io" > /etc/dpkg/dpkg.cfg.d/docker-apt-speedup \
 # Stage 2: Python Dependency Builder via official Astral uv (digest-pinned)
 #          (Executes in ~3-6s *while* Stage 1 is still running apt-get!)
 # ==============================================================================
-FROM mirror.gcr.io/library/python:3.13-slim@sha256:c33f0bc4364a6881bed1ec0cc2665e6c53c87a43e774aaeab88e6f17af105e4f AS venv-builder
+FROM python:3.13-slim@sha256:c33f0bc4364a6881bed1ec0cc2665e6c53c87a43e774aaeab88e6f17af105e4f AS venv-builder
 
-COPY --from=ghcr.io/astral-sh/uv:0.6.6@sha256:031ddbc79275e351a43cbb66f64d8cd314cc78c3878898f4ab4f147b092e8e2d /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.12.18@sha256:3adc3706091ce7c2fe595e669628caedd6d951551b92b258b7e7dbe06d9440bc /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     VIRTUAL_ENV=/opt/venv \

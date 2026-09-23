@@ -102,26 +102,38 @@ fmt_hms() {
 # terminal shows nothing for minutes during the image build. Returns the wrapped
 # command's own exit code, so `set -e` still aborts the deploy if the build fails.
 run_with_heartbeat() {
-  local label=$1; shift
+  local label=$1 log_file=$2; shift 2
   local hb_secs=${HEARTBEAT_SECS:-20}
   local start rc=0
   start=$(date +%s)
-  "$@" &
-  local cmd_pid=$!
-  # Heartbeat in a background subshell: it watches the command's PID and exits
-  # when the command does. cmd_pid/start are inherited from this function scope.
-  (
-    while kill -0 "$cmd_pid" 2>/dev/null; do
-      sleep "$hb_secs"
-      kill -0 "$cmd_pid" 2>/dev/null || break
-      echo "    … ${label} still running ($(fmt_hms $(( $(date +%s) - start ))) elapsed)"
-    done
-  ) &
-  local hb_pid=$!
+  # Put the build command and any children in their own process group so an
+  # interrupted deploy can stop the entire upload/build CLI tree without ps.
+  python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+    "$@" >"$log_file" 2>&1 &
+  HEARTBEAT_CMD_PID=$!
+  local cmd_pid=$HEARTBEAT_CMD_PID
+  # A single Python heartbeat has no sleep child to orphan on interruption.
+  python3 -c '
+import os, sys, time
+pid, interval, label, start = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+while True:
+    time.sleep(interval)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        break
+    elapsed = int(time.time()) - start
+    print(f"    … {label} still running ({elapsed // 3600}h {elapsed % 3600 // 60:02}m {elapsed % 60:02}s elapsed)", flush=True)
+' "$cmd_pid" "$hb_secs" "$label" "$start" &
+  HEARTBEAT_PID=$!
+  local hb_pid=$HEARTBEAT_PID
   wait "$cmd_pid" || rc=$?
   kill "$hb_pid" 2>/dev/null || true
   wait "$hb_pid" 2>/dev/null || true
-  return $rc
+  HEARTBEAT_CMD_PID=""
+  HEARTBEAT_PID=""
+  cat "$log_file"
+  return "$rc"
 }
 
 # Emits the closing timing line for the current phase: wall-clock time of day,
@@ -407,25 +419,31 @@ echo "════════════════════════�
 # human think-time at the prompt doesn't pollute the timing deliverable.
 SCRIPT_START=$(date +%s)
 
-UI_BUILD_PID=""; INFRA_SETUP_PID=""; WORKER_DEPLOY_PID=""
-UI_BUILD_LOG=""; INFRA_SETUP_LOG=""; WORKER_ERR_FILE=""; BUILD_SUBMIT_LOG=""
-
-kill_tree() {
-  local p="$1" c
-  for c in $(pgrep -P "$p" 2>/dev/null || true); do
-    kill_tree "$c"
-  done
-  kill "$p" 2>/dev/null || true
-}
+UI_BUILD_PID=""; INFRA_SETUP_PID=""; HEARTBEAT_CMD_PID=""; HEARTBEAT_PID=""
+UI_BUILD_LOG=""; INFRA_SETUP_LOG=""; BUILD_SUBMIT_LOG=""
 
 cleanup() {
   local pid log
-  for pid in "${UI_BUILD_PID:-}" "${INFRA_SETUP_PID:-}" "${WORKER_DEPLOY_PID:-}"; do
+  # The UI and infra jobs start with Bash monitor mode, and the Cloud Build
+  # command starts with setsid. Each PID is therefore its own process-group
+  # leader; signalling its negative PGID stops descendants without ps/pgrep.
+  for pid in "${UI_BUILD_PID:-}" "${INFRA_SETUP_PID:-}" "${HEARTBEAT_CMD_PID:-}"; do
     [ -n "$pid" ] || continue
-    kill_tree "$pid"
-    kill -- "-${pid}" 2>/dev/null || true
+    kill -TERM -- "-$pid" 2>/dev/null || true
   done
-  for log in "${UI_BUILD_LOG:-}" "${INFRA_SETUP_LOG:-}" "${WORKER_ERR_FILE:-}"; do
+  if [ -n "${UI_BUILD_PID:-}${INFRA_SETUP_PID:-}${HEARTBEAT_CMD_PID:-}" ]; then
+    sleep 1
+  fi
+  for pid in "${UI_BUILD_PID:-}" "${INFRA_SETUP_PID:-}" "${HEARTBEAT_CMD_PID:-}"; do
+    [ -n "$pid" ] || continue
+    kill -KILL -- "-$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
+  if [ -n "${HEARTBEAT_PID:-}" ]; then
+    kill "$HEARTBEAT_PID" 2>/dev/null || true
+    wait "$HEARTBEAT_PID" 2>/dev/null || true
+  fi
+  for log in "${UI_BUILD_LOG:-}" "${INFRA_SETUP_LOG:-}"; do
     [ -n "$log" ] || continue
     if [ -s "$log" ]; then
       echo "--- background log: $log ---" >&2
@@ -433,9 +451,17 @@ cleanup() {
     fi
     rm -f "$log"
   done
-  [ -n "${BUILD_SUBMIT_LOG:-}" ] && rm -f "$BUILD_SUBMIT_LOG" || true
+  if [ -n "${BUILD_SUBMIT_LOG:-}" ]; then
+    if [ -s "$BUILD_SUBMIT_LOG" ]; then
+      echo "--- background log: $BUILD_SUBMIT_LOG ---" >&2
+      cat "$BUILD_SUBMIT_LOG" >&2
+    fi
+    rm -f "$BUILD_SUBMIT_LOG"
+  fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Render UI env + config and kick off the local Angular UI build in the
 # background right away so local CPU work (npm ci / ng build) overlaps with
@@ -449,18 +475,15 @@ if grep -q "controlPlaneMode: 'none'" ./ui/src/env.ts; then
 fi
 if [ "$SKIP_UI_BUILD" != "1" ]; then
   UI_BUILD_LOG=$(mktemp)
+  # A separate job-control process group lets EXIT cleanup stop npm/ng children.
+  set -m
   (
     export NG_CLI_ANALYTICS=ci
-    if [ -f ui/node_modules/.package-lock.stamp ] \
-        && cmp -s ui/package-lock.json ui/node_modules/.package-lock.stamp; then
-      echo "  ✓ ui/package-lock.json unchanged — skipping npm ci."
-    else
-      ( cd ui && npm ci )
-      cp ui/package-lock.json ui/node_modules/.package-lock.stamp
-    fi
+    ( cd ui && npm ci )
     ( cd ui && npx ng build --configuration production )
   ) >"$UI_BUILD_LOG" 2>&1 &
   UI_BUILD_PID=$!
+  set +m
 fi
 
 # --- Enable services ---------------------------------------------------------
@@ -580,13 +603,14 @@ gcloud services identity create --service=iap.googleapis.com --project=$PROJECT 
 # --- Derived values ----------------------------------------------------------
 phase "Resolving project number and runtime service account..."
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT --format="value(projectNumber)")
-# Two distinct identities (least privilege, P2#1):
+# Separate build and runtime identities (P2#1):
 #   BUILD_SA   - the default Compute Engine SA, which is also the default Cloud
 #                Build identity. Used ONLY to build and push the container image
 #                (`gcloud builds submit`, no --service-account). It holds the
 #                build-time roles (artifactregistry.writer, logging.logWriter,
 #                storage.objectUser for the source) and is NOT a request-serving
-#                identity.
+#                identity. On some projects it also inherits project Editor;
+#                these grants do not remove that pre-existing broad access.
 #   RUNTIME_SA - a dedicated SA that the app + worker Cloud Run services run as.
 #                It carries only the roles the running app needs. Crucially it
 #                does NOT get roles/artifactregistry.writer, so a compromise of
@@ -706,8 +730,9 @@ echo "Granting the runtime SA self-impersonation (signBlob + Cloud Tasks OIDC)..
 add_sa_iam_binding "${RUNTIME_SA}" "serviceAccount:${RUNTIME_SA}" "roles/iam.serviceAccountTokenCreator" "$PROJECT"
 add_sa_iam_binding "${RUNTIME_SA}" "serviceAccount:${RUNTIME_SA}" "roles/iam.serviceAccountUser" "$PROJECT"
 
-# --- Non-IAM runtime infrastructure + Firestore seed (overlapped with Cloud Build) ---
+# --- Non-IAM runtime infrastructure (overlapped with Cloud Build) ---
 INFRA_SETUP_LOG=$(mktemp)
+set -m
 (
 # --- Cloud Tasks queues -------------------------------------------------------
 echo "[>] Setting up Cloud Tasks queues..."
@@ -833,6 +858,210 @@ else
   gcloud iam roles update SceneMachineUser --project=$PROJECT --file=./user-role.yaml --quiet || true
 fi
 
+) >"$INFRA_SETUP_LOG" 2>&1 &
+INFRA_SETUP_PID=$!
+set +m
+
+# --- UI env + config (rendered at SCRIPT_START before UI_BUILD_PID) -----------
+phase "Rendering ui/src/env.ts and ui/definitions/config.json..."
+echo "  Front-door auth: IAP (the only deployable mode)"
+
+
+# --- UI build ------------------------------------------------------------------
+if [ "$SKIP_UI_BUILD" = "1" ]; then
+  if [ ! -d ui/dist ]; then
+    echo "ERROR: --skip-ui-build given but ui/dist does not exist." >&2
+    echo "       Run a normal deploy once (or 'cd ui && npx ng build') first." >&2
+    exit 1
+  fi
+  # The render above rewrote env.ts/config.json, but a skipped build leaves the
+  # OLD env baked into ui/dist. Refuse if that prior build was a local-dev,
+  # sign-in-disabled build, so --skip-ui-build can never ship one to production.
+  if grep -rqs 'controlPlaneMode:"none"' ui/dist || grep -rqs "controlPlaneMode:'none'" ui/dist; then
+    echo "ERROR: the existing ui/dist was built for local dev (controlPlaneMode 'none'," >&2
+    echo "       sign-in disabled). Refusing to deploy it. Drop --skip-ui-build and run a" >&2
+    echo "       normal deploy to rebuild the UI first." >&2
+    exit 1
+  fi
+  phase "Reusing existing ui/dist (--skip-ui-build)..."
+  echo "[skip] Building the Angular UI — skipped (--skip-ui-build); reusing ui/dist."
+else
+  phase "Building the Angular UI (npm ci + ng build)..."
+  if ! wait "$UI_BUILD_PID"; then
+    UI_BUILD_PID=""
+    exit 1
+  fi
+  UI_BUILD_PID=""
+  cat "$UI_BUILD_LOG"
+  rm -f "$UI_BUILD_LOG"
+  UI_BUILD_LOG=""
+fi
+
+# --- Version stamp + Artifact Registry + ONE image build -----------------------
+phase "Building the single container image (Cloud Build)..."
+# Version stamp (with a fallback so a missing/
+# detached git checkout doesn't abort the whole deploy under set -e).
+COMMIT_DATE=$(git log -1 --format=%cI 2>/dev/null || echo "unknown")
+GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+echo "${GIT_BRANCH}/${COMMIT_DATE}" > deployed_version.txt
+sync
+if ! gcloud artifacts repositories describe "${ARTIFACT_REPO}" --project=$PROJECT --location="$REGION" &> /dev/null; then
+  echo "Creating artifact repository: $ARTIFACT_REPO"
+  gcloud artifacts repositories create "${ARTIFACT_REPO}" --repository-format=docker --project=$PROJECT --location="$REGION"
+fi
+# The default public Cloud Build pool avoids the high-CPU pool's measured
+# provisioning queue on both cached and no-cache builds.
+# NOTE: the repo's .gcloudignore excludes ui/* but re-includes ui/dist/ and
+# ui/remix-engine-status-viewer/ — both are LOAD-BEARING for this build: the
+# front-door app service serves the built SPA (ui/dist/ui/browser) and the
+# status viewer from inside this single image. Verify they made it into the
+# upload if static serving 404s.
+# Build logs go to Cloud Logging, NOT a GCS bucket (cloudbuild.yaml sets
+# logging: CLOUD_LOGGING_ONLY) — the same thing the original `gcloud run deploy
+# --source` flow did, and the fix for VPC Service Controls (issue H): the default
+# GCS logs bucket is always OUTSIDE the perimeter so its logs can't be streamed,
+# but Cloud Logging is unaffected, so the build runs and its logs are viewable in
+# the console. The build SA's logging.logWriter was granted earlier (IAM section)
+# so it has already propagated by now.
+echo "  Build logs → Cloud Logging (console):"
+echo "    https://console.cloud.google.com/cloud-build/builds?project=${PROJECT}"
+echo "  (this step is quiet — the build runs remotely; a heartbeat prints below)"
+# cloudbuild.yaml reuses cached layers by default; --no-build-cache forces a
+# cold rebuild (passes _USE_CACHE=0). IMAGE has no commas, so comma-joining the
+# substitutions is safe.
+BUILD_SUBS="_IMAGE=${IMAGE}"
+if [ "$NO_BUILD_CACHE" = "1" ]; then
+  BUILD_SUBS="${BUILD_SUBS},_USE_CACHE=0"
+  echo "  Docker layer cache: OFF (--no-build-cache; forcing a cold rebuild)."
+else
+  echo "  Docker layer cache: ON (reuses unchanged layers from the previous image)."
+fi
+BUILD_ATTEMPT=0
+BUILD_MAX_ATTEMPTS=4
+while true; do
+  BUILD_ATTEMPT=$((BUILD_ATTEMPT + 1))
+  BUILD_SUBMIT_LOG=$(mktemp)
+  if run_with_heartbeat "Cloud Build" "$BUILD_SUBMIT_LOG" \
+    gcloud builds submit . --config=cloudbuild.yaml --substitutions="$BUILD_SUBS" \
+      --project=$PROJECT --region=$REGION; then
+    # Identify this build, not whatever a concurrent deploy later writes to
+    # :latest. Fail closed if gcloud's success output lacks its build URL.
+    if ! BUILD_ID=$(python3 deploy/resolve_build_image.py build-id \
+      "$PROJECT" "$REGION" "$BUILD_SUBMIT_LOG"); then
+      echo "ERROR: Cloud Build succeeded but its ID could not be verified; refusing to deploy a mutable image tag." >&2
+      exit 1
+    fi
+    rm -f "$BUILD_SUBMIT_LOG"
+    BUILD_SUBMIT_LOG=""
+    break
+  fi
+  if [ "$BUILD_ATTEMPT" -lt "$BUILD_MAX_ATTEMPTS" ] \
+      && grep -qiE 'PERMISSION_DENIED|permission_denied|HTTPError 403|HTTP[[:space:]/:]+403|status[[:space:]:=]+403|does not have storage\.objects' "$BUILD_SUBMIT_LOG"; then
+    rm -f "$BUILD_SUBMIT_LOG"
+    BUILD_SUBMIT_LOG=""
+    BUILD_RETRY_DELAY=$((BUILD_ATTEMPT * 15))
+    echo "  ⚠ Cloud Build hit transient IAM propagation delay (attempt ${BUILD_ATTEMPT}/${BUILD_MAX_ATTEMPTS}); retrying in ${BUILD_RETRY_DELAY}s..."
+    sleep "$BUILD_RETRY_DELAY"
+    continue
+  fi
+  rm -f "$BUILD_SUBMIT_LOG"
+  BUILD_SUBMIT_LOG=""
+  exit 1
+done
+
+# Cloud Build reports the digest of the image it actually pushed. Using that
+# immutable image for both services prevents a later :latest push from changing
+# which code this deploy promotes between the worker and app steps.
+if ! IMAGE_DIGEST=$(gcloud builds describe "$BUILD_ID" \
+  --project="$PROJECT" --region="$REGION" --format=json \
+  | python3 deploy/resolve_build_image.py digest "$IMAGE"); then
+  echo "ERROR: could not verify the image digest from build ${BUILD_ID}; refusing to deploy a mutable image tag." >&2
+  exit 1
+fi
+DEPLOY_IMAGE="${IMAGE%:*}@${IMAGE_DIGEST}"
+echo "✓ Verified build ${BUILD_ID}; deploying immutable image ${DEPLOY_IMAGE}"
+
+phase "Completing overlapped infrastructure setup..."
+if ! wait "$INFRA_SETUP_PID"; then
+  INFRA_SETUP_PID=""
+  exit 1
+fi
+INFRA_SETUP_PID=""
+cat "$INFRA_SETUP_LOG"
+rm -f "$INFRA_SETUP_LOG"
+INFRA_SETUP_LOG=""
+
+# --- Cloud Run: worker (private, Cloud-Tasks-invoked) --------------------------
+# Cloud Run natively serves https://worker-${PROJECT_NUMBER}.${REGION}.run.app
+# on both first deploy and all subsequent deploys (listed in
+# metadata.annotations."run.googleapis.com/urls"). Using the deterministic
+# regional URL consistently avoids a second app revision rollout on cold deploy
+# and keeps warm redeploys 100% idempotent.
+WORKER_URL="https://worker-${PROJECT_NUMBER}.${REGION}.run.app"
+if [ "$APP_ONLY" = "1" ]; then
+  phase "Reusing existing 'worker' Cloud Run service (--app-only)..."
+  echo "[skip] Deploying 'worker' — skipped (--app-only); reusing the live service."
+  if ! gcloud run services describe worker --region=$REGION --project=$PROJECT >/dev/null 2>&1; then
+    echo "ERROR: --app-only given but no existing 'worker' service in ${PROJECT}/${REGION}." >&2
+    echo "       Deploy once without --app-only, then re-run with --app-only." >&2
+    exit 1
+  fi
+  echo "  Reusing worker: ${WORKER_URL}"
+else
+  phase "Deploying 'worker' Cloud Run service..."
+  gcloud run deploy worker --image "$DEPLOY_IMAGE" --region "$REGION" --project "$PROJECT" \
+    --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated \
+    --service-account="$RUNTIME_SA" \
+    --set-env-vars=ROLE=worker,GUNICORN_TIMEOUT=1830
+  add_run_invoker_binding worker "$REGION" "$PROJECT" "serviceAccount:${RUNTIME_SA}"
+  echo "✓ Worker deployed: ${WORKER_URL}"
+fi
+
+# --- Cloud Run: app (UI + same-origin /api control plane) -----------------------
+phase "Deploying 'app' Cloud Run service (AUTH_MODE=${AUTH_MODE})..."
+IAP_FLAG_AVAILABLE=true
+# IAP front door. The --iap flag (built-in IAP for Cloud Run, GA March 2026) may
+# not exist on older gcloud installs — gate it behind a CLI capability check and
+# fall back to a private deploy + manual enable instruction.
+if ! gcloud run deploy --help 2>/dev/null | grep -- '--iap' >/dev/null; then
+  IAP_FLAG_AVAILABLE=false
+fi
+if [ "$IAP_FLAG_AVAILABLE" = "true" ]; then
+  gcloud run deploy app --image "$DEPLOY_IMAGE" --region $REGION --project $PROJECT \
+    --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated --iap \
+    --service-account="$RUNTIME_SA" \
+    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI},DICTATION_ENABLED=${DICTATION_ENABLED},DICTATION_MODE=${DICTATION_MODE}
+else
+  # 'gcloud run deploy' on this CLI has no --iap flag, but a slightly older CLI
+  # can still enable IAP via 'gcloud run services update --iap'. Deploy private,
+  # then enable IAP with the update command, so the deploy turns IAP on itself
+  # instead of leaving it as a manual step. Only fall back to a printed manual
+  # step if 'services update' lacks --iap too.
+  echo "⚠ 'gcloud run deploy' lacks --iap; deploying the app private, then"
+  echo "  enabling IAP via 'gcloud run services update'."
+  gcloud run deploy app --image "$DEPLOY_IMAGE" --region $REGION --project $PROJECT \
+    --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated \
+    --service-account="$RUNTIME_SA" \
+    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI},DICTATION_ENABLED=${DICTATION_ENABLED},DICTATION_MODE=${DICTATION_MODE}
+  echo "Enabling IAP on 'app' (gcloud run services update --iap)..."
+  if gcloud run services update app --iap --region=$REGION --project=$PROJECT; then
+    echo "✓ IAP enabled on 'app'."
+    IAP_FLAG_AVAILABLE=true  # so the summary does not print a manual enable step
+  else
+    echo "⚠ Could not enable IAP automatically — this gcloud also lacks"
+    echo "  'run services update --iap'. Update the gcloud CLI, then run:"
+    echo "    gcloud run services update app --iap --region=$REGION --project=$PROJECT"
+  fi
+fi
+# The IAP service agent must hold run.invoker on the app service so IAP can
+# forward authenticated traffic to it (Cloud Run built-in IAP requirement).
+IAP_SA="service-${PROJECT_NUMBER}@gcp-sa-iap.iam.gserviceaccount.com"
+echo "Granting service-scoped run.invoker on 'app' to the IAP service agent..."
+add_run_invoker_binding app "$REGION" "$PROJECT" "serviceAccount:${IAP_SA}"
+APP_URL=$(gcloud run services describe app --region=$REGION --project=$PROJECT --format='value(status.url)')
+echo "✓ App deployed: ${APP_URL}"
+
+phase "Seeding Firestore config after both services are deployed..."
 # --- Seed Firestore config (front-door topology) --------------------------------
 echo "[>] Adding default Scene Machine configurations to Firestore..."
 ADC_TOKEN=$(gcloud auth application-default print-access-token)
@@ -888,208 +1117,6 @@ for template in creative_templates/*.json; do
     exit 1
   fi
 done
-) >"$INFRA_SETUP_LOG" 2>&1 &
-INFRA_SETUP_PID=$!
-
-# --- UI env + config (rendered at SCRIPT_START before UI_BUILD_PID) -----------
-phase "Rendering ui/src/env.ts and ui/definitions/config.json..."
-echo "  Front-door auth: IAP (the only deployable mode)"
-
-
-# --- UI build ------------------------------------------------------------------
-if [ "$SKIP_UI_BUILD" = "1" ]; then
-  if [ ! -d ui/dist ]; then
-    echo "ERROR: --skip-ui-build given but ui/dist does not exist." >&2
-    echo "       Run a normal deploy once (or 'cd ui && npx ng build') first." >&2
-    exit 1
-  fi
-  # The render above rewrote env.ts/config.json, but a skipped build leaves the
-  # OLD env baked into ui/dist. Refuse if that prior build was a local-dev,
-  # sign-in-disabled build, so --skip-ui-build can never ship one to production.
-  if grep -rqs 'controlPlaneMode:"none"' ui/dist || grep -rqs "controlPlaneMode:'none'" ui/dist; then
-    echo "ERROR: the existing ui/dist was built for local dev (controlPlaneMode 'none'," >&2
-    echo "       sign-in disabled). Refusing to deploy it. Drop --skip-ui-build and run a" >&2
-    echo "       normal deploy to rebuild the UI first." >&2
-    exit 1
-  fi
-  phase "Reusing existing ui/dist (--skip-ui-build)..."
-  echo "[skip] Building the Angular UI — skipped (--skip-ui-build); reusing ui/dist."
-else
-  phase "Building the Angular UI (npm ci + ng build)..."
-  if ! wait "$UI_BUILD_PID"; then
-    UI_BUILD_PID=""
-    exit 1
-  fi
-  UI_BUILD_PID=""
-  cat "$UI_BUILD_LOG"
-  rm -f "$UI_BUILD_LOG"
-  UI_BUILD_LOG=""
-fi
-
-# --- Version stamp + Artifact Registry + ONE image build -----------------------
-phase "Building the single container image (Cloud Build)..."
-# Version stamp (with a fallback so a missing/
-# detached git checkout doesn't abort the whole deploy under set -e).
-COMMIT_DATE=$(git log -1 --format=%cI 2>/dev/null || echo "unknown")
-GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-echo "${GIT_BRANCH}/${COMMIT_DATE}" > deployed_version.txt
-sync
-if ! gcloud artifacts repositories describe "${ARTIFACT_REPO}" --project=$PROJECT --location="$REGION" &> /dev/null; then
-  echo "Creating artifact repository: $ARTIFACT_REPO"
-  gcloud artifacts repositories create "${ARTIFACT_REPO}" --repository-format=docker --project=$PROJECT --location="$REGION"
-fi
-BUILD_MACHINE_ARGS=()
-if [ "$NO_BUILD_CACHE" = "1" ] || ! gcloud artifacts docker images describe "${IMAGE}:latest" --project="$PROJECT" &> /dev/null; then
-  BUILD_MACHINE_ARGS=(--machine-type=e2-highcpu-8)
-fi
-# NOTE: the repo's .gcloudignore excludes ui/* but re-includes ui/dist/ and
-# ui/remix-engine-status-viewer/ — both are LOAD-BEARING for this build: the
-# front-door app service serves the built SPA (ui/dist/ui/browser) and the
-# status viewer from inside this single image. Verify they made it into the
-# upload if static serving 404s.
-# Build logs go to Cloud Logging, NOT a GCS bucket (cloudbuild.yaml sets
-# logging: CLOUD_LOGGING_ONLY) — the same thing the original `gcloud run deploy
-# --source` flow did, and the fix for VPC Service Controls (issue H): the default
-# GCS logs bucket is always OUTSIDE the perimeter so its logs can't be streamed,
-# but Cloud Logging is unaffected, so the build runs and its logs are viewable in
-# the console. The build SA's logging.logWriter was granted earlier (IAM section)
-# so it has already propagated by now.
-echo "  Build logs → Cloud Logging (console):"
-echo "    https://console.cloud.google.com/cloud-build/builds?project=${PROJECT}"
-echo "  (this step is quiet — the build runs remotely; a heartbeat prints below)"
-# cloudbuild.yaml reuses cached layers by default; --no-build-cache forces a
-# cold rebuild (passes _USE_CACHE=0). IMAGE has no commas, so comma-joining the
-# substitutions is safe.
-BUILD_SUBS="_IMAGE=${IMAGE}"
-if [ "$NO_BUILD_CACHE" = "1" ]; then
-  BUILD_SUBS="${BUILD_SUBS},_USE_CACHE=0"
-  echo "  Docker layer cache: OFF (--no-build-cache; forcing a cold rebuild)."
-else
-  echo "  Docker layer cache: ON (reuses unchanged layers from the previous image)."
-fi
-BUILD_ATTEMPT=0
-BUILD_MAX_ATTEMPTS=4
-while true; do
-  BUILD_ATTEMPT=$((BUILD_ATTEMPT + 1))
-  BUILD_SUBMIT_LOG=$(mktemp)
-  if run_with_heartbeat "Cloud Build" \
-    gcloud builds submit . --config=cloudbuild.yaml --substitutions="$BUILD_SUBS" \
-      "${BUILD_MACHINE_ARGS[@]}" --project=$PROJECT --region=$REGION 2>&1 | tee "$BUILD_SUBMIT_LOG"; then
-    rm -f "$BUILD_SUBMIT_LOG"
-    BUILD_SUBMIT_LOG=""
-    break
-  fi
-  if [ "$BUILD_ATTEMPT" -lt "$BUILD_MAX_ATTEMPTS" ] \
-      && grep -qiE 'PERMISSION_DENIED|permission_denied|HTTPError 403|HTTP[[:space:]/:]+403|status[[:space:]:=]+403|does not have storage\.objects' "$BUILD_SUBMIT_LOG"; then
-    rm -f "$BUILD_SUBMIT_LOG"
-    BUILD_SUBMIT_LOG=""
-    BUILD_RETRY_DELAY=$((BUILD_ATTEMPT * 15))
-    echo "  ⚠ Cloud Build hit transient IAM propagation delay (attempt ${BUILD_ATTEMPT}/${BUILD_MAX_ATTEMPTS}); retrying in ${BUILD_RETRY_DELAY}s..."
-    sleep "$BUILD_RETRY_DELAY"
-    continue
-  fi
-  rm -f "$BUILD_SUBMIT_LOG"
-  BUILD_SUBMIT_LOG=""
-  exit 1
-done
-
-phase "Completing overlapped infrastructure & Firestore setup..."
-if ! wait "$INFRA_SETUP_PID"; then
-  INFRA_SETUP_PID=""
-  exit 1
-fi
-INFRA_SETUP_PID=""
-cat "$INFRA_SETUP_LOG"
-rm -f "$INFRA_SETUP_LOG"
-INFRA_SETUP_LOG=""
-
-# --- Cloud Run: worker (private, Cloud-Tasks-invoked) --------------------------
-# Cloud Run natively serves https://worker-${PROJECT_NUMBER}.${REGION}.run.app
-# on both first deploy and all subsequent deploys (listed in
-# metadata.annotations."run.googleapis.com/urls"). Using the deterministic
-# regional URL consistently avoids a second app revision rollout on cold deploy
-# and keeps warm redeploys 100% idempotent.
-WORKER_URL="https://worker-${PROJECT_NUMBER}.${REGION}.run.app"
-if [ "$APP_ONLY" = "1" ]; then
-  phase "Reusing existing 'worker' Cloud Run service (--app-only)..."
-  echo "[skip] Deploying 'worker' — skipped (--app-only); reusing the live service."
-  if ! gcloud run services describe worker --region=$REGION --project=$PROJECT >/dev/null 2>&1; then
-    echo "ERROR: --app-only given but no existing 'worker' service in ${PROJECT}/${REGION}." >&2
-    echo "       Deploy once without --app-only, then re-run with --app-only." >&2
-    exit 1
-  fi
-  echo "  Reusing worker: ${WORKER_URL}"
-else
-  WORKER_ERR_FILE=$(mktemp)
-  (
-    if ! gcloud run deploy worker --image "$IMAGE" --region "$REGION" --project "$PROJECT" \
-      --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated \
-      --service-account="$RUNTIME_SA" \
-      --set-env-vars=ROLE=worker,GUNICORN_TIMEOUT=1830 >/dev/null 2>"$WORKER_ERR_FILE"; then
-      exit 1
-    fi
-    add_run_invoker_binding worker "$REGION" "$PROJECT" "serviceAccount:${RUNTIME_SA}" >/dev/null 2>>"$WORKER_ERR_FILE"
-  ) &
-  WORKER_DEPLOY_PID=$!
-fi
-
-# --- Cloud Run: app (UI + same-origin /api control plane) -----------------------
-if [ "$APP_ONLY" = "1" ]; then
-  phase "Deploying 'app' Cloud Run service (AUTH_MODE=${AUTH_MODE})..."
-else
-  phase "Deploying 'worker' and 'app' Cloud Run services in parallel (AUTH_MODE=${AUTH_MODE})..."
-fi
-IAP_FLAG_AVAILABLE=true
-# IAP front door. The --iap flag (built-in IAP for Cloud Run, GA March 2026) may
-# not exist on older gcloud installs — gate it behind a CLI capability check and
-# fall back to a private deploy + manual enable instruction.
-if ! gcloud run deploy --help 2>/dev/null | grep -q -- '--iap'; then
-  IAP_FLAG_AVAILABLE=false
-fi
-if [ "$IAP_FLAG_AVAILABLE" = "true" ]; then
-  gcloud run deploy app --image "$IMAGE" --region $REGION --project $PROJECT \
-    --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated --iap \
-    --service-account="$RUNTIME_SA" \
-    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI},DICTATION_ENABLED=${DICTATION_ENABLED},DICTATION_MODE=${DICTATION_MODE}
-else
-  # 'gcloud run deploy' on this CLI has no --iap flag, but a slightly older CLI
-  # can still enable IAP via 'gcloud run services update --iap'. Deploy private,
-  # then enable IAP with the update command, so the deploy turns IAP on itself
-  # instead of leaving it as a manual step. Only fall back to a printed manual
-  # step if 'services update' lacks --iap too.
-  echo "⚠ 'gcloud run deploy' lacks --iap; deploying the app private, then"
-  echo "  enabling IAP via 'gcloud run services update'."
-  gcloud run deploy app --image "$IMAGE" --region $REGION --project $PROJECT \
-    --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated \
-    --service-account="$RUNTIME_SA" \
-    --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI},DICTATION_ENABLED=${DICTATION_ENABLED},DICTATION_MODE=${DICTATION_MODE}
-  echo "Enabling IAP on 'app' (gcloud run services update --iap)..."
-  if gcloud run services update app --iap --region=$REGION --project=$PROJECT; then
-    echo "✓ IAP enabled on 'app'."
-    IAP_FLAG_AVAILABLE=true  # so the summary does not print a manual enable step
-  else
-    echo "⚠ Could not enable IAP automatically — this gcloud also lacks"
-    echo "  'run services update --iap'. Update the gcloud CLI, then run:"
-    echo "    gcloud run services update app --iap --region=$REGION --project=$PROJECT"
-  fi
-fi
-# The IAP service agent must hold run.invoker on the app service so IAP can
-# forward authenticated traffic to it (Cloud Run built-in IAP requirement).
-IAP_SA="service-${PROJECT_NUMBER}@gcp-sa-iap.iam.gserviceaccount.com"
-echo "Granting service-scoped run.invoker on 'app' to the IAP service agent..."
-add_run_invoker_binding app "$REGION" "$PROJECT" "serviceAccount:${IAP_SA}"
-if [ -n "$WORKER_DEPLOY_PID" ]; then
-  if ! wait "$WORKER_DEPLOY_PID"; then
-    WORKER_DEPLOY_PID=""
-    exit 1
-  fi
-  WORKER_DEPLOY_PID=""
-  rm -f "$WORKER_ERR_FILE"
-  WORKER_ERR_FILE=""
-  echo "✓ Worker deployed: ${WORKER_URL}"
-fi
-APP_URL=$(gcloud run services describe app --region=$REGION --project=$PROJECT --format='value(status.url)')
-echo "✓ App deployed: ${APP_URL}"
 # Nothing was predicted: the image carries only same-origin URLs, so the app and
 # its status viewer work on this first deploy. The actual Cloud Run hosts,
 # known only now, feed the GCS bucket CORS list below, so the browser

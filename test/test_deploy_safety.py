@@ -11,6 +11,9 @@ import json
 import os
 import subprocess
 import sys
+import signal
+import time
+import textwrap
 
 import pytest
 
@@ -788,26 +791,38 @@ def _verify_dockerfile_security_invariants(dockerfile: str) -> None:
   ]
   normalized = re.sub(r"\\\s*\n", " ", "\n".join(uncommented_lines))
 
-  raw_from_matches = re.findall(
-      r"^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?",
-      normalized,
-      re.MULTILINE | re.IGNORECASE,
-  )
-  assert (
-      raw_from_matches
-  ), "Expected at least one FROM instruction in Dockerfile"
-  stage_names = {alias.lower() for _, alias in raw_from_matches if alias}
-  for ref, _ in raw_from_matches:
-    if ref.lower() in stage_names:
-      continue
-    assert "@sha256:" in ref, f"Unpinned FROM image in Dockerfile: {ref}"
+  stage_names = set()
+  stage_count = 0
+  for line in normalized.splitlines():
+    from_match = re.match(
+        r"^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?",
+        line,
+        re.IGNORECASE,
+    )
+    if from_match:
+      ref, alias = from_match.groups()
+      is_prior_stage = ref.lower() in stage_names or (
+          ref.isdigit() and int(ref) < stage_count
+      )
+      if not is_prior_stage:
+        assert re.search(r"@sha256:[0-9a-f]{64}$", ref), (
+            f"Unpinned FROM image in Dockerfile: {ref}"
+        )
+      stage_count += 1
+      if alias:
+        stage_names.add(alias.lower())
 
-  for ref in re.findall(
-      r"COPY\s+(?:--(?!from=)\S+\s+)*--from=(\S+)", normalized, re.IGNORECASE
-  ):
-    if ref.lower() in stage_names:
-      continue
-    assert "@sha256:" in ref, f"Unpinned COPY --from image in Dockerfile: {ref}"
+    for ref in re.findall(
+        r"\bCOPY\s+(?:--(?!from=)\S+\s+)*--from=(\S+)", line, re.IGNORECASE
+    ):
+      is_prior_stage = ref.lower() in stage_names or (
+          ref.isdigit() and int(ref) < stage_count
+      )
+      if not is_prior_stage:
+        assert re.search(r"@sha256:[0-9a-f]{64}$", ref), (
+            f"Unpinned COPY --from image in Dockerfile: {ref}"
+        )
+  assert stage_count, "Expected at least one FROM instruction in Dockerfile"
 
   uv_install_cmds = [
       line
@@ -853,6 +868,18 @@ def test_dockerfile_external_images_are_digest_pinned_and_hash_verified():
             "FROM --platform=linux/amd64@sha256:0000 unpinned:latest AS final",
         )
     )
+  with pytest.raises(AssertionError, match="Unpinned FROM image"):
+    _verify_dockerfile_security_invariants(
+        "FROM alpine AS injected\n"
+        + dockerfile.replace("FROM runtime-base AS final", "FROM runtime-base AS alpine")
+    )
+  for bad_ref in ("alpine:latest@sha256:", "alpine:latest@sha256:not-a-digest"):
+    with pytest.raises(AssertionError, match="Unpinned FROM image"):
+      _verify_dockerfile_security_invariants(
+          dockerfile.replace(
+              "FROM runtime-base AS final", f"FROM {bad_ref} AS final"
+          )
+      )
 
 
 def test_add_iam_binding_caches_policy_and_recovers_after_fetch_error(tmp_path):
@@ -913,6 +940,10 @@ def test_deploy_cleanup_trap_dumps_logs_and_unlinks_on_abort(tmp_path):
   )
   assert match, "Expected cleanup() and trap cleanup EXIT in deploy.sh"
   trap_block = match.group(1)
+  assert re.search(r'UI_BUILD_LOG=\$\(mktemp\)\s+.*?set -m\s+\(', deploy_sh, re.DOTALL)
+  assert re.search(r'UI_BUILD_PID=\$!\s+set \+m', deploy_sh)
+  assert re.search(r'INFRA_SETUP_LOG=\$\(mktemp\)\s+set -m\s+\(', deploy_sh)
+  assert re.search(r'INFRA_SETUP_PID=\$!\s+set \+m', deploy_sh)
 
   # 1. Pre-flight abort (PIDs/logs still empty) must not fail under set -u.
   preflight = subprocess.run(
@@ -926,13 +957,18 @@ def test_deploy_cleanup_trap_dumps_logs_and_unlinks_on_abort(tmp_path):
 
   # 2. Mid-deploy abort dumps non-empty background log to stderr and unlinks it.
   bg_log = tmp_path / "infra.log"
+  child_pid_file = tmp_path / 'infra-child.pid'
   bg_log.write_text("Firestore DB 1 created\nSeed failed HTTP 404\n")
   abort_run = subprocess.run(
       [
           "bash",
           "-c",
           f'set -euo pipefail\n{trap_block}\nINFRA_SETUP_LOG="{bg_log}"\n'
-          "( sleep 30 ) &\nINFRA_SETUP_PID=$!\nexit 1\n",
+          'set -m\n'
+          f'( sleep 30 & echo "$!" > "{child_pid_file}"; wait ) &\n'
+          'INFRA_SETUP_PID=$!\nset +m\n'
+          f'while [ ! -f "{child_pid_file}" ]; do sleep 0.01; done\n'
+          'exit 1\n',
       ],
       capture_output=True,
       text=True,
@@ -942,3 +978,255 @@ def test_deploy_cleanup_trap_dumps_logs_and_unlinks_on_abort(tmp_path):
   assert "--- background log:" in abort_run.stderr
   assert "Seed failed HTTP 404" in abort_run.stderr
   assert not bg_log.exists(), "Expected cleanup trap to unlink background log"
+  assert not _pid_exists(int(child_pid_file.read_text())), (
+      'Expected cleanup trap to stop the infra job child'
+  )
+
+
+def test_deploy_failure_gates_app_and_config_seeding():
+  """A failed worker rollout must stop before app promotion or config writes."""
+  text = _deploy_sh()
+  worker = text.index('gcloud run deploy worker --image')
+  worker_binding = text.index('add_run_invoker_binding worker', worker)
+  app = text.index('gcloud run deploy app --image', worker_binding)
+  app_binding = text.index('add_run_invoker_binding app', app)
+  seed = text.index('CONFIG_SEED_STATUS=$(curl', app_binding)
+  assert worker < worker_binding < app < app_binding < seed
+  assert '${IMAGE}:latest' not in text
+  assert 'BUILD_MACHINE_ARGS' not in text
+  assert '--machine-type=' not in text
+  assert '.package-lock.stamp' not in text
+  assert '( cd ui && npm ci )' in text
+  assert not re.search(r'run_with_heartbeat[^\n]*\|\s*tee', text)
+  assert '--image "$DEPLOY_IMAGE"' in text
+  assert 'DEPLOY_IMAGE="${IMAGE%:*}@${IMAGE_DIGEST}"' in text
+
+
+@pytest.mark.parametrize('failure', ['deploy', 'binding'])
+def test_worker_failure_stops_before_app_rollout_or_seeding(tmp_path, failure):
+  """Execute the real worker phase with a failing fake gcloud/binding."""
+  text = _deploy_sh()
+  start = text.index('WORKER_URL="https://worker-')
+  end = text.index('# --- Cloud Run: app', start)
+  worker_phase = text[start:end]
+  calls = tmp_path / 'calls'
+  script = f'''
+set -euo pipefail
+APP_ONLY=0 PROJECT=p REGION=us-central1 PROJECT_NUMBER=123
+IMAGE=pkg:latest DEPLOY_IMAGE=pkg@sha256:{'a' * 64} RUNTIME_SA=runtime@example.com
+CALLS="{calls}" FAILURE="{failure}"
+phase() {{ :; }}
+gcloud() {{
+  printf '%s\n' "$*" >> "$CALLS"
+  if [ "$FAILURE" = deploy ] && [ "$1 $2 $3" = 'run deploy worker' ]; then return 7; fi
+}}
+add_run_invoker_binding() {{
+  printf 'binding %s\n' "$*" >> "$CALLS"
+  if [ "$FAILURE" = binding ]; then return 8; fi
+}}
+{worker_phase}
+printf 'app phase reached\n' >> "$CALLS"
+'''
+  proc = subprocess.run(['/bin/bash', '-c', script], capture_output=True, text=True)
+  assert proc.returncode != 0, proc.stdout + proc.stderr
+  recorded = calls.read_text()
+  assert 'run deploy worker' in recorded
+  assert 'app phase reached' not in recorded
+  assert 'run deploy app' not in recorded
+  assert 'seed' not in recorded
+
+
+def test_build_receipt_resolves_only_its_own_successful_image(tmp_path):
+  helper = _REPO / 'deploy' / 'resolve_build_image.py'
+  build = '957c2a44-0012-4e80-8666-3fecfc199401'
+  project, region = 'pr206-test', 'us-central1'
+  log = tmp_path / 'build.log'
+  log.write_text(
+      f'Created [https://cloudbuild.googleapis.com/v1/projects/{project}/locations/{region}/builds/{build}].\n'
+  )
+  found = subprocess.run(
+      [sys.executable, str(helper), 'build-id', project, region, str(log)],
+      capture_output=True, text=True,
+  )
+  assert found.returncode == 0, found.stderr
+  assert found.stdout.strip() == build
+  wrong_project = subprocess.run(
+      [sys.executable, str(helper), 'build-id', 'other-project', region, str(log)],
+      capture_output=True, text=True,
+  )
+  assert wrong_project.returncode != 0
+
+  image = f'{region}-docker.pkg.dev/{project}/repo/app:latest'
+  receipt = {
+      'status': 'SUCCESS',
+      'results': {'images': [
+          {'name': image, 'digest': 'sha256:' + 'a' * 64},
+          {'name': image.removesuffix(':latest'), 'digest': 'sha256:' + 'a' * 64},
+      ]},
+  }
+  resolved = subprocess.run(
+      [sys.executable, str(helper), 'digest', image], input=json.dumps(receipt),
+      capture_output=True, text=True,
+  )
+  assert resolved.returncode == 0, resolved.stderr
+  assert resolved.stdout.strip() == 'sha256:' + 'a' * 64
+  for bad in (
+      {**receipt, 'status': 'FAILURE'},
+      {**receipt, 'results': {'images': [{'name': image, 'digest': 'sha256:short'}]}},
+      {**receipt, 'results': {'images': []}},
+      None,
+      {**receipt, 'results': None},
+      {**receipt, 'results': {'images': [None]}},
+  ):
+    rejected = subprocess.run(
+        [sys.executable, str(helper), 'digest', image], input=json.dumps(bad),
+        capture_output=True, text=True,
+    )
+    assert rejected.returncode != 0
+    assert 'Traceback' not in rejected.stderr
+
+
+def test_cloud_build_cold_image_still_exports_cache_for_the_next_warm_build(tmp_path):
+  """Run both actual Cloud Build shell branches against a recording docker."""
+  cloudbuild = (_REPO / 'cloudbuild.yaml').read_text(encoding='utf-8')
+  assert cloudbuild.count('      - |\n') == 1
+  script = textwrap.dedent(
+      cloudbuild.split('      - |\n', 1)[1].split('\nsubstitutions:', 1)[0]
+  )
+  fake_bin = tmp_path / 'bin'
+  fake_bin.mkdir()
+  docker = fake_bin / 'docker'
+  docker.write_text(
+      '#!/bin/sh\nprintf "%s\\n" "$*" >> "$DOCKER_LOG"\n'
+      'if [ "${DOCKER_PULL_FAIL:-0}" = 1 ] && [ "$1" = pull ]; then exit 1; fi\n'
+  )
+  docker.chmod(0o755)
+  image = 'us-central1-docker.pkg.dev/trial/repo/app:latest'
+  for use_cache, pull_fails in (('0', False), ('1', False), ('1', True)):
+    calls = tmp_path / f'docker-{use_cache}-{pull_fails}.log'
+    env = {
+        **os.environ,
+        'PATH': f'{fake_bin}:{os.environ["PATH"]}',
+        'DOCKER_LOG': str(calls),
+        '_IMAGE': image,
+        '_USE_CACHE': use_cache,
+        'DOCKER_PULL_FAIL': '1' if pull_fails else '0',
+    }
+    run = subprocess.run(['/bin/bash', '-c', script], env=env,
+                         capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+    commands = calls.read_text().splitlines()
+    build = next((line for line in commands if line.startswith('build ')), '')
+    assert build, commands
+    assert f'-t {image}' in build
+    assert '--build-arg BUILDKIT_INLINE_CACHE=1' in build
+    if use_cache == '1':
+      assert commands[0] == f'pull {image}'
+      assert f'--cache-from {image}' in build
+      assert '--no-cache' not in build
+    else:
+      assert len(commands) == 1, commands
+      assert '--no-cache' in build
+      assert '--cache-from' not in build
+
+
+@pytest.mark.parametrize('no_build_cache, expected', [('0', None), ('1', '_USE_CACHE=0')])
+def test_deploy_cache_flag_reaches_cloud_build_substitution(no_build_cache, expected):
+  """Exercise the deploy flag's actual substitution assembly under Bash 3.2."""
+  deploy = _deploy_sh()
+  assert '--substitutions="$BUILD_SUBS"' in deploy
+  match = re.search(r'(BUILD_SUBS="_IMAGE=\$\{IMAGE\}".*?\nfi)', deploy, re.DOTALL)
+  assert match, 'Expected Cloud Build substitution assembly in deploy.sh'
+  script = (
+      'set -euo pipefail\nIMAGE=example:latest\n'
+      f'NO_BUILD_CACHE={no_build_cache}\n{match.group(1)}\n'
+      'printf "%s" "$BUILD_SUBS"\n'
+  )
+  run = subprocess.run(['/bin/bash', '-c', script], capture_output=True, text=True)
+  assert run.returncode == 0, run.stderr
+  substitutions = run.stdout.splitlines()[-1]
+  assert substitutions.startswith('_IMAGE=example:latest')
+  assert ('_USE_CACHE=0' in substitutions) == (expected is not None)
+
+
+def _pid_exists(pid: int) -> bool:
+  try:
+    os.kill(pid, 0)
+    return True
+  except ProcessLookupError:
+    return False
+
+
+def test_heartbeat_cleanup_kills_command_and_descendants_on_signal(tmp_path):
+  """The real Bash 3.2 EXIT trap must stop a heartbeat-wrapped process tree."""
+  text = _deploy_sh()
+  heartbeat = re.search(r'(run_with_heartbeat\(\) \{.*?\n\})', text, re.DOTALL)
+  cleanup = re.search(
+      r'(UI_BUILD_PID="";.*?trap \'exit 143\' TERM)', text, re.DOTALL
+  )
+  assert heartbeat and cleanup
+  heartbeat_block = heartbeat.group(1).replace(
+      'HEARTBEAT_PID=$!',
+      'HEARTBEAT_PID=$!; echo "$HEARTBEAT_PID" > "$PID_DIR/heartbeat"',
+  )
+  assert heartbeat_block != heartbeat.group(1)
+  log = tmp_path / 'build.log'
+  pid_dir = tmp_path / 'pids'
+  pid_dir.mkdir()
+  fake_command = tmp_path / 'fake-build.sh'
+  fake_command.write_text(
+      '#!/bin/bash\n'
+      'echo "$$" > "$PID_DIR/command"\n'
+      'echo "fake build started"\n'
+      'bash -c \'echo "$$" > "$PID_DIR/child"; '
+      'sleep 30 & echo "$!" > "$PID_DIR/grandchild"; wait\' &\n'
+      'wait\n',
+      encoding='utf-8',
+  )
+  fake_command.chmod(0o755)
+  script = (
+      'set -euo pipefail\n'
+      + 'fmt_hms() { printf "%ss" "$1"; }\n'
+      + heartbeat_block + '\n'
+      + cleanup.group(1) + '\n'
+      + 'HEARTBEAT_SECS=30\n'
+      + f'BUILD_SUBMIT_LOG="{log}"\n'
+      + f'run_with_heartbeat "Build" "{log}" "{fake_command}"\n'
+  )
+  env = {**os.environ, 'PID_DIR': str(pid_dir)}
+  proc = subprocess.Popen(
+      ['/bin/bash', '-c', script],
+      stdout=subprocess.PIPE,
+      stderr=subprocess.PIPE,
+      text=True,
+      env=env,
+  )
+  pids = []
+  try:
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+      if all((pid_dir / name).exists() for name in ('command', 'child', 'grandchild', 'heartbeat')):
+        break
+      time.sleep(0.05)
+    else:
+      pytest.fail('Fake build did not start its full process tree')
+    pids = [int((pid_dir / name).read_text()) for name in ('command', 'child', 'grandchild', 'heartbeat')]
+    os.kill(proc.pid, signal.SIGTERM)
+    stdout, stderr = proc.communicate(timeout=10)
+    assert proc.returncode == 143, (stdout, stderr)
+    assert '--- background log:' in stderr
+    deadline = time.monotonic() + 4
+    while time.monotonic() < deadline and any(_pid_exists(pid) for pid in pids):
+      time.sleep(0.05)
+    alive = [pid for pid in pids if _pid_exists(pid)]
+    assert not alive, f'Deploy cleanup left descendants alive: {alive}'
+    assert not log.exists(), 'Expected cleanup to remove the build log'
+  finally:
+    if proc.poll() is None:
+      proc.kill()
+      proc.communicate(timeout=5)
+    for pid in pids:
+      try:
+        os.kill(pid, signal.SIGKILL)
+      except ProcessLookupError:
+        pass

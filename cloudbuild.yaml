@@ -9,7 +9,7 @@
 # Layer caching (faster repeat deploys): by default the build pulls the
 # previously pushed :latest image and passes it to `docker build --cache-from`,
 # so unchanged layers are reused instead of rebuilt. The slow builder-stage
-# `pip install` only re-runs when requirements.txt changes. Two details make
+# `uv pip install` only re-runs when requirements.txt changes. Two details make
 # this actually work:
 #   * the pull is best-effort (`|| true`): the first build on a fresh project has
 #     nothing to pull and must not fail;
@@ -18,7 +18,8 @@
 #     build can read these layers back. Without the inline-cache arg,
 #     --cache-from finds the image but gets zero cache hits.
 # Set _USE_CACHE=0 (deploy.sh --no-build-cache) to force a clean cold rebuild,
-# e.g. a release or a dependency/CVE refresh.
+# e.g. a dependency/CVE refresh. Keep inline-cache metadata on that fresh image
+# so the next ordinary redeploy can reuse its unchanged layers.
 steps:
   - name: 'gcr.io/cloud-builders/docker'
     entrypoint: 'bash'
@@ -36,7 +37,11 @@ steps:
             .
         else
           echo "Layer cache OFF: forced cold rebuild (--no-build-cache)."
-          DOCKER_BUILDKIT=1 docker build -t "${_IMAGE}" .
+          DOCKER_BUILDKIT=1 docker build \
+            -t "${_IMAGE}" \
+            --no-cache \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            .
         fi
 substitutions:
   _USE_CACHE: '1'
