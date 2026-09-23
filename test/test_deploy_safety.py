@@ -788,24 +788,23 @@ def _verify_dockerfile_security_invariants(dockerfile: str) -> None:
   ]
   normalized = re.sub(r"\\\s*\n", " ", "\n".join(uncommented_lines))
 
-  stage_names = {
-      name.lower()
-      for name in re.findall(
-          r"^\s*FROM\s+\S+\s+AS\s+(\S+)",
-          normalized,
-          re.MULTILINE | re.IGNORECASE,
-      )
-  }
-  from_refs = re.findall(
-      r"^\s*FROM\s+(\S+)", normalized, re.MULTILINE | re.IGNORECASE
+  raw_from_matches = re.findall(
+      r"^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?",
+      normalized,
+      re.MULTILINE | re.IGNORECASE,
   )
-  assert from_refs, "Expected at least one FROM instruction in Dockerfile"
-  for ref in from_refs:
+  assert (
+      raw_from_matches
+  ), "Expected at least one FROM instruction in Dockerfile"
+  stage_names = {alias.lower() for _, alias in raw_from_matches if alias}
+  for ref, _ in raw_from_matches:
     if ref.lower() in stage_names:
       continue
     assert "@sha256:" in ref, f"Unpinned FROM image in Dockerfile: {ref}"
 
-  for ref in re.findall(r"COPY\s+--from=(\S+)", normalized, re.IGNORECASE):
+  for ref in re.findall(
+      r"COPY\s+(?:--(?!from=)\S+\s+)*--from=(\S+)", normalized, re.IGNORECASE
+  ):
     if ref.lower() in stage_names:
       continue
     assert "@sha256:" in ref, f"Unpinned COPY --from image in Dockerfile: {ref}"
@@ -824,7 +823,7 @@ def _verify_dockerfile_security_invariants(dockerfile: str) -> None:
 
 
 def test_dockerfile_external_images_are_digest_pinned_and_hash_verified():
-  """Every external image in Dockerfile must be @sha256-pinned and uv verified."""
+  """External Dockerfile images must be @sha256-pinned and uv verified."""
   dockerfile = _dockerfile()
   _verify_dockerfile_security_invariants(dockerfile)
 
@@ -845,6 +844,13 @@ def test_dockerfile_external_images_are_digest_pinned_and_hash_verified():
     _verify_dockerfile_security_invariants(
         dockerfile.replace(
             "FROM runtime-base AS final", "from alpine:latest as final"
+        )
+    )
+  with pytest.raises(AssertionError, match="Unpinned FROM image"):
+    _verify_dockerfile_security_invariants(
+        dockerfile.replace(
+            "FROM runtime-base AS final",
+            "FROM --platform=linux/amd64@sha256:0000 unpinned:latest AS final",
         )
     )
 
@@ -900,7 +906,7 @@ def test_add_iam_binding_caches_policy_and_recovers_after_fetch_error(tmp_path):
 
 
 def test_deploy_cleanup_trap_dumps_logs_and_unlinks_on_abort(tmp_path):
-  """The EXIT trap in deploy.sh dumps background logs and reaps jobs on abort."""
+  """The EXIT trap in deploy.sh dumps background logs and reaps jobs."""
   deploy_sh = (_REPO / "deploy.sh").read_text(encoding="utf-8")
   match = re.search(
       r"(UI_BUILD_PID=\"\";.*?trap cleanup EXIT)", deploy_sh, re.DOTALL

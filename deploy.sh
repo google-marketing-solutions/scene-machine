@@ -408,14 +408,22 @@ echo "════════════════════════�
 SCRIPT_START=$(date +%s)
 
 UI_BUILD_PID=""; INFRA_SETUP_PID=""; WORKER_DEPLOY_PID=""
-UI_BUILD_LOG=""; INFRA_SETUP_LOG=""; WORKER_ERR_FILE=""
+UI_BUILD_LOG=""; INFRA_SETUP_LOG=""; WORKER_ERR_FILE=""; BUILD_SUBMIT_LOG=""
+
+kill_tree() {
+  local p="$1" c
+  for c in $(pgrep -P "$p" 2>/dev/null || true); do
+    kill_tree "$c"
+  done
+  kill "$p" 2>/dev/null || true
+}
 
 cleanup() {
   local pid log
   for pid in "${UI_BUILD_PID:-}" "${INFRA_SETUP_PID:-}" "${WORKER_DEPLOY_PID:-}"; do
     [ -n "$pid" ] || continue
-    pkill -P "$pid" 2>/dev/null || true
-    kill -- "-${pid}" 2>/dev/null || kill "$pid" 2>/dev/null || true
+    kill_tree "$pid"
+    kill -- "-${pid}" 2>/dev/null || true
   done
   for log in "${UI_BUILD_LOG:-}" "${INFRA_SETUP_LOG:-}" "${WORKER_ERR_FILE:-}"; do
     [ -n "$log" ] || continue
@@ -425,6 +433,7 @@ cleanup() {
     fi
     rm -f "$log"
   done
+  [ -n "${BUILD_SUBMIT_LOG:-}" ] && rm -f "$BUILD_SUBMIT_LOG" || true
 }
 trap cleanup EXIT
 
@@ -967,17 +976,20 @@ while true; do
     gcloud builds submit . --config=cloudbuild.yaml --substitutions="$BUILD_SUBS" \
       "${BUILD_MACHINE_ARGS[@]}" --project=$PROJECT --region=$REGION 2>&1 | tee "$BUILD_SUBMIT_LOG"; then
     rm -f "$BUILD_SUBMIT_LOG"
+    BUILD_SUBMIT_LOG=""
     break
   fi
   if [ "$BUILD_ATTEMPT" -lt "$BUILD_MAX_ATTEMPTS" ] \
-      && grep -qiE 'PERMISSION_DENIED|permission_denied|403|does not have storage\.objects' "$BUILD_SUBMIT_LOG"; then
+      && grep -qiE 'PERMISSION_DENIED|permission_denied|HTTPError 403|HTTP[[:space:]/:]+403|status[[:space:]:=]+403|does not have storage\.objects' "$BUILD_SUBMIT_LOG"; then
     rm -f "$BUILD_SUBMIT_LOG"
+    BUILD_SUBMIT_LOG=""
     BUILD_RETRY_DELAY=$((BUILD_ATTEMPT * 15))
     echo "  ⚠ Cloud Build hit transient IAM propagation delay (attempt ${BUILD_ATTEMPT}/${BUILD_MAX_ATTEMPTS}); retrying in ${BUILD_RETRY_DELAY}s..."
     sleep "$BUILD_RETRY_DELAY"
     continue
   fi
   rm -f "$BUILD_SUBMIT_LOG"
+  BUILD_SUBMIT_LOG=""
   exit 1
 done
 
@@ -992,20 +1004,22 @@ rm -f "$INFRA_SETUP_LOG"
 INFRA_SETUP_LOG=""
 
 # --- Cloud Run: worker (private, Cloud-Tasks-invoked) --------------------------
+# Cloud Run natively serves https://worker-${PROJECT_NUMBER}.${REGION}.run.app
+# on both first deploy and all subsequent deploys (listed in
+# metadata.annotations."run.googleapis.com/urls"). Using the deterministic
+# regional URL consistently avoids a second app revision rollout on cold deploy
+# and keeps warm redeploys 100% idempotent.
+WORKER_URL="https://worker-${PROJECT_NUMBER}.${REGION}.run.app"
 if [ "$APP_ONLY" = "1" ]; then
   phase "Reusing existing 'worker' Cloud Run service (--app-only)..."
   echo "[skip] Deploying 'worker' — skipped (--app-only); reusing the live service."
-  # The app deploy below needs WORKER_URL; read it from the live worker.
-  WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)' 2>/dev/null || true)
-  if [ -z "$WORKER_URL" ]; then
+  if ! gcloud run services describe worker --region=$REGION --project=$PROJECT >/dev/null 2>&1; then
     echo "ERROR: --app-only given but no existing 'worker' service in ${PROJECT}/${REGION}." >&2
     echo "       Deploy once without --app-only, then re-run with --app-only." >&2
     exit 1
   fi
   echo "  Reusing worker: ${WORKER_URL}"
 else
-  EXISTING_WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)' 2>/dev/null || true)
-  WORKER_URL="${EXISTING_WORKER_URL:-https://worker-${PROJECT_NUMBER}.${REGION}.run.app}"
   WORKER_ERR_FILE=$(mktemp)
   (
     if ! gcloud run deploy worker --image "$IMAGE" --region "$REGION" --project "$PROJECT" \
@@ -1072,12 +1086,6 @@ if [ -n "$WORKER_DEPLOY_PID" ]; then
   WORKER_DEPLOY_PID=""
   rm -f "$WORKER_ERR_FILE"
   WORKER_ERR_FILE=""
-  ACTUAL_WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)')
-  if [ -n "$ACTUAL_WORKER_URL" ] && [ "$WORKER_URL" != "$ACTUAL_WORKER_URL" ]; then
-    WORKER_URL="$ACTUAL_WORKER_URL"
-    gcloud run services update app --region=$REGION --project=$PROJECT \
-      --update-env-vars="WORKER_URL=${WORKER_URL}" --quiet >/dev/null
-  fi
   echo "✓ Worker deployed: ${WORKER_URL}"
 fi
 APP_URL=$(gcloud run services describe app --region=$REGION --project=$PROJECT --format='value(status.url)')
