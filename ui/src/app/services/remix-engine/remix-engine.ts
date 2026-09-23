@@ -1790,22 +1790,57 @@ export class RemixEngineService {
         }
         const existingCandidates = s.candidates ?? [];
         const candidates = [...existingCandidates, ...newCandidates];
-        const selectedCandidateIndex = s.selectedCandidateIndex;
+        const currentSelected =
+          s.selectedCandidateIndex !== undefined &&
+          Number.isInteger(s.selectedCandidateIndex) &&
+          s.selectedCandidateIndex >= 0 &&
+          s.selectedCandidateIndex < candidates.length &&
+          !candidates[s.selectedCandidateIndex].isArchived
+            ? s.selectedCandidateIndex
+            : undefined;
+        let nextSelectedIndex = currentSelected;
+        if (nextSelectedIndex === undefined) {
+          const firstNewActiveIndex = candidates.findIndex(
+            (c, idx) => idx >= existingCandidates.length && !c.isArchived,
+          );
+          if (firstNewActiveIndex >= 0) {
+            nextSelectedIndex = firstNewActiveIndex;
+          } else {
+            const firstActiveIndex = candidates.findIndex(c => !c.isArchived);
+            if (firstActiveIndex >= 0) {
+              nextSelectedIndex = firstActiveIndex;
+            }
+          }
+        }
+        const selectedCandidate =
+          nextSelectedIndex !== undefined
+            ? candidates[nextSelectedIndex]
+            : undefined;
         const updated: GeneratedScene = {
           ...s,
           ...(candidates.length ? {candidates} : {}),
-          ...(candidates.length
+          ...(nextSelectedIndex !== undefined
             ? {
-                selectedCandidateIndex:
-                  selectedCandidateIndex !== undefined &&
-                  Number.isInteger(selectedCandidateIndex) &&
-                  selectedCandidateIndex >= 0 &&
-                  selectedCandidateIndex < candidates.length
-                    ? selectedCandidateIndex
-                    : 0,
+                selectedCandidateIndex: nextSelectedIndex,
+                ...(currentSelected === undefined && selectedCandidate
+                  ? {
+                      prompt: selectedCandidate.prompt,
+                      referenceImage: selectedCandidate.referenceImage,
+                    }
+                  : {}),
               }
             : {}),
         };
+        if (nextSelectedIndex === undefined) {
+          delete updated.selectedCandidateIndex;
+        }
+        if (
+          currentSelected === undefined &&
+          selectedCandidate &&
+          !selectedCandidate.referenceImage
+        ) {
+          delete updated.referenceImage;
+        }
         if (!candidates.length) {
           delete updated.candidates;
           delete updated.selectedCandidateIndex;
@@ -2414,10 +2449,13 @@ export class RemixEngineService {
     if (transitionViolation) {
       throw new RenderContractError(transitionViolation);
     }
-    for (const {scene, resolution} of resolvedScenes) {
+    for (let i = 0; i < resolvedScenes.length; i++) {
+      const {scene, resolution} = resolvedScenes[i];
       if (resolution.state !== 'ready') {
         continue;
       }
+      const prevStoryboardSceneReady =
+        i > 0 && resolvedScenes[i - 1].resolution.state === 'ready';
       const {video, start, duration, includeAudio} = resolution.clip;
       const videoArrangement: CombineScenesArrangement = {
         file_type: 'video',
@@ -2427,7 +2465,11 @@ export class RemixEngineService {
         duration,
         include_audio: includeAudio,
       };
-      if (scene.transition) {
+      if (
+        arrangement.length > 0 &&
+        prevStoryboardSceneReady &&
+        scene.transition
+      ) {
         videoArrangement.transition = scene.transition;
         videoArrangement.transition_overlap =
           scene.transitionOverlap ?? DEFAULT_TRANSITION_OVERLAP;

@@ -255,7 +255,8 @@ export class Storyboard {
     if (scene.selectedCandidateIndex === undefined) {
       return undefined;
     }
-    return scene.candidates[scene.selectedCandidateIndex];
+    const candidate = scene.candidates[scene.selectedCandidateIndex];
+    return candidate && !candidate.isArchived ? candidate : undefined;
   });
 
   candidateCounts = computed(() => {
@@ -458,12 +459,63 @@ export class Storyboard {
     };
   }
 
+  getSceneFilmstripThumbnailData(scene: GeneratedScene | ProvidedVideoScene) {
+    if (this.config.isGeneratedScene(scene)) {
+      const selected =
+        scene.selectedCandidateIndex !== undefined
+          ? scene.candidates?.[scene.selectedCandidateIndex]
+          : undefined;
+      if (!selected || selected.isArchived) {
+        return {
+          lowQuality: undefined,
+          highQuality: undefined,
+          reference: undefined,
+          showReference: false,
+          showIcon: true,
+        };
+      }
+      const hasLowQualityThumbnail = !!selected.lowQualityThumbnail;
+      const hasHighQualityThumbnail = !!(
+        selected.highQualityThumbnail?.url ||
+        selected.highQualityThumbnail?.path
+      );
+      const hasThumbnail = hasLowQualityThumbnail || hasHighQualityThumbnail;
+      return {
+        lowQuality: selected.lowQualityThumbnail,
+        highQuality: hasHighQualityThumbnail
+          ? selected.highQualityThumbnail
+          : undefined,
+        reference: undefined,
+        showReference: false,
+        showIcon: !hasThumbnail,
+      };
+    }
+
+    const hasLowQualityThumbnail = !!scene.lowQualityThumbnail;
+    const hasHighQualityThumbnail = !!(
+      scene.highQualityThumbnail?.url || scene.highQualityThumbnail?.path
+    );
+    const hasThumbnail = hasLowQualityThumbnail || hasHighQualityThumbnail;
+    return {
+      lowQuality: scene.lowQualityThumbnail,
+      highQuality: hasHighQualityThumbnail
+        ? scene.highQualityThumbnail
+        : undefined,
+      reference: undefined,
+      showReference: false,
+      showIcon: !hasThumbnail,
+    };
+  }
+
   thumbnailPersistForScene(
     scene: GeneratedScene | ProvidedVideoScene,
   ): boolean {
     if (!this.config.isGeneratedScene(scene)) return true;
-    const selected = scene.candidates?.[scene.selectedCandidateIndex ?? 0];
-    return !selected?.isArchived;
+    if (scene.selectedCandidateIndex === undefined) {
+      return !!scene.referenceImage;
+    }
+    const selected = scene.candidates?.[scene.selectedCandidateIndex];
+    return !!selected && !selected.isArchived;
   }
 
   formatTimeLabel(value: number): string {
@@ -972,7 +1024,10 @@ export class Storyboard {
   }
 
   selectCandidate(scene: GeneratedScene, index: number) {
-    const candidate = scene.candidates![index];
+    const candidate = scene.candidates?.[index];
+    if (!candidate || candidate.isArchived) {
+      return;
+    }
     const promptChanged = scene.prompt !== candidate.prompt;
     this.referenceUploadEpoch++;
     scene.selectedCandidateIndex = index;
@@ -1145,26 +1200,113 @@ export class Storyboard {
     return this.scenePromptRevisions()[sceneId] ?? 0;
   }
 
+  private findNextActiveCandidateIndex(
+    candidates: readonly Candidate[],
+    archivedIndex: number,
+  ): number | undefined {
+    for (let i = archivedIndex + 1; i < candidates.length; i++) {
+      if (!candidates[i].isArchived) {
+        return i;
+      }
+    }
+    for (let i = 0; i < archivedIndex; i++) {
+      if (!candidates[i].isArchived) {
+        return i;
+      }
+    }
+    return undefined;
+  }
+
+  private clearSceneAndNextNeighborTransitions(sceneId: string): void {
+    const storyboard = this.config.projectConfig.value().storyboard;
+    const sceneIdx = storyboard.findIndex(s => s.id === sceneId);
+    if (sceneIdx === -1) return;
+    let changed = false;
+    const updatedStoryboard = storyboard.map((item, idx) => {
+      if (
+        (idx === sceneIdx || idx === sceneIdx + 1) &&
+        (item.transition !== undefined || item.transitionOverlap !== undefined)
+      ) {
+        changed = true;
+        const copy = {...item};
+        delete copy.transition;
+        delete copy.transitionOverlap;
+        return copy;
+      }
+      return item;
+    });
+    if (changed) {
+      this.config.updateProjectConfig({storyboard: updatedStoryboard});
+    }
+  }
+
   toggleArchive(event: Event, scene: GeneratedScene, index: number) {
     event.stopPropagation();
     if (scene.candidates && scene.candidates[index]) {
       const candidate = scene.candidates[index];
       candidate.isArchived = !candidate.isArchived;
-      this.updateScenes();
-      if (candidate.isArchived && candidate.video?.path) {
+      if (!candidate.isArchived) {
+        this.selectCandidate(scene, index);
+        return;
+      }
+      if (scene.selectedCandidateIndex === index) {
+        const nextActiveIndex = this.findNextActiveCandidateIndex(
+          scene.candidates,
+          index,
+        );
+        if (nextActiveIndex !== undefined) {
+          this.selectCandidate(scene, nextActiveIndex);
+        } else {
+          const promptChanged = scene.prompt !== '';
+          this.referenceUploadEpoch++;
+          scene.selectedCandidateIndex = undefined;
+          scene.prompt = '';
+          delete scene.referenceImage;
+          delete scene.lowQualityThumbnail;
+          delete scene.highQualityThumbnail;
+          delete scene.transition;
+          delete scene.transitionOverlap;
+          this.isVideoPlaying.set(false);
+          this.updateScenes(scene, promptChanged);
+          this.clearSceneAndNextNeighborTransitions(scene.id);
+        }
+      } else {
+        this.updateScenes(scene);
+      }
+      if (candidate.video?.path) {
         void this.candidateVideoCache.invalidateCandidate(
           this.config.projectConfig.value().id,
           candidate.video.path,
         );
       }
-      if (candidate.isArchived) {
-        const projectId = this.config.projectConfig.value().id;
-        for (const path of [
-          candidate.highQualityThumbnail?.path,
-          candidate.referenceImage?.path,
-        ]) {
-          if (path)
-            void this.thumbnailCache.invalidateCandidate(projectId, path);
+      const projectId = this.config.projectConfig.value().id;
+      const activePaths = new Set<string>();
+      if (scene.referenceImage?.path) {
+        activePaths.add(scene.referenceImage.path);
+      }
+      if (scene.referenceImage?.preview?.path) {
+        activePaths.add(scene.referenceImage.preview.path);
+      }
+      for (const c of scene.candidates) {
+        if (!c.isArchived) {
+          if (c.highQualityThumbnail?.path) {
+            activePaths.add(c.highQualityThumbnail.path);
+          }
+          if (c.referenceImage?.path) {
+            activePaths.add(c.referenceImage.path);
+          }
+          if (c.referenceImage?.preview?.path) {
+            activePaths.add(c.referenceImage.preview.path);
+          }
+        }
+      }
+      for (const path of [
+        candidate.highQualityThumbnail?.path,
+        candidate.referenceImage?.path,
+        candidate.referenceImage?.preview?.path,
+      ]) {
+        if (path && !activePaths.has(path)) {
+          void this.thumbnailCache.invalidateCandidate(projectId, path);
         }
       }
     }
@@ -1264,7 +1406,18 @@ export class Storyboard {
           this.userSelectedSceneId.set(null);
         }
         const config = this.config.projectConfig.value();
-        const scenes = config.storyboard.filter(s => s.id !== id);
+        const deletedIdx = config.storyboard.findIndex(s => s.id === id);
+        const scenes = config.storyboard
+          .map((s, idx) => {
+            if (deletedIdx !== -1 && idx === deletedIdx + 1) {
+              const copy = {...s};
+              delete copy.transition;
+              delete copy.transitionOverlap;
+              return copy;
+            }
+            return s;
+          })
+          .filter(s => s.id !== id);
         this.config.updateProjectConfig({storyboard: scenes});
       }
     });

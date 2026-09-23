@@ -221,14 +221,14 @@ describe('Homepage', () => {
   );
 
   it.each([{path: 'reference.jpg'}, {url: 'https://example.com/image.jpg'}])(
-    'uses a reference with a usable source: %j',
+    'ignores a reference image and shows the placeholder when no active candidate thumbnail exists: %j',
     referenceImage => {
       const project = {
         storyboard: [{type: 'generated', referenceImage}],
       } as unknown as ProjectConfig;
       const data = component.getThumbnailData(project);
-      expect(data.showReference).toBe(true);
-      expect(data.showPlaceholder).toBe(false);
+      expect(data.showReference).toBe(false);
+      expect(data.showPlaceholder).toBe(true);
     },
   );
 
@@ -290,7 +290,7 @@ describe('Homepage', () => {
     );
   });
 
-  it('uses a reference preview for a summary fallback without changing the original ref', () => {
+  it('shows the placeholder for a summary with only a reference image and no active candidate thumbnail', () => {
     const original = {
       path: 'original.jpg',
       url: 'https://example.test/original.jpg',
@@ -307,8 +307,9 @@ describe('Homepage', () => {
 
     const data = component.getThumbnailData(project);
 
-    expect(data.referenceImage).toEqual(original.preview);
-    expect(project.thumbnail!.referenceImage).toBe(original);
+    expect(data.referenceImage).toBeUndefined();
+    expect(data.showReference).toBe(false);
+    expect(data.showPlaceholder).toBe(true);
   });
 
   it('renders only the selected candidate thumbnail when a reference fallback exists', async () => {
