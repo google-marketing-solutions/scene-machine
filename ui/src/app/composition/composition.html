@@ -266,7 +266,7 @@
       <div class="candidates-tray">
         <div class="candidates-grid">
           @for (scene of filmstripScenes(); track scene.id; let i = $index) {
-            @if (i > 0) {
+            @if (i > 0 && scene.canTransitionFromPrev) {
               <div
                 class="transition-icon"
                 (click)="openTransitionModal(i)"

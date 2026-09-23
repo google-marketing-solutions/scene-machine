@@ -119,8 +119,9 @@ export class Composition {
       const prevNotReady =
         prevScene !== undefined &&
         resolveSceneRenderClip(prevScene).state !== 'ready';
+      const canTransitionFromPrev = index > 0 && !prevNotReady;
       const effectiveScene =
-        prevNotReady &&
+        !canTransitionFromPrev &&
         (scene.transition !== undefined ||
           scene.transitionOverlap !== undefined)
           ? {
@@ -132,6 +133,7 @@ export class Composition {
       return {
         scene: effectiveScene,
         resolution,
+        canTransitionFromPrev,
       };
     }),
   );
@@ -139,15 +141,19 @@ export class Composition {
   filmstripScenes = computed(() =>
     this.sceneRenderClips()
       .filter(({resolution}) => resolution.state === 'ready')
-      .map(({scene}, index) =>
+      .map(({scene, canTransitionFromPrev}, index) =>
         index === 0 &&
         (scene.transition || scene.transitionOverlap !== undefined)
           ? {
               ...scene,
               transition: undefined,
               transitionOverlap: undefined,
+              canTransitionFromPrev: false,
             }
-          : scene,
+          : {
+              ...scene,
+              canTransitionFromPrev: index > 0 && canTransitionFromPrev,
+            },
       ),
   );
 
