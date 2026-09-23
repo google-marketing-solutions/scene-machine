@@ -248,23 +248,15 @@ export function moveCandidate(input: MoveCandidateInput): MoveCandidateResult {
     const runNumber = candidates.length
       ? Math.max(...candidates.map(item => item.runNumber)) + 1
       : 1;
-    const currentDestSelected =
-      destination.selectedCandidateIndex !== undefined
-        ? candidates[destination.selectedCandidateIndex]
-        : undefined;
-    const shouldSelectArrival =
-      !currentDestSelected || !!currentDestSelected.isArchived;
     const destinationWithoutFailure: GeneratedScene = {...destination};
     delete destinationWithoutFailure.generationError;
     delete destinationWithoutFailure.generationErrorAcknowledged;
-    if (shouldSelectArrival) {
-      destinationWithoutFailure.selectedCandidateIndex = candidates.length;
-      destinationWithoutFailure.prompt = moved.prompt;
-      if (moved.referenceImage) {
-        destinationWithoutFailure.referenceImage = moved.referenceImage;
-      } else {
-        delete destinationWithoutFailure.referenceImage;
-      }
+    destinationWithoutFailure.selectedCandidateIndex = candidates.length;
+    destinationWithoutFailure.prompt = moved.prompt;
+    if (moved.referenceImage) {
+      destinationWithoutFailure.referenceImage = moved.referenceImage;
+    } else {
+      delete destinationWithoutFailure.referenceImage;
     }
     next[destinationIndex] = {
       ...destinationWithoutFailure,
