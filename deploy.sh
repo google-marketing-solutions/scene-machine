@@ -112,19 +112,36 @@ run_with_heartbeat() {
     "$@" >"$log_file" 2>&1 &
   HEARTBEAT_CMD_PID=$!
   local cmd_pid=$HEARTBEAT_CMD_PID
-  # A single Python heartbeat has no sleep child to orphan on interruption.
+  # A single Python watcher has no sleep/tail child to orphan on interruption.
+  # Show gcloud's build-log link as soon as it appears, even though the complete
+  # command output is replayed only after the build finishes.
   python3 -c '
 import os, sys, time
-pid, interval, label, start = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
+pid, interval, label, start, log = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], int(sys.argv[4]), sys.argv[5]
+next_heartbeat = time.monotonic() + interval
+shown_link = False
 while True:
-    time.sleep(interval)
+    if not shown_link:
+        try:
+            with open(log, encoding="utf-8", errors="replace") as output:
+                for line in output:
+                    if line.startswith("Logs are available at ["):
+                        print(f"    {line.rstrip()}", flush=True)
+                        shown_link = True
+                        break
+        except FileNotFoundError:
+            pass
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         break
-    elapsed = int(time.time()) - start
-    print(f"    … {label} still running ({elapsed // 3600}h {elapsed % 3600 // 60:02}m {elapsed % 60:02}s elapsed)", flush=True)
-' "$cmd_pid" "$hb_secs" "$label" "$start" &
+    now = time.monotonic()
+    if now >= next_heartbeat:
+        elapsed = int(time.time()) - start
+        print(f"    … {label} still running ({elapsed // 3600}h {elapsed % 3600 // 60:02}m {elapsed % 60:02}s elapsed)", flush=True)
+        next_heartbeat = now + interval
+    time.sleep(0.5)
+' "$cmd_pid" "$hb_secs" "$label" "$start" "$log_file" &
   HEARTBEAT_PID=$!
   local hb_pid=$HEARTBEAT_PID
   wait "$cmd_pid" || rc=$?
@@ -481,7 +498,7 @@ if [ "$SKIP_UI_BUILD" != "1" ]; then
     export NG_CLI_ANALYTICS=ci
     ( cd ui && npm ci )
     ( cd ui && npx ng build --configuration production )
-  ) >"$UI_BUILD_LOG" 2>&1 &
+  ) </dev/null >"$UI_BUILD_LOG" 2>&1 &
   UI_BUILD_PID=$!
   set +m
 fi
@@ -858,7 +875,7 @@ else
   gcloud iam roles update SceneMachineUser --project=$PROJECT --file=./user-role.yaml --quiet || true
 fi
 
-) >"$INFRA_SETUP_LOG" 2>&1 &
+) </dev/null >"$INFRA_SETUP_LOG" 2>&1 &
 INFRA_SETUP_PID=$!
 set +m
 

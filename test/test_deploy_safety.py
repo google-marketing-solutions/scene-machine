@@ -997,6 +997,8 @@ def test_deploy_failure_gates_app_and_config_seeding():
   assert '--machine-type=' not in text
   assert '.package-lock.stamp' not in text
   assert '( cd ui && npm ci )' in text
+  assert ') </dev/null >"$UI_BUILD_LOG" 2>&1 &' in text
+  assert ') </dev/null >"$INFRA_SETUP_LOG" 2>&1 &' in text
   assert not re.search(r'run_with_heartbeat[^\n]*\|\s*tee', text)
   assert '--image "$DEPLOY_IMAGE"' in text
   assert 'DEPLOY_IMAGE="${IMAGE%:*}@${IMAGE_DIGEST}"' in text
@@ -1031,6 +1033,8 @@ printf 'app phase reached\n' >> "$CALLS"
   assert proc.returncode != 0, proc.stdout + proc.stderr
   recorded = calls.read_text()
   assert 'run deploy worker' in recorded
+  assert f'--image pkg@sha256:{"a" * 64}' in recorded
+  assert '--image pkg:latest' not in recorded
   assert 'app phase reached' not in recorded
   assert 'run deploy app' not in recorded
   assert 'seed' not in recorded
@@ -1055,6 +1059,13 @@ def test_build_receipt_resolves_only_its_own_successful_image(tmp_path):
       capture_output=True, text=True,
   )
   assert wrong_project.returncode != 0
+  log.write_text(log.read_text() + log.read_text())
+  duplicate_build = subprocess.run(
+      [sys.executable, str(helper), 'build-id', project, region, str(log)],
+      capture_output=True, text=True,
+  )
+  assert duplicate_build.returncode != 0
+  assert 'expected exactly one' in duplicate_build.stderr
 
   image = f'{region}-docker.pkg.dev/{project}/repo/app:latest'
   receipt = {
@@ -1073,6 +1084,12 @@ def test_build_receipt_resolves_only_its_own_successful_image(tmp_path):
   for bad in (
       {**receipt, 'status': 'FAILURE'},
       {**receipt, 'results': {'images': [{'name': image, 'digest': 'sha256:short'}]}},
+      {
+          **receipt,
+          'results': {'images': [
+              {'name': image, 'digest': 'sha256:' + 'a' * 64 + 'suffix'}
+          ]},
+      },
       {**receipt, 'results': {'images': []}},
       None,
       {**receipt, 'results': None},
@@ -1147,6 +1164,37 @@ def test_deploy_cache_flag_reaches_cloud_build_substitution(no_build_cache, expe
   substitutions = run.stdout.splitlines()[-1]
   assert substitutions.startswith('_IMAGE=example:latest')
   assert ('_USE_CACHE=0' in substitutions) == (expected is not None)
+
+
+def test_build_log_link_is_printed_before_the_build_finishes(tmp_path):
+  """The Cloud Build link should appear before the buffered output replay."""
+  heartbeat = re.search(
+      r'(run_with_heartbeat\(\) \{.*?\n\})', _deploy_sh(), re.DOTALL
+  )
+  assert heartbeat
+  link = (
+      'Logs are available at [ '
+      'https://console.cloud.google.com/cloud-build/builds/example ].'
+  )
+  fake_build = tmp_path / 'fake-build.sh'
+  fake_build.write_text(
+      f'#!/bin/bash\nprintf "%s\\n" "{link}"\nsleep 1.2\n'
+      'printf "%s\\n" "build complete"\n'
+  )
+  fake_build.chmod(0o755)
+  log = tmp_path / 'build.log'
+  script = (
+      'set -euo pipefail\n'
+      + heartbeat.group(1) + '\n'
+      + 'HEARTBEAT_SECS=30\n'
+      + f'run_with_heartbeat "Cloud Build" "{log}" "{fake_build}"\n'
+  )
+  run = subprocess.run(
+      ['/bin/bash', '-c', script], capture_output=True, text=True, timeout=10
+  )
+  assert run.returncode == 0, run.stderr
+  assert run.stdout.count(link) == 2, run.stdout
+  assert run.stdout.index(link) < run.stdout.index('build complete')
 
 
 def _pid_exists(pid: int) -> bool:
