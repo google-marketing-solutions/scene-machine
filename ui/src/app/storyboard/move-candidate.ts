@@ -76,6 +76,33 @@ function cloneMovedCandidate(
   return moved;
 }
 
+function findNextActiveIndex(
+  candidates: readonly Candidate[],
+  startIndex: number,
+): number | undefined {
+  for (let i = startIndex; i < candidates.length; i++) {
+    if (!candidates[i].isArchived) {
+      return i;
+    }
+  }
+  for (let i = 0; i < Math.min(startIndex, candidates.length); i++) {
+    if (!candidates[i].isArchived) {
+      return i;
+    }
+  }
+  return undefined;
+}
+
+function clearEmptySceneState(scene: GeneratedScene): void {
+  delete scene.selectedCandidateIndex;
+  scene.prompt = '';
+  delete scene.referenceImage;
+  delete scene.lowQualityThumbnail;
+  delete scene.highQualityThumbnail;
+  delete scene.transition;
+  delete scene.transitionOverlap;
+}
+
 export function moveCandidate(input: MoveCandidateInput): MoveCandidateResult {
   const sourceIndex = input.storyboard.findIndex(
     scene => scene.id === input.sourceSceneId,
@@ -136,20 +163,65 @@ export function moveCandidate(input: MoveCandidateInput): MoveCandidateResult {
     (_candidate, index) => index !== input.candidateIndex,
   );
   const updatedSource: GeneratedScene = {...source};
+  let sourceHasActiveRemaining = false;
   if (!remaining?.length) {
     delete updatedSource.candidates;
-    delete updatedSource.selectedCandidateIndex;
     delete updatedSource.generationError;
     delete updatedSource.generationErrorAcknowledged;
+    clearEmptySceneState(updatedSource);
   } else {
     updatedSource.candidates = remaining;
     if (source.selectedCandidateIndex === input.candidateIndex) {
-      delete updatedSource.selectedCandidateIndex;
-    } else if (
-      source.selectedCandidateIndex !== undefined &&
-      source.selectedCandidateIndex > input.candidateIndex
-    ) {
-      updatedSource.selectedCandidateIndex = source.selectedCandidateIndex - 1;
+      const nextActiveIndex = findNextActiveIndex(
+        remaining,
+        input.candidateIndex,
+      );
+      if (nextActiveIndex !== undefined) {
+        const nextCandidate = remaining[nextActiveIndex];
+        updatedSource.selectedCandidateIndex = nextActiveIndex;
+        updatedSource.prompt = nextCandidate.prompt;
+        if (nextCandidate.referenceImage) {
+          updatedSource.referenceImage = nextCandidate.referenceImage;
+        } else {
+          delete updatedSource.referenceImage;
+        }
+        sourceHasActiveRemaining = true;
+      } else {
+        clearEmptySceneState(updatedSource);
+      }
+    } else if (source.selectedCandidateIndex !== undefined) {
+      const adjustedIndex =
+        source.selectedCandidateIndex > input.candidateIndex
+          ? source.selectedCandidateIndex - 1
+          : source.selectedCandidateIndex;
+      const adjustedCandidate = remaining[adjustedIndex];
+      if (adjustedCandidate && !adjustedCandidate.isArchived) {
+        updatedSource.selectedCandidateIndex = adjustedIndex;
+        sourceHasActiveRemaining = true;
+      } else {
+        const nextActiveIndex = findNextActiveIndex(
+          remaining,
+          input.candidateIndex,
+        );
+        if (nextActiveIndex !== undefined) {
+          const nextCandidate = remaining[nextActiveIndex];
+          updatedSource.selectedCandidateIndex = nextActiveIndex;
+          updatedSource.prompt = nextCandidate.prompt;
+          if (nextCandidate.referenceImage) {
+            updatedSource.referenceImage = nextCandidate.referenceImage;
+          } else {
+            delete updatedSource.referenceImage;
+          }
+          sourceHasActiveRemaining = true;
+        } else {
+          clearEmptySceneState(updatedSource);
+        }
+      }
+    } else {
+      sourceHasActiveRemaining = remaining.some(c => !c.isArchived);
+      if (!sourceHasActiveRemaining) {
+        clearEmptySceneState(updatedSource);
+      }
     }
   }
 
@@ -176,15 +248,27 @@ export function moveCandidate(input: MoveCandidateInput): MoveCandidateResult {
     const runNumber = candidates.length
       ? Math.max(...candidates.map(item => item.runNumber)) + 1
       : 1;
-    const destinationWithoutFailure = {...destination};
+    const currentDestSelected =
+      destination.selectedCandidateIndex !== undefined
+        ? candidates[destination.selectedCandidateIndex]
+        : undefined;
+    const shouldSelectArrival =
+      !currentDestSelected || !!currentDestSelected.isArchived;
+    const destinationWithoutFailure: GeneratedScene = {...destination};
     delete destinationWithoutFailure.generationError;
     delete destinationWithoutFailure.generationErrorAcknowledged;
+    if (shouldSelectArrival) {
+      destinationWithoutFailure.selectedCandidateIndex = candidates.length;
+      destinationWithoutFailure.prompt = moved.prompt;
+      if (moved.referenceImage) {
+        destinationWithoutFailure.referenceImage = moved.referenceImage;
+      } else {
+        delete destinationWithoutFailure.referenceImage;
+      }
+    }
     next[destinationIndex] = {
       ...destinationWithoutFailure,
       candidates: [...candidates, {...moved, runNumber}],
-      ...(destination.selectedCandidateIndex === undefined
-        ? {selectedCandidateIndex: candidates.length}
-        : {}),
     };
   }
   return {ok: true, storyboard: next, destinationSceneId};
