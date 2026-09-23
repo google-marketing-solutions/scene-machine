@@ -863,38 +863,10 @@ done
 ) >"$INFRA_SETUP_LOG" 2>&1 &
 INFRA_SETUP_PID=$!
 
-# --- Render UI env + config (must precede the single image build) -------------
-# Order matters: these artifacts are baked into the image (Dockerfile
-# `COPY . .`), so they must exist before `gcloud builds submit`.
+# --- UI env + config (rendered at SCRIPT_START before UI_BUILD_PID) -----------
 phase "Rendering ui/src/env.ts and ui/definitions/config.json..."
-# IAP is the only deployable front-door mode (controlPlaneMode 'none' is local
-# dev only), and the data plane is always mediated, so there is nothing to
-# choose here — the UI is always built for IAP.
-export UI_CONTROL_PLANE_MODE="iap"
 echo "  Front-door auth: IAP (the only deployable mode)"
-# env.ts: UI_CONTROL_PLANE_MODE
-# is additionally exported for the front-door env.template.txt field
-# (controlPlaneMode) — a no-op against templates that don't reference it.
-envsubst < ./ui/src/env.template.txt > ./ui/src/env.ts
-# config.json: read by the backend (orch.py) for the project/bucket/database
-# params and rendered into the deploy. The app serves the SPA, /api and the
-# status viewer from one Cloud Run service, so the browser always calls /api
-# RELATIVE to wherever the page loaded; no app host is baked in. Only
-# $FIRESTORE_DB / $GCS_BUCKET / $PROJECT / $REGION / $TASKS_QUEUE_PREFIX are
-# substituted.
-generate_config
 
-# Safety: never build or ship a UI rendered for LOCAL DEV (controlPlaneMode
-# 'none' turns the sign-in gate off). The line above always sets 'iap', so this
-# only trips on a stray UI_CONTROL_PLANE_MODE override; fail loudly rather than
-# deploy an app with authentication disabled.
-if grep -q "controlPlaneMode: 'none'" ./ui/src/env.ts; then
-  echo "ERROR: ui/src/env.ts rendered with controlPlaneMode 'none' (sign-in disabled)." >&2
-  echo "       Refusing to build a deploy with the front-door auth gate off." >&2
-  echo "       This should not happen on a normal deploy; check for a stray" >&2
-  echo "       UI_CONTROL_PLANE_MODE in your environment, then re-run $0." >&2
-  exit 1
-fi
 
 # --- UI build ------------------------------------------------------------------
 if [ "$SKIP_UI_BUILD" = "1" ]; then
