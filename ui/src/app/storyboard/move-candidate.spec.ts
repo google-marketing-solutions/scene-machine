@@ -152,15 +152,21 @@ describe('moveCandidate', () => {
     });
   });
 
-  it('appends to an existing destination and preserves its selection', () => {
-    const source = scene('1', [candidate(1, 'source')]);
+  it('appends to an existing destination and selects the moved candidate', () => {
+    const source = scene('1', [
+      {
+        ...candidate(1, 'source'),
+        prompt: 'moved prompt',
+        referenceImage: {path: 'moved-ref', url: 'moved-ref-url'},
+      },
+    ]);
     const destination = scene('2', [
       candidate(4, 'dest'),
       candidate(9, 'archived'),
     ]);
     destination.candidates![1].isArchived = true;
     destination.selectedCandidateIndex = 0;
-    destination.prompt = 'keep this prompt';
+    destination.prompt = 'previous prompt';
     destination.referenceImage = {path: 'ref', url: 'ref-url'};
     destination.transition = 'fade';
     destination.transitionOverlap = 0.25;
@@ -180,9 +186,9 @@ describe('moveCandidate', () => {
     const movedDestination = generated(result.storyboard[1]);
     expect(movedDestination.candidates).toHaveLength(3);
     expect(movedDestination.candidates?.[2].runNumber).toBe(10);
-    expect(movedDestination.selectedCandidateIndex).toBe(0);
-    expect(movedDestination.prompt).toBe('keep this prompt');
-    expect(movedDestination.referenceImage?.path).toBe('ref');
+    expect(movedDestination.selectedCandidateIndex).toBe(2);
+    expect(movedDestination.prompt).toBe('moved prompt');
+    expect(movedDestination.referenceImage?.path).toBe('moved-ref');
     expect(movedDestination.transitionOverlap).toBe(0.25);
     expect(movedDestination.generationError).toBeUndefined();
     expect(movedDestination.generationErrorAcknowledged).toBeUndefined();
