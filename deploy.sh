@@ -264,8 +264,8 @@ REQUIRED_VARS=(
 )
 MISSING=0
 for var in "${REQUIRED_VARS[@]}"; do
-  if ! grep -qE "^(export )?${var}=[A-Za-z0-9._\$-]+" ./config.txt; then
-    echo "ERROR: $var is missing, empty, or has invalid characters in config.txt" >&2
+  if ! grep -qE "^(export )?${var}=((\"[-A-Za-z0-9._{}$]+\"|[-A-Za-z0-9._{}$]+)([[:space:]]*(#.*)?)?$)" ./config.txt; then
+    echo "ERROR: $var is missing, empty, or has invalid characters in config.txt (use double quotes if quoting)" >&2
     MISSING=$((MISSING + 1))
   fi
 done
@@ -303,8 +303,10 @@ if ! [[ "$APP_MIN_INSTANCES" =~ ^[0-9]+$ ]]; then
   echo "Validation failed. Please fix config.txt and try again." >&2
   exit 1
 fi
-DICTATION_ENABLED="${DICTATION_ENABLED:-1}"
-if [[ "$DICTATION_ENABLED" != "0" && "$DICTATION_ENABLED" != "1" ]]; then
+# Validate an explicitly configured value before the confirmation prompt and
+# any provisioning calls. Values inherited from the live service are checked
+# again after the preservation probe below.
+if [ -n "${DICTATION_ENABLED:-}" ] && [[ "$DICTATION_ENABLED" != "0" && "$DICTATION_ENABLED" != "1" ]]; then
   echo "ERROR: DICTATION_ENABLED must be 0 or 1 (got '$DICTATION_ENABLED')." >&2
   echo "Validation failed. Please fix config.txt and try again." >&2
   exit 1
@@ -449,6 +451,55 @@ if [ -n "${TO_ENABLE// /}" ]; then
   echo "  ✓ Enabled ${count} API(s)."
 else
   echo "  ✓ All required APIs already enabled, nothing to do."
+fi
+
+# When DICTATION_ENABLED is omitted in config.txt, preserve the live deployed
+# setting (0 or 1). Only fall back to default 1 on first deploy (service absent).
+if [ -z "${DICTATION_ENABLED:-}" ]; then
+  if ! APP_EXISTS=$(gcloud run services list \
+    --region="$REGION" --project="$PROJECT" \
+    --filter="metadata.name=app" \
+    --format="value(metadata.name)"); then
+    echo "ERROR: Failed to query Cloud Run services in ${PROJECT}/${REGION}." >&2
+    echo "       Set DICTATION_ENABLED explicitly in config.txt or check gcloud credentials." >&2
+    echo "Validation failed. Please fix config.txt and try again." >&2
+    exit 1
+  fi
+  if printf '%s\n' "$APP_EXISTS" | grep -Fxq "app"; then
+    # Sanity check: the deployed app service always has env vars (e.g. ROLE, AUTH_MODE).
+    # If the env list is empty, format extraction is broken; fail closed.
+    if ! LIVE_ENV_VARS=$(gcloud run services describe app \
+      --region="$REGION" --project="$PROJECT" \
+      --format='value(spec.template.spec.containers[0].env.extract(name).flatten())'); then
+      echo "ERROR: Failed to read environment from existing 'app' service in ${PROJECT}/${REGION}." >&2
+      echo "       Set DICTATION_ENABLED explicitly in config.txt or check gcloud credentials." >&2
+      echo "Validation failed. Please fix config.txt and try again." >&2
+      exit 1
+    fi
+    if [ -z "$LIVE_ENV_VARS" ]; then
+      echo "ERROR: Could not extract environment from existing 'app' service in ${PROJECT}/${REGION}." >&2
+      echo "       Field path or formatting may be unsupported. Set DICTATION_ENABLED explicitly in config.txt." >&2
+      echo "Validation failed. Please fix config.txt and try again." >&2
+      exit 1
+    fi
+    if ! LIVE_DICTATION=$(gcloud run services describe app \
+      --region="$REGION" --project="$PROJECT" \
+      --format='value(spec.template.spec.containers[0].env.filter(name=DICTATION_ENABLED).extract(value).flatten())'); then
+      echo "ERROR: Failed to read DICTATION_ENABLED from existing 'app' service in ${PROJECT}/${REGION}." >&2
+      echo "       Set DICTATION_ENABLED explicitly in config.txt or check gcloud credentials." >&2
+      echo "Validation failed. Please fix config.txt and try again." >&2
+      exit 1
+    fi
+    if [ -n "$LIVE_DICTATION" ]; then
+      DICTATION_ENABLED="$LIVE_DICTATION"
+    fi
+  fi
+fi
+DICTATION_ENABLED="${DICTATION_ENABLED:-1}"
+if [[ "$DICTATION_ENABLED" != "0" && "$DICTATION_ENABLED" != "1" ]]; then
+  echo "ERROR: DICTATION_ENABLED must be 0 or 1 (got '$DICTATION_ENABLED')." >&2
+  echo "Validation failed. Please fix config.txt and try again." >&2
+  exit 1
 fi
 
 # Warm up Vertex AI service agent. On a fresh project, the agent

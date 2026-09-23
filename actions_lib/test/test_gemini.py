@@ -26,17 +26,43 @@ from parameterized import parameterized
 class TestGemini(unittest.TestCase):
     """Tests for gemini."""
 
-    def test_get_mime_type_allowed(self):
-        """Tests get_mime_type with allowed extensions."""
-        self.assertEqual(gemini.get_mime_type("test.png"), "image/png")
-        self.assertEqual(gemini.get_mime_type("test.jpeg"), "image/jpeg")
-        self.assertEqual(gemini.get_mime_type("test.jpg"), "image/jpeg")
-        self.assertEqual(gemini.get_mime_type("test.mp4"), "video/mp4")
+    def test_get_mime_type_all_allowed_extensions(self):
+        """Tests that every allowed extension maps to the expected MIME type."""
+        expected_mappings = {
+            "png": "image/png",
+            "jpeg": "image/jpeg",
+            "jpg": "image/jpeg",
+            "webp": "image/webp",
+            "avif": "image/avif",
+            "heic": "image/heic",
+            "heif": "image/heif",
+            "mp4": "video/mp4",
+            "mov": "video/quicktime",
+            "avi": "video/x-msvideo",
+            "webm": "video/webm",
+            "mkv": "video/x-matroska",
+        }
+        self.assertCountEqual(expected_mappings, gemini.ALLOWED_MIME_TYPES)
+        for ext, expected_mime in expected_mappings.items():
+            with self.subTest(ext=ext):
+                self.assertEqual(
+                    gemini.get_mime_type(f"gs://bucket/file.{ext}"),
+                    expected_mime,
+                )
+
+    def test_get_mime_type_case_insensitive(self):
+        """Tests case-insensitivity for file extensions."""
+        self.assertEqual(gemini.get_mime_type("test.PNG"), "image/png")
+        self.assertEqual(gemini.get_mime_type("test.AvIf"), "image/avif")
+        self.assertEqual(gemini.get_mime_type("test.MKV"), "video/x-matroska")
 
     def test_get_mime_type_unallowed_raises_value_error(self):
         """Tests that unallowed extensions raise ValueError."""
-        with self.assertRaises(ValueError):
-            gemini.get_mime_type("test.txt")
+        with self.assertRaisesRegex(
+            ValueError,
+            r"File extension 'txt' \(gs://bucket/test\.txt\) is not allowed\.",
+        ):
+            gemini.get_mime_type("gs://bucket/test.txt")
 
     def test_remove_md_notation(self):
         """Tests remove_md_notation."""
