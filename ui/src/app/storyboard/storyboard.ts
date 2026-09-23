@@ -255,7 +255,8 @@ export class Storyboard {
     if (scene.selectedCandidateIndex === undefined) {
       return undefined;
     }
-    return scene.candidates[scene.selectedCandidateIndex];
+    const candidate = scene.candidates[scene.selectedCandidateIndex];
+    return candidate && !candidate.isArchived ? candidate : undefined;
   });
 
   candidateCounts = computed(() => {
@@ -458,12 +459,61 @@ export class Storyboard {
     };
   }
 
+  getSceneFilmstripThumbnailData(scene: GeneratedScene | ProvidedVideoScene) {
+    if (this.config.isGeneratedScene(scene)) {
+      const selected =
+        scene.selectedCandidateIndex !== undefined
+          ? scene.candidates?.[scene.selectedCandidateIndex]
+          : undefined;
+      if (!selected || selected.isArchived) {
+        return {
+          lowQuality: undefined,
+          highQuality: undefined,
+          reference: undefined,
+          showReference: false,
+          showIcon: true,
+        };
+      }
+      const hasLowQualityThumbnail = !!selected.lowQualityThumbnail;
+      const hasHighQualityThumbnail = !!(
+        selected.highQualityThumbnail?.url ||
+        selected.highQualityThumbnail?.path
+      );
+      const hasThumbnail = hasLowQualityThumbnail || hasHighQualityThumbnail;
+      return {
+        lowQuality: selected.lowQualityThumbnail,
+        highQuality: hasHighQualityThumbnail
+          ? selected.highQualityThumbnail
+          : undefined,
+        reference: undefined,
+        showReference: false,
+        showIcon: !hasThumbnail,
+      };
+    }
+
+    const hasLowQualityThumbnail = !!scene.lowQualityThumbnail;
+    const hasHighQualityThumbnail = !!(
+      scene.highQualityThumbnail?.url || scene.highQualityThumbnail?.path
+    );
+    const hasThumbnail = hasLowQualityThumbnail || hasHighQualityThumbnail;
+    return {
+      lowQuality: scene.lowQualityThumbnail,
+      highQuality: hasHighQualityThumbnail
+        ? scene.highQualityThumbnail
+        : undefined,
+      reference: undefined,
+      showReference: false,
+      showIcon: !hasThumbnail,
+    };
+  }
+
   thumbnailPersistForScene(
     scene: GeneratedScene | ProvidedVideoScene,
   ): boolean {
     if (!this.config.isGeneratedScene(scene)) return true;
-    const selected = scene.candidates?.[scene.selectedCandidateIndex ?? 0];
-    return !selected?.isArchived;
+    if (scene.selectedCandidateIndex === undefined) return false;
+    const selected = scene.candidates?.[scene.selectedCandidateIndex];
+    return !!selected && !selected.isArchived;
   }
 
   formatTimeLabel(value: number): string {
@@ -1148,33 +1198,67 @@ export class Storyboard {
     return this.scenePromptRevisions()[sceneId] ?? 0;
   }
 
+  private findNextActiveCandidateIndex(
+    candidates: readonly Candidate[],
+    archivedIndex: number,
+  ): number | undefined {
+    for (let i = archivedIndex + 1; i < candidates.length; i++) {
+      if (!candidates[i].isArchived) {
+        return i;
+      }
+    }
+    for (let i = 0; i < archivedIndex; i++) {
+      if (!candidates[i].isArchived) {
+        return i;
+      }
+    }
+    return undefined;
+  }
+
   toggleArchive(event: Event, scene: GeneratedScene, index: number) {
     event.stopPropagation();
     if (scene.candidates && scene.candidates[index]) {
       const candidate = scene.candidates[index];
       candidate.isArchived = !candidate.isArchived;
-      // Archiving the candidate that is currently selected must also clear the
-      // selection. Leaving the index in place keeps the archived clip in the
-      // composition playlist and renders it into the final video.
-      if (candidate.isArchived && scene.selectedCandidateIndex === index) {
-        scene.selectedCandidateIndex = undefined;
+      if (!candidate.isArchived) {
+        this.selectCandidate(scene, index);
+        return;
       }
-      this.updateScenes();
-      if (candidate.isArchived && candidate.video?.path) {
+      if (scene.selectedCandidateIndex === index) {
+        const nextActiveIndex = this.findNextActiveCandidateIndex(
+          scene.candidates,
+          index,
+        );
+        if (nextActiveIndex !== undefined) {
+          this.selectCandidate(scene, nextActiveIndex);
+        } else {
+          const promptChanged = scene.prompt !== '';
+          this.referenceUploadEpoch++;
+          scene.selectedCandidateIndex = undefined;
+          scene.prompt = '';
+          delete scene.referenceImage;
+          delete scene.lowQualityThumbnail;
+          delete scene.highQualityThumbnail;
+          this.isVideoPlaying.set(false);
+          this.updateScenes(scene, promptChanged);
+        }
+      } else {
+        this.updateScenes(scene);
+      }
+      if (candidate.video?.path) {
         void this.candidateVideoCache.invalidateCandidate(
           this.config.projectConfig.value().id,
           candidate.video.path,
         );
       }
-      if (candidate.isArchived) {
-        const projectId = this.config.projectConfig.value().id;
-        for (const path of [
-          candidate.highQualityThumbnail?.path,
-          candidate.referenceImage?.path,
-          candidate.referenceImage?.preview?.path,
-        ]) {
-          if (path)
-            void this.thumbnailCache.invalidateCandidate(projectId, path);
+      const projectId = this.config.projectConfig.value().id;
+      for (const path of [
+        candidate.highQualityThumbnail?.path,
+        candidate.referenceImage?.path,
+        candidate.referenceImage?.preview?.path,
+      ]) {
+        if (path) {
+          void this.thumbnailCache.invalidateCandidate(projectId, path);
         }
       }
     }

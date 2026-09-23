@@ -80,10 +80,7 @@
               <mat-icon>delete</mat-icon>
             </button>
             @let fallbackIcon = this.config.isGeneratedScene(scene) ? 'auto_awesome' : 'videocam';
-            @let thumb =
-              this.config.isGeneratedScene(scene) && (scene.candidates?.length ?? 0) > 0
-                ? getThumbnailData(scene.candidates![scene.selectedCandidateIndex ?? 0])
-                : getThumbnailData(scene);
+            @let thumb = getSceneFilmstripThumbnailData(scene);
             @let thumbnailPersist = thumbnailPersistForScene(scene);
             <div #thumbContainer>
               <!-- 1. Low quality image -->
@@ -107,25 +104,14 @@
                 />
               }
 
-              <!-- 3. Fallback to Reference Image -->
-              @if (thumb.showReference) {
-                <img
-                  [appThumbnailImage]="thumb.reference"
-                  [thumbnailCacheScope]="candidateCacheScope()"
-                  [thumbnailImagePersist]="thumbnailPersist"
-                  class="reference-image-bg"
-                  alt="Reference Image"
-                />
-              }
-
-              <!-- 4. Fallback to Icon -->
+              <!-- 3. Fallback to Icon -->
               @if (thumb.showIcon) {
                 <div class="scene-icon">
                   <mat-icon>{{ fallbackIcon }}</mat-icon>
                 </div>
               }
 
-              <!-- 5. Spinner if generating -->
+              <!-- 4. Spinner if generating -->
               @if (areCandidatesGenerating(scene.id)) {
                 <div class="scene-loading">
                   <mat-spinner diameter="32"></mat-spinner>
@@ -143,25 +129,22 @@
             <div *cdkDragPreview>
               <div class="filmstrip-item-preview">
                 <div class="scene-number">{{ $index + 1 }}</div>
-                @if (this.config.isGeneratedScene(scene)) {
-                  @if (
-                    scene.selectedCandidateIndex !== undefined &&
-                    scene.candidates?.[scene.selectedCandidateIndex]?.referenceImage
-                  ) {
-                    <img
-                      [appThumbnailImage]="
-                        scene.candidates?.[scene.selectedCandidateIndex]?.referenceImage
-                      "
-                      [thumbnailCacheScope]="candidateCacheScope()"
-                      [thumbnailImagePersist]="thumbnailPersistForScene(scene)"
-                      class="reference-image-bg"
-                      alt="Reference Image"
-                    />
-                  } @else {
-                    <div class="scene-icon"><mat-icon>auto_awesome</mat-icon></div>
-                  }
+                @if (thumb.highQuality) {
+                  <img
+                    [appThumbnailImage]="thumb.highQuality"
+                    [thumbnailCacheScope]="candidateCacheScope()"
+                    [thumbnailImagePersist]="thumbnailPersist"
+                    class="reference-image-bg"
+                    alt="High Quality Thumbnail"
+                  />
+                } @else if (thumb.lowQuality) {
+                  <img
+                    [src]="thumb.lowQuality"
+                    class="reference-image-bg loaded"
+                    alt="Low Quality Thumbnail"
+                  />
                 } @else {
-                  <div class="scene-icon"><mat-icon>videocam</mat-icon></div>
+                  <div class="scene-icon"><mat-icon>{{ fallbackIcon }}</mat-icon></div>
                 }
                 <div class="scene-label">{{ scene.name }}</div>
               </div>

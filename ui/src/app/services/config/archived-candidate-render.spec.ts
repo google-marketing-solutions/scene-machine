@@ -287,22 +287,33 @@ describe('archived candidates are never rendered', () => {
       storyboardComponent = fixture.componentInstance;
     });
 
-    it('clears selectedCandidateIndex when the selected candidate is archived', () => {
+    it('selects the next active candidate when archiving the selected candidate, and clears selection + prompt + referenceImage when the last candidate is archived', () => {
       const scene: GeneratedScene = {
         id: 'scene-1',
         type: 'generated',
         name: 'Scene 1',
-        prompt: 'test prompt',
+        prompt: 'prompt 0',
+        referenceImage: {path: 'refs/ref0.jpg', url: 'ref0-url'},
+        lowQualityThumbnail: 'scene-low',
+        highQualityThumbnail: {path: 'thumbs/scene-hq.jpg', url: ''},
         selectedCandidateIndex: 0,
         candidates: [
           {
             video: {path: 'videos/c0.mp4', url: ''},
             durationSeconds: 5,
+            prompt: 'prompt 0',
+            referenceImage: {path: 'refs/ref0.jpg', url: 'ref0-url'},
+            lowQualityThumbnail: 'c0-low',
+            highQualityThumbnail: {path: 'thumbs/c0.jpg', url: ''},
             isArchived: false,
           },
           {
             video: {path: 'videos/c1.mp4', url: ''},
             durationSeconds: 5,
+            prompt: 'prompt 1',
+            referenceImage: {path: 'refs/ref1.jpg', url: 'ref1-url'},
+            lowQualityThumbnail: 'c1-low',
+            highQualityThumbnail: {path: 'thumbs/c1.jpg', url: ''},
             isArchived: false,
           },
         ] as any,
@@ -312,10 +323,53 @@ describe('archived candidates are never rendered', () => {
         storyboard: [scene],
       });
 
+      // Archive c0 -> should automatically select c1 and load c1's prompt and referenceImage
       storyboardComponent.toggleArchive(new Event('click'), scene, 0);
 
       expect(scene.candidates![0].isArchived).toBe(true);
+      expect(scene.selectedCandidateIndex).toBe(1);
+      expect(scene.prompt).toBe('prompt 1');
+      expect(scene.referenceImage).toEqual({
+        path: 'refs/ref1.jpg',
+        url: 'ref1-url',
+      });
+      expect(
+        storyboardComponent.getSceneFilmstripThumbnailData(scene),
+      ).toMatchObject({
+        lowQuality: 'c1-low',
+        showReference: false,
+        showIcon: false,
+      });
+
+      // Archive c1 (the last active candidate) -> should clear selection, prompt, and referenceImage, and show fallback icon in filmstrip
+      storyboardComponent.toggleArchive(new Event('click'), scene, 1);
+
+      expect(scene.candidates![1].isArchived).toBe(true);
       expect(scene.selectedCandidateIndex).toBeUndefined();
+      expect(scene.prompt).toBe('');
+      expect(scene.referenceImage).toBeUndefined();
+      expect(scene.lowQualityThumbnail).toBeUndefined();
+      expect(scene.highQualityThumbnail).toBeUndefined();
+      expect(
+        storyboardComponent.getSceneFilmstripThumbnailData(scene),
+      ).toMatchObject({
+        lowQuality: undefined,
+        highQuality: undefined,
+        showReference: false,
+        showIcon: true,
+      });
+
+      // Restore c0 -> should select c0, keep video paused, and reload c0's prompt and referenceImage
+      storyboardComponent.toggleArchive(new Event('click'), scene, 0);
+
+      expect(scene.candidates![0].isArchived).toBe(false);
+      expect(scene.selectedCandidateIndex).toBe(0);
+      expect(scene.prompt).toBe('prompt 0');
+      expect(scene.referenceImage).toEqual({
+        path: 'refs/ref0.jpg',
+        url: 'ref0-url',
+      });
+      expect(storyboardComponent.isVideoPlaying()).toBe(false);
     });
 
     it('leaves selectedCandidateIndex alone when a DIFFERENT candidate is archived (control)', () => {

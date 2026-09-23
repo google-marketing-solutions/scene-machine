@@ -65,17 +65,15 @@ from werkzeug.exceptions import BadRequest
 from werkzeug.exceptions import RequestEntityTooLarge
 from flask_cors import CORS
 from google.api_core import exceptions as google_exceptions
-from google.auth import compute_engine
-from google.auth import default as google_auth_default
 from google.auth.transport import requests as google_auth_requests
 from google.cloud import firestore
 from google.cloud.firestore_v1 import field_path
-from google.cloud import storage
 from google.oauth2 import id_token as google_id_token
 import orchestrator
 import transcription
 from util import database as util_database
 from util import errors as util_errors
+from util import gcs_wrapper
 from util import model_allowlist
 from util import submission_validation
 from werkzeug.security import safe_join
@@ -692,9 +690,8 @@ def get_status_handler() -> flask_response:
 # ---------------------------------------------------------------------------
 # Mediated data plane (ROLE='app'): signed-URL minting for GCS plus CRUD on
 # the UI Firestore database, so the SPA can run without direct Firestore or
-# Storage access. Module-level lazy singletons keep the per-request cost at
-# ~1 IAM signBlob RPC per unique path (the per-call construction in
-# util.gcs_wrapper.get_signed_url costs ~3 RPCs).
+# Storage access. Storage client and IAM signing credentials delegate to the
+# cached signing context in util.gcs_wrapper.
 # ---------------------------------------------------------------------------
 
 _SIGNED_GET_TTL = datetime.timedelta(hours=24)
@@ -732,17 +729,7 @@ def _is_allowed_upload_content_type(content_type: str) -> bool:
       _ALLOWED_UPLOAD_TYPE_PREFIXES
   )
 
-_storage_client = None
 _ui_db = None
-_signing_credentials = None
-
-
-def _get_storage_client() -> storage.Client:
-  """Returns the lazily-built module-level Cloud Storage client."""
-  global _storage_client
-  if _storage_client is None:
-    _storage_client = storage.Client()
-  return _storage_client
 
 
 def _get_ui_db() -> firestore.Client | None:
@@ -759,31 +746,11 @@ def _get_ui_db() -> firestore.Client | None:
   return _ui_db
 
 
-def _get_signing_credentials() -> compute_engine.IDTokenCredentials:
-  """Returns cached IAM-signing credentials, rebuilding them on expiry.
-
-  Inlines the flask-context mechanics of util.gcs_wrapper.get_signed_url:
-  the metadata-server credentials carry no private key, so URL signing
-  goes through the IAM signBlob API via compute_engine.IDTokenCredentials
-  (requires roles/iam.serviceAccountTokenCreator on the runtime SA).
-  """
-  global _signing_credentials
-  if _signing_credentials is None or _signing_credentials.expired:
-    auth_request = google_auth_requests.Request()
-    source_credentials, _ = google_auth_default()
-    source_credentials.refresh(auth_request)
-    _signing_credentials = compute_engine.IDTokenCredentials(
-        auth_request,
-        '',
-        service_account_email=source_credentials.service_account_email,  # pyright: ignore[reportAttributeAccessIssue]
-    )
-  return _signing_credentials
-
-
 def _signed_url(
     blob, method: str, expiration: datetime.timedelta, content_type=None
 ) -> str:
-  """Generates a V4 signed URL for the blob with the cached credentials."""
+  """Generates a V4 signed URL for the blob with cached IAM credentials."""
+  _, credentials = gcs_wrapper.get_signing_context()
   kwargs = {}
   if content_type is not None:
     kwargs['content_type'] = content_type
@@ -791,7 +758,7 @@ def _signed_url(
       version='v4',
       expiration=expiration,
       method=method,
-      credentials=_get_signing_credentials(),
+      credentials=credentials,
       **kwargs,
   )
 
@@ -999,7 +966,8 @@ def upload_url_handler() -> flask_response:
   if not bucket_name:
     return _json_error('gcsBucket not configured', 500)
   object_path = f'{prefix}/{file_name}'
-  blob = _get_storage_client().bucket(bucket_name).blob(object_path)
+  storage_client, _ = gcs_wrapper.get_signing_context()
+  blob = storage_client.bucket(bucket_name).blob(object_path)
   exists = blob.exists()
   upload_url = None
   if not exists:
@@ -1061,7 +1029,8 @@ def sign_url_handler() -> flask_response:
     if not ttl_arg.isdecimal() or not 1 <= int(ttl_arg) <= 86400:
       return _json_error('ttl must be 1-86400 seconds', 400)
     ttl = datetime.timedelta(seconds=int(ttl_arg))
-  bucket = _get_storage_client().bucket(bucket_name)
+  storage_client, _ = gcs_wrapper.get_signing_context()
+  bucket = storage_client.bucket(bucket_name)
   urls = {
       path: _signed_url(bucket.blob(path), 'GET', ttl) for path in paths
   }
@@ -1306,13 +1275,11 @@ def _read_project_list_docs(
     thumbnail = {}
     thumbnail_persist = True
     if isinstance(scene, dict):
-      low_quality = scene.get('lowQualityThumbnail')
-      high_quality = scene.get('highQualityThumbnail')
+      low_quality = None
+      high_quality = None
       if scene.get('type') == 'generated':
         candidates = scene.get('candidates')
         selected_index = scene.get('selectedCandidateIndex')
-        if selected_index is None:
-          selected_index = 0
         candidate = None
         if (
             isinstance(candidates, list)
@@ -1320,17 +1287,17 @@ def _read_project_list_docs(
             and not isinstance(selected_index, bool)
             and 0 <= selected_index < len(candidates)
             and isinstance(candidates[selected_index], dict)
+            and not bool(candidates[selected_index].get('isArchived'))
         ):
           candidate = candidates[selected_index]
         if candidate is not None:
-          low_quality = candidate.get('lowQualityThumbnail') or low_quality
-          high_quality = (
-              candidate.get('highQualityThumbnail') or high_quality
-          )
-          thumbnail_persist = not bool(candidate.get('isArchived'))
-        reference_image = scene.get('referenceImage')
-        if reference_image is not None:
-          thumbnail['referenceImage'] = reference_image
+          low_quality = candidate.get('lowQualityThumbnail')
+          high_quality = candidate.get('highQualityThumbnail')
+        else:
+          thumbnail_persist = False
+      else:
+        low_quality = scene.get('lowQualityThumbnail')
+        high_quality = scene.get('highQualityThumbnail')
       if low_quality is not None:
         thumbnail['lowQualityThumbnail'] = low_quality
       if high_quality is not None:

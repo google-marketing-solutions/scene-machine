@@ -48,7 +48,16 @@ _CACHED_AUTH_FACTORY = None
 _SIGNING_CONTEXT_LOCK = threading.Lock()
 
 
-def _get_cached_signing_context():
+def get_signing_context(
+) -> tuple[storage.Client, compute_engine.IDTokenCredentials]:
+  """Returns cached (storage_client, signing_credentials) for GCS URL signing.
+
+  Returns:
+    A tuple of (storage.Client, compute_engine.IDTokenCredentials).
+
+  Raises:
+    RuntimeError: If active credentials do not have a service account email.
+  """
   global _CACHED_STORAGE_CLIENT, _CACHED_CLIENT_FACTORY
   global _CACHED_SIGNING_CREDENTIALS, _CACHED_AUTH_FACTORY
 
@@ -63,16 +72,34 @@ def _get_cached_signing_context():
     ):
       auth_request = transport_requests.Request()
       cred, _ = default()
+      sa_email = getattr(cred, 'service_account_email', None)
+      if not sa_email:
+        raise RuntimeError(
+            'GCS URL signing requires a service account identity, but the '
+            'active credentials have no service_account_email. User '
+            'credentials from "gcloud auth application-default login" cannot '
+            'sign URLs; configure service account impersonation ("gcloud auth '
+            'application-default login --impersonate-service-account='
+            '<SA_EMAIL>") or set GOOGLE_APPLICATION_CREDENTIALS to a service '
+            'account key file. See DEVELOPING.md ("The local loop") for '
+            'details.'
+        )
       cred.refresh(auth_request)  # pyright: ignore[reportAttributeAccessIssue]
+      sa_email = getattr(cred, 'service_account_email', None)
+      if not sa_email or sa_email == 'default':
+        raise RuntimeError(
+            'GCS URL signing requires a resolved service account email, but '
+            f'credential refresh produced {sa_email!r}.'
+        )
       signer = iam.Signer(
           auth_request,
           cred,
-          cred.service_account_email,  # pyright: ignore[reportAttributeAccessIssue]
+          sa_email,
       )
       signing_creds = compute_engine.IDTokenCredentials(
           auth_request,
           '',
-          service_account_email=cred.service_account_email,  # pyright: ignore[reportAttributeAccessIssue]
+          service_account_email=sa_email,
           signer=signer,
       )
       if isinstance(getattr(cred, 'expiry', None), datetime.datetime):
@@ -96,7 +123,7 @@ def get_signed_url(
     A signed URL to the input file.
   """
   if flask_context:
-    storage_client, signing_credentials = _get_cached_signing_context()
+    storage_client, signing_credentials = get_signing_context()
     bucket = storage_client.bucket(gcs_bucket_name)
     blob = bucket.blob(blob_name)
     return blob.generate_signed_url(

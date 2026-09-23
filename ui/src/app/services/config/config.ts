@@ -1062,6 +1062,40 @@ export class ConfigService {
     if (!data.visualOverlays) {
       data.visualOverlays = [];
     }
+    if (Array.isArray(data.storyboard)) {
+      data.storyboard = data.storyboard.map(scene => {
+        if (!this.isGeneratedScene(scene)) {
+          return scene;
+        }
+        if (scene.selectedCandidateIndex === undefined) {
+          return scene;
+        }
+        const selected = scene.candidates?.[scene.selectedCandidateIndex];
+        if (selected && !selected.isArchived) {
+          return scene;
+        }
+        const nextActiveIndex =
+          scene.candidates?.findIndex(c => !c.isArchived) ?? -1;
+        const updatedScene: GeneratedScene = {...scene};
+        if (nextActiveIndex >= 0 && scene.candidates) {
+          const activeCandidate = scene.candidates[nextActiveIndex];
+          updatedScene.selectedCandidateIndex = nextActiveIndex;
+          updatedScene.prompt = activeCandidate.prompt;
+          if (activeCandidate.referenceImage) {
+            updatedScene.referenceImage = activeCandidate.referenceImage;
+          } else {
+            delete updatedScene.referenceImage;
+          }
+        } else {
+          delete updatedScene.selectedCandidateIndex;
+          updatedScene.prompt = '';
+          delete updatedScene.referenceImage;
+          delete updatedScene.lowQualityThumbnail;
+          delete updatedScene.highQualityThumbnail;
+        }
+        return updatedScene;
+      });
+    }
     // Snap resolution/duration/aspect ratio a persisted project's own (still
     // valid) model no longer allows, so a stale combination from before a
     // catalog change is never posted verbatim.
