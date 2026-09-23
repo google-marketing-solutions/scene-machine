@@ -818,11 +818,22 @@ if [ "$SKIP_UI_BUILD" = "1" ]; then
 else
   phase "Building the Angular UI (npm ci + ng build)..."
   export NG_CLI_ANALYTICS=ci
-  (
-    cd ui \
-      && npm ci \
-      && npx ng build --configuration production
-  )
+  LOCK_HASH=$(sha256sum ui/package-lock.json | awk '{print $1}')
+  if [ -d ui/node_modules ] && [ -f ui/node_modules/.package-lock.sha256 ] \
+      && [ "$(cat ui/node_modules/.package-lock.sha256)" = "$LOCK_HASH" ]; then
+    echo "  ✓ ui/package-lock.json unchanged — skipping npm ci."
+    (
+      cd ui \
+        && npx ng build --configuration production
+    )
+  else
+    (
+      cd ui \
+        && npm ci \
+        && printf '%s\n' "$LOCK_HASH" > node_modules/.package-lock.sha256 \
+        && npx ng build --configuration production
+    )
+  fi
 fi
 
 # --- Version stamp + Artifact Registry + ONE image build -----------------------
@@ -867,6 +878,7 @@ run_with_heartbeat "Cloud Build" \
     --project=$PROJECT --region=$REGION
 
 # --- Cloud Run: worker (private, Cloud-Tasks-invoked) --------------------------
+WORKER_DEPLOY_PID=""
 if [ "$APP_ONLY" = "1" ]; then
   phase "Reusing existing 'worker' Cloud Run service (--app-only)..."
   echo "[skip] Deploying 'worker' — skipped (--app-only); reusing the live service."
@@ -879,23 +891,38 @@ if [ "$APP_ONLY" = "1" ]; then
   fi
   echo "  Reusing worker: ${WORKER_URL}"
 else
-  phase "Deploying 'worker' Cloud Run service (private)..."
-  # GUNICORN_TIMEOUT just above the worker's 1800s Cloud Run request timeout so
-  # gunicorn reaps a thread only AFTER Cloud Run has already returned, never
-  # killing a legitimate long render mid-flight. (D7)
-  gcloud run deploy worker --image "$IMAGE" --region $REGION --project $PROJECT \
-    --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated \
-    --service-account="$RUNTIME_SA" \
-    --set-env-vars=ROLE=worker,GUNICORN_TIMEOUT=1830
-  WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)')
-  echo "✓ Worker deployed: ${WORKER_URL}"
+  EXISTING_WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)' 2>/dev/null || true)
+  if [ -n "$EXISTING_WORKER_URL" ]; then
+    phase "Deploying 'worker' and 'app' Cloud Run services in parallel..."
+    WORKER_URL="$EXISTING_WORKER_URL"
+    (
+      gcloud run deploy worker --image "$IMAGE" --region "$REGION" --project "$PROJECT" \
+        --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated \
+        --service-account="$RUNTIME_SA" \
+        --set-env-vars=ROLE=worker,GUNICORN_TIMEOUT=1830 >/dev/null 2>&1
+      add_run_invoker_binding worker "$REGION" "$PROJECT" "serviceAccount:${RUNTIME_SA}" >/dev/null
+    ) &
+    WORKER_DEPLOY_PID=$!
+    echo "  Started background 'worker' rollout (${WORKER_URL})..."
+  else
+    phase "Deploying 'worker' Cloud Run service (private)..."
+    # GUNICORN_TIMEOUT just above the worker's 1800s Cloud Run request timeout so
+    # gunicorn reaps a thread only AFTER Cloud Run has already returned, never
+    # killing a legitimate long render mid-flight. (D7)
+    gcloud run deploy worker --image "$IMAGE" --region $REGION --project $PROJECT \
+      --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated \
+      --service-account="$RUNTIME_SA" \
+      --set-env-vars=ROLE=worker,GUNICORN_TIMEOUT=1830
+    WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)')
+    echo "✓ Worker deployed: ${WORKER_URL}"
 
-  # The only run.invoker grant the runtime SA gets: service-scoped to the
-  # worker, exactly what the Cloud-Tasks-minted OIDC tokens need to invoke it.
-  # (There is no project-wide run.invoker, so the app cannot invoke other
-  # Cloud Run services.)
-  echo "Granting service-scoped run.invoker on 'worker' to ${RUNTIME_SA}..."
-  add_run_invoker_binding worker "$REGION" "$PROJECT" "serviceAccount:${RUNTIME_SA}"
+    # The only run.invoker grant the runtime SA gets: service-scoped to the
+    # worker, exactly what the Cloud-Tasks-minted OIDC tokens need to invoke it.
+    # (There is no project-wide run.invoker, so the app cannot invoke other
+    # Cloud Run services.)
+    echo "Granting service-scoped run.invoker on 'worker' to ${RUNTIME_SA}..."
+    add_run_invoker_binding worker "$REGION" "$PROJECT" "serviceAccount:${RUNTIME_SA}"
+  fi
 fi
 
 # --- Cloud Run: app (UI + same-origin /api control plane) -----------------------
@@ -939,6 +966,10 @@ fi
 IAP_SA="service-${PROJECT_NUMBER}@gcp-sa-iap.iam.gserviceaccount.com"
 echo "Granting service-scoped run.invoker on 'app' to the IAP service agent..."
 add_run_invoker_binding app "$REGION" "$PROJECT" "serviceAccount:${IAP_SA}"
+if [ -n "$WORKER_DEPLOY_PID" ]; then
+  wait "$WORKER_DEPLOY_PID"
+  echo "✓ Worker deployed: ${WORKER_URL}"
+fi
 APP_URL=$(gcloud run services describe app --region=$REGION --project=$PROJECT --format='value(status.url)')
 echo "✓ App deployed: ${APP_URL}"
 # Nothing was predicted: the image carries only same-origin URLs, so the app and
