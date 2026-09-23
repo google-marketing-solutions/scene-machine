@@ -407,6 +407,27 @@ echo "════════════════════════�
 # human think-time at the prompt doesn't pollute the timing deliverable.
 SCRIPT_START=$(date +%s)
 
+UI_BUILD_PID=""; INFRA_SETUP_PID=""; WORKER_DEPLOY_PID=""
+UI_BUILD_LOG=""; INFRA_SETUP_LOG=""; WORKER_ERR_FILE=""
+
+cleanup() {
+  local pid log
+  for pid in "${UI_BUILD_PID:-}" "${INFRA_SETUP_PID:-}" "${WORKER_DEPLOY_PID:-}"; do
+    [ -n "$pid" ] || continue
+    pkill -P "$pid" 2>/dev/null || true
+    kill -- "-${pid}" 2>/dev/null || kill "$pid" 2>/dev/null || true
+  done
+  for log in "${UI_BUILD_LOG:-}" "${INFRA_SETUP_LOG:-}" "${WORKER_ERR_FILE:-}"; do
+    [ -n "$log" ] || continue
+    if [ -s "$log" ]; then
+      echo "--- background log: $log ---" >&2
+      cat "$log" >&2
+    fi
+    rm -f "$log"
+  done
+}
+trap cleanup EXIT
+
 # Render UI env + config and kick off the local Angular UI build in the
 # background right away so local CPU work (npm ci / ng build) overlaps with
 # cloud API, service-account, IAM, Cloud Tasks, bucket, and Firestore setup.
@@ -417,8 +438,6 @@ if grep -q "controlPlaneMode: 'none'" ./ui/src/env.ts; then
   echo "ERROR: ui/src/env.ts rendered with controlPlaneMode 'none' (sign-in disabled)." >&2
   exit 1
 fi
-UI_BUILD_PID=""
-UI_BUILD_LOG=""
 if [ "$SKIP_UI_BUILD" != "1" ]; then
   UI_BUILD_LOG=$(mktemp)
   (
@@ -682,7 +701,7 @@ add_sa_iam_binding "${RUNTIME_SA}" "serviceAccount:${RUNTIME_SA}" "roles/iam.ser
 INFRA_SETUP_LOG=$(mktemp)
 (
 # --- Cloud Tasks queues -------------------------------------------------------
-phase "Setting up Cloud Tasks queues..."
+echo "[>] Setting up Cloud Tasks queues..."
 QUEUES=("Other" "Gemini" "Veo")
 for QUEUE_SUFFIX in "${QUEUES[@]}"; do
   QUEUE_NAME="${TASKS_QUEUE_PREFIX}${QUEUE_SUFFIX}"
@@ -729,7 +748,7 @@ echo "  ✓ ${#QUEUES[@]} Cloud Tasks queues ready (${QUEUES[*]/#/${TASKS_QUEUE_
 # deployer sets ADOPT_EXISTING_BUCKET=1 — so a shared bucket cannot have its
 # contents exposed through signed URLs. (Needs roles/storage.admin, already
 # required.)
-phase "Setting up GCS bucket..."
+echo "[>] Setting up GCS bucket..."
 DEFAULT_BUCKET="${PROJECT}-scene-machine"
 if ! gcloud storage buckets describe "gs://$GCS_BUCKET" --project=$PROJECT &> /dev/null; then
     echo "Creating dedicated GCS bucket gs://$GCS_BUCKET in ${REGION}..."
@@ -770,7 +789,7 @@ else
 fi
 
 # --- Firestore databases (two) -------------------------------------------------
-phase "Setting up Firestore databases..."
+echo "[>] Setting up Firestore databases..."
 if ! gcloud firestore databases describe --database="$FIRESTORE_DB" --project=$PROJECT &> /dev/null; then
     echo "Creating Firestore database: $FIRESTORE_DB"
     gcloud firestore databases create --database="$FIRESTORE_DB" --project=$PROJECT --location="$REGION"
@@ -796,7 +815,7 @@ else
 fi
 
 # --- SceneMachineUser custom role -----------------------------------------------
-phase "Ensuring SceneMachineUser custom role matches user-role.yaml..."
+echo "[>] Ensuring SceneMachineUser custom role matches user-role.yaml..."
 if ! gcloud iam roles describe SceneMachineUser --project=$PROJECT &> /dev/null; then
   echo "SceneMachineUser role doesn't exist. Creating it..."
   gcloud iam roles create SceneMachineUser --project=$PROJECT --file=./user-role.yaml
@@ -806,7 +825,7 @@ else
 fi
 
 # --- Seed Firestore config (front-door topology) --------------------------------
-phase "Adding default Scene Machine configurations to Firestore..."
+echo "[>] Adding default Scene Machine configurations to Firestore..."
 ADC_TOKEN=$(gcloud auth application-default print-access-token)
 CONFIG_SEED_STATUS=$(curl -s -X PATCH \
 "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/global" \
@@ -889,12 +908,13 @@ if [ "$SKIP_UI_BUILD" = "1" ]; then
 else
   phase "Building the Angular UI (npm ci + ng build)..."
   if ! wait "$UI_BUILD_PID"; then
-    cat "$UI_BUILD_LOG" >&2
-    rm -f "$UI_BUILD_LOG"
+    UI_BUILD_PID=""
     exit 1
   fi
+  UI_BUILD_PID=""
   cat "$UI_BUILD_LOG"
   rm -f "$UI_BUILD_LOG"
+  UI_BUILD_LOG=""
 fi
 
 # --- Version stamp + Artifact Registry + ONE image build -----------------------
@@ -905,10 +925,12 @@ COMMIT_DATE=$(git log -1 --format=%cI 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 echo "${GIT_BRANCH}/${COMMIT_DATE}" > deployed_version.txt
 sync
-BUILD_MACHINE_ARGS=()
 if ! gcloud artifacts repositories describe "${ARTIFACT_REPO}" --project=$PROJECT --location="$REGION" &> /dev/null; then
   echo "Creating artifact repository: $ARTIFACT_REPO"
   gcloud artifacts repositories create "${ARTIFACT_REPO}" --repository-format=docker --project=$PROJECT --location="$REGION"
+fi
+BUILD_MACHINE_ARGS=()
+if [ "$NO_BUILD_CACHE" = "1" ] || ! gcloud artifacts docker images describe "${IMAGE}:latest" --project="$PROJECT" &> /dev/null; then
   BUILD_MACHINE_ARGS=(--machine-type=e2-highcpu-8)
 fi
 # NOTE: the repo's .gcloudignore excludes ui/* but re-includes ui/dist/ and
@@ -932,27 +954,44 @@ echo "  (this step is quiet — the build runs remotely; a heartbeat prints belo
 BUILD_SUBS="_IMAGE=${IMAGE}"
 if [ "$NO_BUILD_CACHE" = "1" ]; then
   BUILD_SUBS="${BUILD_SUBS},_USE_CACHE=0"
-  BUILD_MACHINE_ARGS=(--machine-type=e2-highcpu-8)
   echo "  Docker layer cache: OFF (--no-build-cache; forcing a cold rebuild)."
 else
   echo "  Docker layer cache: ON (reuses unchanged layers from the previous image)."
 fi
-run_with_heartbeat "Cloud Build" \
-  gcloud builds submit . --config=cloudbuild.yaml --substitutions="$BUILD_SUBS" \
-    "${BUILD_MACHINE_ARGS[@]}" --project=$PROJECT --region=$REGION
+BUILD_ATTEMPT=0
+BUILD_MAX_ATTEMPTS=4
+while true; do
+  BUILD_ATTEMPT=$((BUILD_ATTEMPT + 1))
+  BUILD_SUBMIT_LOG=$(mktemp)
+  if run_with_heartbeat "Cloud Build" \
+    gcloud builds submit . --config=cloudbuild.yaml --substitutions="$BUILD_SUBS" \
+      "${BUILD_MACHINE_ARGS[@]}" --project=$PROJECT --region=$REGION 2>&1 | tee "$BUILD_SUBMIT_LOG"; then
+    rm -f "$BUILD_SUBMIT_LOG"
+    break
+  fi
+  if [ "$BUILD_ATTEMPT" -lt "$BUILD_MAX_ATTEMPTS" ] \
+      && grep -qiE 'PERMISSION_DENIED|permission_denied|403|does not have storage\.objects' "$BUILD_SUBMIT_LOG"; then
+    rm -f "$BUILD_SUBMIT_LOG"
+    BUILD_RETRY_DELAY=$((BUILD_ATTEMPT * 15))
+    echo "  ⚠ Cloud Build hit transient IAM propagation delay (attempt ${BUILD_ATTEMPT}/${BUILD_MAX_ATTEMPTS}); retrying in ${BUILD_RETRY_DELAY}s..."
+    sleep "$BUILD_RETRY_DELAY"
+    continue
+  fi
+  rm -f "$BUILD_SUBMIT_LOG"
+  exit 1
+done
 
 phase "Completing overlapped infrastructure & Firestore setup..."
 if ! wait "$INFRA_SETUP_PID"; then
-  cat "$INFRA_SETUP_LOG" >&2
-  rm -f "$INFRA_SETUP_LOG"
+  INFRA_SETUP_PID=""
   exit 1
 fi
+INFRA_SETUP_PID=""
 cat "$INFRA_SETUP_LOG"
 rm -f "$INFRA_SETUP_LOG"
+INFRA_SETUP_LOG=""
 
 # --- Cloud Run: worker (private, Cloud-Tasks-invoked) --------------------------
-WORKER_DEPLOY_PID=""
-WORKER_ERR_FILE=""
 if [ "$APP_ONLY" = "1" ]; then
   phase "Reusing existing 'worker' Cloud Run service (--app-only)..."
   echo "[skip] Deploying 'worker' — skipped (--app-only); reusing the live service."
@@ -981,7 +1020,11 @@ else
 fi
 
 # --- Cloud Run: app (UI + same-origin /api control plane) -----------------------
-phase "Deploying 'worker' and 'app' Cloud Run services in parallel (AUTH_MODE=${AUTH_MODE})..."
+if [ "$APP_ONLY" = "1" ]; then
+  phase "Deploying 'app' Cloud Run service (AUTH_MODE=${AUTH_MODE})..."
+else
+  phase "Deploying 'worker' and 'app' Cloud Run services in parallel (AUTH_MODE=${AUTH_MODE})..."
+fi
 IAP_FLAG_AVAILABLE=true
 # IAP front door. The --iap flag (built-in IAP for Cloud Run, GA March 2026) may
 # not exist on older gcloud installs — gate it behind a CLI capability check and
@@ -1023,12 +1066,18 @@ echo "Granting service-scoped run.invoker on 'app' to the IAP service agent..."
 add_run_invoker_binding app "$REGION" "$PROJECT" "serviceAccount:${IAP_SA}"
 if [ -n "$WORKER_DEPLOY_PID" ]; then
   if ! wait "$WORKER_DEPLOY_PID"; then
-    cat "$WORKER_ERR_FILE" >&2
-    rm -f "$WORKER_ERR_FILE"
+    WORKER_DEPLOY_PID=""
     exit 1
   fi
+  WORKER_DEPLOY_PID=""
   rm -f "$WORKER_ERR_FILE"
-  WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)')
+  WORKER_ERR_FILE=""
+  ACTUAL_WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)')
+  if [ -n "$ACTUAL_WORKER_URL" ] && [ "$WORKER_URL" != "$ACTUAL_WORKER_URL" ]; then
+    WORKER_URL="$ACTUAL_WORKER_URL"
+    gcloud run services update app --region=$REGION --project=$PROJECT \
+      --update-env-vars="WORKER_URL=${WORKER_URL}" --quiet >/dev/null
+  fi
   echo "✓ Worker deployed: ${WORKER_URL}"
 fi
 APP_URL=$(gcloud run services describe app --region=$REGION --project=$PROJECT --format='value(status.url)')

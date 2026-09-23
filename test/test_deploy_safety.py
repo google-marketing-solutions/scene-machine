@@ -771,18 +771,168 @@ def test_config_validation_regex_accepts_quoted_and_rejects_empty(
   assert (proc.returncode == 0) == expected_match
 
 
-def test_dockerfile_external_images_are_digest_pinned_and_hash_verified():
-  """Every external FROM / COPY --from image in Dockerfile must be @sha256-pinned."""
-  dockerfile = _dockerfile()
-  stage_names = set(
-      re.findall(r"^FROM\s+\S+\s+AS\s+(\S+)", dockerfile, re.MULTILINE)
+def _verify_dockerfile_security_invariants(dockerfile: str) -> None:
+  """Validate digest pinning and uv hash/wheel flags on a Dockerfile string."""
+  for syntax_ref in re.findall(
+      r"^\s*#\s*syntax\s*=\s*(\S+)", dockerfile, re.MULTILINE | re.IGNORECASE
+  ):
+    assert (
+        "@sha256:" in syntax_ref
+    ), f"Unpinned # syntax= frontend image in Dockerfile: {syntax_ref}"
+
+  # Strip comment lines and join backslash continuations before parsing rules.
+  uncommented_lines = [
+      line
+      for line in dockerfile.splitlines()
+      if not line.lstrip().startswith("#")
+  ]
+  normalized = re.sub(r"\\\s*\n", " ", "\n".join(uncommented_lines))
+
+  stage_names = {
+      name.lower()
+      for name in re.findall(
+          r"^\s*FROM\s+\S+\s+AS\s+(\S+)",
+          normalized,
+          re.MULTILINE | re.IGNORECASE,
+      )
+  }
+  from_refs = re.findall(
+      r"^\s*FROM\s+(\S+)", normalized, re.MULTILINE | re.IGNORECASE
   )
-  for ref in re.findall(r"^FROM\s+(\S+)", dockerfile, re.MULTILINE):
-    if ref in stage_names:
+  assert from_refs, "Expected at least one FROM instruction in Dockerfile"
+  for ref in from_refs:
+    if ref.lower() in stage_names:
       continue
     assert "@sha256:" in ref, f"Unpinned FROM image in Dockerfile: {ref}"
-  for ref in re.findall(r"COPY\s+--from=(\S+)", dockerfile):
-    if ref in stage_names:
+
+  for ref in re.findall(r"COPY\s+--from=(\S+)", normalized, re.IGNORECASE):
+    if ref.lower() in stage_names:
       continue
     assert "@sha256:" in ref, f"Unpinned COPY --from image in Dockerfile: {ref}"
-  assert "--require-hashes" in dockerfile
+
+  uv_install_cmds = [
+      line
+      for line in normalized.splitlines()
+      if re.search(r"^\s*RUN\b.*\buv\s+pip\s+install\b", line, re.IGNORECASE)
+  ]
+  assert uv_install_cmds, "Expected a RUN ... uv pip install instruction"
+  for cmd in uv_install_cmds:
+    assert "--require-hashes" in cmd, f"Missing --require-hashes in: {cmd}"
+    assert (
+        "--only-binary :all:" in cmd or "--only-binary=:all:" in cmd
+    ), f"Missing --only-binary :all: in: {cmd}"
+
+
+def test_dockerfile_external_images_are_digest_pinned_and_hash_verified():
+  """Every external image in Dockerfile must be @sha256-pinned and uv verified."""
+  dockerfile = _dockerfile()
+  _verify_dockerfile_security_invariants(dockerfile)
+
+  # Self-verifying mutation checks: ensure each regression fails the check.
+  with pytest.raises(AssertionError, match="Unpinned # syntax="):
+    _verify_dockerfile_security_invariants(
+        "# syntax=docker/dockerfile:1\n" + dockerfile
+    )
+  with pytest.raises(AssertionError, match="Missing --require-hashes"):
+    _verify_dockerfile_security_invariants(
+        dockerfile.replace("--require-hashes", "") + "\n# --require-hashes\n"
+    )
+  with pytest.raises(AssertionError, match="Missing --only-binary :all:"):
+    _verify_dockerfile_security_invariants(
+        dockerfile.replace("--only-binary :all:", "")
+    )
+  with pytest.raises(AssertionError, match="Unpinned FROM image"):
+    _verify_dockerfile_security_invariants(
+        dockerfile.replace(
+            "FROM runtime-base AS final", "from alpine:latest as final"
+        )
+    )
+
+
+def test_add_iam_binding_caches_policy_and_recovers_after_fetch_error(tmp_path):
+  """add_iam_binding caches get-iam-policy without poisoning on error."""
+  fake_bin = tmp_path / "bin"
+  fake_bin.mkdir()
+  calls_log = tmp_path / "gcloud_calls.log"
+  fail_flag = tmp_path / "fail_first_get"
+  fail_flag.write_text("1")
+
+  sa_member = "serviceAccount:sm-runtime@p1.iam.gserviceaccount.com"
+  fake_gcloud = fake_bin / "gcloud"
+  fake_gcloud.write_text(
+      "#!/usr/bin/env bash\n"
+      f'echo "$*" >> "{calls_log}"\n'
+      'if [[ "$1 $2" == "projects get-iam-policy" ]]; then\n'
+      f'  if [[ -f "{fail_flag}" ]]; then\n'
+      f'    rm -f "{fail_flag}"\n'
+      "    exit 1\n"
+      "  fi\n"
+      f'  printf "roles/datastore.user\\t{sa_member}\\n"\n'
+      "  exit 0\n"
+      "fi\n"
+      "exit 0\n"
+  )
+  fake_gcloud.chmod(0o755)
+
+  libs_sh = _REPO / "deploy" / "libs.sh"
+  script = f"""
+    set -euo pipefail
+    export PATH="{fake_bin}:$PATH"
+    source "{libs_sh}"
+    add_iam_binding p1 --member="{sa_member}" --role="roles/logging.logWriter"
+    add_iam_binding p1 --member="{sa_member}" --role="roles/datastore.user"
+    add_iam_binding p1 --member="{sa_member}" --role="roles/aiplatform.user"
+    add_iam_binding p1 --member="{sa_member}" --role="roles/aiplatform.user"
+  """
+  proc = subprocess.run(
+      ["bash", "-c", script], capture_output=True, text=True, check=False
+  )
+  assert proc.returncode == 0, f"Script failed: {proc.stderr}"
+  calls = calls_log.read_text().splitlines()
+  get_calls = [c for c in calls if c.startswith("projects get-iam-policy")]
+  add_calls = [
+      c for c in calls if c.startswith("projects add-iam-policy-binding")
+  ]
+  assert len(get_calls) == 2, f"Expected 2 get-iam-policy calls, got: {calls}"
+  assert (
+      len(add_calls) == 2
+  ), f"Expected 2 add-iam-policy-binding calls, got: {calls}"
+
+
+def test_deploy_cleanup_trap_dumps_logs_and_unlinks_on_abort(tmp_path):
+  """The EXIT trap in deploy.sh dumps background logs and reaps jobs on abort."""
+  deploy_sh = (_REPO / "deploy.sh").read_text(encoding="utf-8")
+  match = re.search(
+      r"(UI_BUILD_PID=\"\";.*?trap cleanup EXIT)", deploy_sh, re.DOTALL
+  )
+  assert match, "Expected cleanup() and trap cleanup EXIT in deploy.sh"
+  trap_block = match.group(1)
+
+  # 1. Pre-flight abort (PIDs/logs still empty) must not fail under set -u.
+  preflight = subprocess.run(
+      ["bash", "-c", f"set -euo pipefail\n{trap_block}\nexit 1\n"],
+      capture_output=True,
+      text=True,
+      check=False,
+  )
+  assert preflight.returncode == 1
+  assert "unbound variable" not in preflight.stderr
+
+  # 2. Mid-deploy abort dumps non-empty background log to stderr and unlinks it.
+  bg_log = tmp_path / "infra.log"
+  bg_log.write_text("Firestore DB 1 created\nSeed failed HTTP 404\n")
+  abort_run = subprocess.run(
+      [
+          "bash",
+          "-c",
+          f'set -euo pipefail\n{trap_block}\nINFRA_SETUP_LOG="{bg_log}"\n'
+          "( sleep 30 ) &\nINFRA_SETUP_PID=$!\nexit 1\n",
+      ],
+      capture_output=True,
+      text=True,
+      check=False,
+  )
+  assert abort_run.returncode == 1
+  assert "--- background log:" in abort_run.stderr
+  assert "Seed failed HTTP 404" in abort_run.stderr
+  assert not bg_log.exists(), "Expected cleanup trap to unlink background log"
