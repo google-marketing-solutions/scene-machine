@@ -141,10 +141,8 @@ describe('moveCandidate', () => {
     expect(
       generated(result.storyboard[0]).selectedCandidateIndex,
     ).toBeUndefined();
-    expect(generated(result.storyboard[0]).prompt).toBe('keep prompt');
-    expect(generated(result.storyboard[0]).referenceImage?.path).toBe(
-      'keep-ref',
-    );
+    expect(generated(result.storyboard[0]).prompt).toBe('');
+    expect(generated(result.storyboard[0]).referenceImage).toBeUndefined();
     expect(generated(result.storyboard[0]).generationError).toBeUndefined();
     expect(resolveSceneRenderClip(result.storyboard[0])).toEqual({
       state: 'not-selected',
@@ -215,10 +213,17 @@ describe('moveCandidate', () => {
     expect(remaining.transitionOverlap).toBe(0.2);
   });
 
-  it('selects an arrival only when the existing destination is unselected', () => {
-    const source = scene('1', [candidate(1, 'source')]);
+  it('selects an arrival and loads its prompt and referenceImage when the existing destination has no active selection', () => {
+    const source = scene('1', [
+      {
+        ...candidate(1, 'source'),
+        prompt: 'moved prompt',
+        referenceImage: {path: 'moved-ref', url: 'moved-ref-url'},
+      },
+    ]);
     const destination = scene('2', [candidate(3, 'dest')]);
     delete destination.selectedCandidateIndex;
+    destination.prompt = 'old prompt';
     const result = moveCandidate({
       storyboard: [source, destination],
       sourceSceneId: '1',
@@ -231,6 +236,11 @@ describe('moveCandidate', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(generated(result.storyboard[1]).selectedCandidateIndex).toBe(1);
+    expect(generated(result.storyboard[1]).prompt).toBe('moved prompt');
+    expect(generated(result.storyboard[1]).referenceImage).toEqual({
+      path: 'moved-ref',
+      url: 'moved-ref-url',
+    });
   });
 
   it('preserves first-placement origin across repeated moves and return', () => {
@@ -274,7 +284,7 @@ describe('moveCandidate', () => {
     expect(generated(returned.storyboard[0]).candidates?.[0]).toEqual(
       generated(first.storyboard[1]).candidates?.[0],
     );
-    expect(generated(returned.storyboard[0]).prompt).toBe(source.prompt);
+    expect(generated(returned.storyboard[0]).prompt).toBe('prompt');
     expect(generated(returned.storyboard[2]).candidates).toBeUndefined();
     expect(
       moveCandidate({
@@ -368,8 +378,15 @@ describe('moveCandidate', () => {
     expect(moveCandidate(input)).toEqual({ok: false, reason: 'invalid-source'});
   });
 
-  it('clears a removed selection and preserves an undefined selection', () => {
-    const source = scene('1', [candidate(1, 'a'), candidate(1, 'b')]);
+  it('selects the next active candidate when moving the selected candidate and preserves an undefined selection', () => {
+    const source = scene('1', [
+      {...candidate(1, 'a'), prompt: 'prompt a'},
+      {
+        ...candidate(1, 'b'),
+        prompt: 'prompt b',
+        referenceImage: {path: 'ref-b', url: 'ref-b-url'},
+      },
+    ]);
     const input = {
       storyboard: [source],
       sourceSceneId: '1',
@@ -382,9 +399,14 @@ describe('moveCandidate', () => {
     const selectedResult = moveCandidate(input);
     expect(selectedResult.ok).toBe(true);
     if (!selectedResult.ok) return;
-    expect(
-      generated(selectedResult.storyboard[0]).selectedCandidateIndex,
-    ).toBeUndefined();
+    expect(generated(selectedResult.storyboard[0]).selectedCandidateIndex).toBe(
+      0,
+    );
+    expect(generated(selectedResult.storyboard[0]).prompt).toBe('prompt b');
+    expect(generated(selectedResult.storyboard[0]).referenceImage).toEqual({
+      path: 'ref-b',
+      url: 'ref-b-url',
+    });
     expect(
       generated(selectedResult.storyboard[0]).candidates?.[0].video?.path,
     ).toBe('b');

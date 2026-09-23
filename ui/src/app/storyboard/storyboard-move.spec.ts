@@ -171,7 +171,7 @@ describe('Storyboard move persistence', () => {
     const moved = config.projectConfig.value().storyboard;
     expect(moved).toHaveLength(2);
     expect((moved[0] as GeneratedScene).candidates).toBeUndefined();
-    expect((moved[0] as GeneratedScene).prompt).toBe('keep prompt');
+    expect((moved[0] as GeneratedScene).prompt).toBe('');
     expect((moved[1] as GeneratedScene).candidates).toHaveLength(1);
     expect(component.selectedSceneId()).toBe('2');
     expect(component.selectedScene()?.id).toBe('2');
@@ -211,7 +211,7 @@ describe('Storyboard move persistence', () => {
     const reloaded = config.projectConfig.value().storyboard;
     expect(reloaded).toHaveLength(2);
     expect((reloaded[0] as GeneratedScene).candidates).toBeUndefined();
-    expect((reloaded[0] as GeneratedScene).prompt).toBe('keep prompt');
+    expect((reloaded[0] as GeneratedScene).prompt).toBe('');
     expect((reloaded[1] as GeneratedScene).candidates).toHaveLength(1);
     expect((reloaded[1] as GeneratedScene).selectedCandidateIndex).toBe(0);
     expect((reloaded[1] as GeneratedScene).candidates?.[0].video?.path).toBe(

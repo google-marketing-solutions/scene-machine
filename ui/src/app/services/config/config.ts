@@ -533,18 +533,26 @@ export function findTransitionContractViolation(
   const renderable: Array<{
     scene: GeneratedScene | ProvidedVideoScene;
     duration: number;
+    prevStoryboardSceneReady: boolean;
   }> = [];
-  for (const scene of scenes) {
+  for (let i = 0; i < scenes.length; i++) {
+    const scene = scenes[i];
     const resolution = resolveSceneRenderClip(scene);
     if (resolution.state === 'ready') {
-      renderable.push({scene, duration: resolution.clip.duration});
+      const prevStoryboardSceneReady =
+        i > 0 && resolveSceneRenderClip(scenes[i - 1]).state === 'ready';
+      renderable.push({
+        scene,
+        duration: resolution.clip.duration,
+        prevStoryboardSceneReady,
+      });
     }
   }
   // The first clip has nothing to transition from, so ffmpeg ignores its
   // transition; start at the second.
   for (let index = 1; index < renderable.length; index++) {
-    const {scene, duration} = renderable[index];
-    if (!scene.transition) {
+    const {scene, duration, prevStoryboardSceneReady} = renderable[index];
+    if (!prevStoryboardSceneReady || !scene.transition) {
       continue;
     }
     const overlap = scene.transitionOverlap ?? DEFAULT_TRANSITION_OVERLAP;
@@ -1092,9 +1100,25 @@ export class ConfigService {
           delete updatedScene.referenceImage;
           delete updatedScene.lowQualityThumbnail;
           delete updatedScene.highQualityThumbnail;
+          delete updatedScene.transition;
+          delete updatedScene.transitionOverlap;
         }
         return updatedScene;
       });
+      for (let i = 0; i < data.storyboard.length; i++) {
+        if (resolveSceneRenderClip(data.storyboard[i]).state !== 'ready') {
+          const current = {...data.storyboard[i]};
+          delete current.transition;
+          delete current.transitionOverlap;
+          data.storyboard[i] = current;
+          if (i + 1 < data.storyboard.length) {
+            const next = {...data.storyboard[i + 1]};
+            delete next.transition;
+            delete next.transitionOverlap;
+            data.storyboard[i + 1] = next;
+          }
+        }
+      }
     }
     // Snap resolution/duration/aspect ratio a persisted project's own (still
     // valid) model no longer allows, so a stale combination from before a

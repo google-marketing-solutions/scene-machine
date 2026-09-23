@@ -1215,6 +1215,29 @@ export class Storyboard {
     return undefined;
   }
 
+  private clearSceneAndNextNeighborTransitions(sceneId: string): void {
+    const storyboard = this.config.projectConfig.value().storyboard;
+    const sceneIdx = storyboard.findIndex(s => s.id === sceneId);
+    if (sceneIdx === -1) return;
+    let changed = false;
+    const updatedStoryboard = storyboard.map((item, idx) => {
+      if (
+        (idx === sceneIdx || idx === sceneIdx + 1) &&
+        (item.transition !== undefined || item.transitionOverlap !== undefined)
+      ) {
+        changed = true;
+        const copy = {...item};
+        delete copy.transition;
+        delete copy.transitionOverlap;
+        return copy;
+      }
+      return item;
+    });
+    if (changed) {
+      this.config.updateProjectConfig({storyboard: updatedStoryboard});
+    }
+  }
+
   toggleArchive(event: Event, scene: GeneratedScene, index: number) {
     event.stopPropagation();
     if (scene.candidates && scene.candidates[index]) {
@@ -1239,8 +1262,11 @@ export class Storyboard {
           delete scene.referenceImage;
           delete scene.lowQualityThumbnail;
           delete scene.highQualityThumbnail;
+          delete scene.transition;
+          delete scene.transitionOverlap;
           this.isVideoPlaying.set(false);
           this.updateScenes(scene, promptChanged);
+          this.clearSceneAndNextNeighborTransitions(scene.id);
         }
       } else {
         this.updateScenes(scene);
@@ -1358,7 +1384,18 @@ export class Storyboard {
           this.userSelectedSceneId.set(null);
         }
         const config = this.config.projectConfig.value();
-        const scenes = config.storyboard.filter(s => s.id !== id);
+        const deletedIdx = config.storyboard.findIndex(s => s.id === id);
+        const scenes = config.storyboard
+          .map((s, idx) => {
+            if (deletedIdx !== -1 && idx === deletedIdx + 1) {
+              const copy = {...s};
+              delete copy.transition;
+              delete copy.transitionOverlap;
+              return copy;
+            }
+            return s;
+          })
+          .filter(s => s.id !== id);
         this.config.updateProjectConfig({storyboard: scenes});
       }
     });

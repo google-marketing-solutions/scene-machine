@@ -2449,10 +2449,13 @@ export class RemixEngineService {
     if (transitionViolation) {
       throw new RenderContractError(transitionViolation);
     }
-    for (const {scene, resolution} of resolvedScenes) {
+    for (let i = 0; i < resolvedScenes.length; i++) {
+      const {scene, resolution} = resolvedScenes[i];
       if (resolution.state !== 'ready') {
         continue;
       }
+      const prevStoryboardSceneReady =
+        i > 0 && resolvedScenes[i - 1].resolution.state === 'ready';
       const {video, start, duration, includeAudio} = resolution.clip;
       const videoArrangement: CombineScenesArrangement = {
         file_type: 'video',
@@ -2462,7 +2465,11 @@ export class RemixEngineService {
         duration,
         include_audio: includeAudio,
       };
-      if (scene.transition) {
+      if (
+        arrangement.length > 0 &&
+        prevStoryboardSceneReady &&
+        scene.transition
+      ) {
         videoArrangement.transition = scene.transition;
         videoArrangement.transition_overlap =
           scene.transitionOverlap ?? DEFAULT_TRANSITION_OVERLAP;
