@@ -1790,22 +1790,57 @@ export class RemixEngineService {
         }
         const existingCandidates = s.candidates ?? [];
         const candidates = [...existingCandidates, ...newCandidates];
-        const selectedCandidateIndex = s.selectedCandidateIndex;
+        const currentSelected =
+          s.selectedCandidateIndex !== undefined &&
+          Number.isInteger(s.selectedCandidateIndex) &&
+          s.selectedCandidateIndex >= 0 &&
+          s.selectedCandidateIndex < candidates.length &&
+          !candidates[s.selectedCandidateIndex].isArchived
+            ? s.selectedCandidateIndex
+            : undefined;
+        let nextSelectedIndex = currentSelected;
+        if (nextSelectedIndex === undefined) {
+          const firstNewActiveIndex = candidates.findIndex(
+            (c, idx) => idx >= existingCandidates.length && !c.isArchived,
+          );
+          if (firstNewActiveIndex >= 0) {
+            nextSelectedIndex = firstNewActiveIndex;
+          } else {
+            const firstActiveIndex = candidates.findIndex(c => !c.isArchived);
+            if (firstActiveIndex >= 0) {
+              nextSelectedIndex = firstActiveIndex;
+            }
+          }
+        }
+        const selectedCandidate =
+          nextSelectedIndex !== undefined
+            ? candidates[nextSelectedIndex]
+            : undefined;
         const updated: GeneratedScene = {
           ...s,
           ...(candidates.length ? {candidates} : {}),
-          ...(candidates.length
+          ...(nextSelectedIndex !== undefined
             ? {
-                selectedCandidateIndex:
-                  selectedCandidateIndex !== undefined &&
-                  Number.isInteger(selectedCandidateIndex) &&
-                  selectedCandidateIndex >= 0 &&
-                  selectedCandidateIndex < candidates.length
-                    ? selectedCandidateIndex
-                    : 0,
+                selectedCandidateIndex: nextSelectedIndex,
+                ...(currentSelected === undefined && selectedCandidate
+                  ? {
+                      prompt: selectedCandidate.prompt,
+                      referenceImage: selectedCandidate.referenceImage,
+                    }
+                  : {}),
               }
             : {}),
         };
+        if (nextSelectedIndex === undefined) {
+          delete updated.selectedCandidateIndex;
+        }
+        if (
+          currentSelected === undefined &&
+          selectedCandidate &&
+          !selectedCandidate.referenceImage
+        ) {
+          delete updated.referenceImage;
+        }
         if (!candidates.length) {
           delete updated.candidates;
           delete updated.selectedCandidateIndex;

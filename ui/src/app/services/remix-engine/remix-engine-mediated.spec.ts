@@ -334,7 +334,7 @@ describe('RemixEngineService (mediated)', () => {
         trim: {start: 1, end: 4},
       });
       expect(attached.candidates).toHaveLength(2);
-      expect(attached.selectedCandidateIndex).toBe(0);
+      expect(attached.selectedCandidateIndex).toBe(1);
     });
 
     it('should clear pendingGeneration on a definitive workflow error', async () => {
@@ -918,7 +918,7 @@ describe('RemixEngineService (mediated)', () => {
         trim: {start: 1, end: 4},
       });
       expect(finalScene.candidates).toHaveLength(2);
-      expect(finalScene.selectedCandidateIndex).toBe(0);
+      expect(finalScene.selectedCandidateIndex).toBe(1);
     });
 
     it('chooses the edit model from the catalog default, never the project model', async () => {
@@ -1542,7 +1542,7 @@ describe('RemixEngineService (mediated)', () => {
         isArchived: true,
         trim: {start: 1, end: 4},
       });
-      expect(finalScene.selectedCandidateIndex).toBe(0);
+      expect(finalScene.selectedCandidateIndex).toBe(1);
       expect(finalScene).not.toHaveProperty('pendingGeneration');
     });
 
