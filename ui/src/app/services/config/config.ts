@@ -1053,10 +1053,14 @@ export class ConfigService {
         if (!this.isGeneratedScene(scene)) {
           return scene;
         }
-        if (scene.selectedCandidateIndex === undefined) {
+        const hasCandidates = (scene.candidates?.length ?? 0) > 0;
+        if (scene.selectedCandidateIndex === undefined && !hasCandidates) {
           return scene;
         }
-        const selected = scene.candidates?.[scene.selectedCandidateIndex];
+        const selected =
+          scene.selectedCandidateIndex !== undefined
+            ? scene.candidates?.[scene.selectedCandidateIndex]
+            : undefined;
         if (selected && !selected.isArchived) {
           return scene;
         }
@@ -1072,6 +1076,8 @@ export class ConfigService {
           } else {
             delete updatedScene.referenceImage;
           }
+          delete updatedScene.lowQualityThumbnail;
+          delete updatedScene.highQualityThumbnail;
         } else {
           delete updatedScene.selectedCandidateIndex;
           updatedScene.prompt = '';

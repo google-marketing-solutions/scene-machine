@@ -511,7 +511,9 @@ export class Storyboard {
     scene: GeneratedScene | ProvidedVideoScene,
   ): boolean {
     if (!this.config.isGeneratedScene(scene)) return true;
-    if (scene.selectedCandidateIndex === undefined) return false;
+    if (scene.selectedCandidateIndex === undefined) {
+      return !!scene.referenceImage;
+    }
     const selected = scene.candidates?.[scene.selectedCandidateIndex];
     return !!selected && !selected.isArchived;
   }
@@ -1278,12 +1280,32 @@ export class Storyboard {
         );
       }
       const projectId = this.config.projectConfig.value().id;
+      const activePaths = new Set<string>();
+      if (scene.referenceImage?.path) {
+        activePaths.add(scene.referenceImage.path);
+      }
+      if (scene.referenceImage?.preview?.path) {
+        activePaths.add(scene.referenceImage.preview.path);
+      }
+      for (const c of scene.candidates) {
+        if (!c.isArchived) {
+          if (c.highQualityThumbnail?.path) {
+            activePaths.add(c.highQualityThumbnail.path);
+          }
+          if (c.referenceImage?.path) {
+            activePaths.add(c.referenceImage.path);
+          }
+          if (c.referenceImage?.preview?.path) {
+            activePaths.add(c.referenceImage.preview.path);
+          }
+        }
+      }
       for (const path of [
         candidate.highQualityThumbnail?.path,
         candidate.referenceImage?.path,
         candidate.referenceImage?.preview?.path,
       ]) {
-        if (path) {
+        if (path && !activePaths.has(path)) {
           void this.thumbnailCache.invalidateCandidate(projectId, path);
         }
       }
