@@ -25,18 +25,18 @@ ENV PYTHONUNBUFFERED=1
 RUN echo "force-unsafe-io" > /etc/dpkg/dpkg.cfg.d/docker-apt-speedup \
   && apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg \
-  && rm -rf /var/lib/apt/lists/* \
+  && rm -rf /var/lib/apt/lists/* /etc/dpkg/dpkg.cfg.d/docker-apt-speedup \
   && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
   && mkdir -p /app \
   && chown appuser:appuser /app
 
 # ==============================================================================
-# Stage 2: Python Dependency Builder via official Astral uv
+# Stage 2: Python Dependency Builder via official Astral uv (digest-pinned)
 #          (Executes in ~3-6s *while* Stage 1 is still running apt-get!)
 # ==============================================================================
 FROM mirror.gcr.io/library/python:3.13-slim@sha256:c33f0bc4364a6881bed1ec0cc2665e6c53c87a43e774aaeab88e6f17af105e4f AS venv-builder
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.6.6@sha256:031ddbc79275e351a43cbb66f64d8cd314cc78c3878898f4ab4f147b092e8e2d /uv /bin/uv
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     VIRTUAL_ENV=/opt/venv \
@@ -45,7 +45,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 COPY requirements.txt .
 RUN uv venv /opt/venv \
-  && uv pip install --no-cache --require-hashes -r requirements.txt
+  && uv pip install --no-cache --only-binary :all: --require-hashes -r requirements.txt
 
 # ==============================================================================
 # Stage 3: Final Image Assembly (< 1 second merge)

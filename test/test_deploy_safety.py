@@ -769,3 +769,21 @@ def test_config_validation_regex_accepts_quoted_and_rejects_empty(
   )
   assert proc.stderr == "", f"Bash error evaluating grep command: {proc.stderr}"
   assert (proc.returncode == 0) == expected_match
+
+
+def test_dockerfile_external_images_are_digest_pinned_and_hash_verified():
+  """Every external FROM / COPY --from image in Dockerfile must be @sha256-pinned."""
+  dockerfile = _dockerfile()
+  stage_names = set(
+      re.findall(r"^FROM\s+\S+\s+AS\s+(\S+)", dockerfile, re.MULTILINE)
+  )
+  for ref in re.findall(r"^FROM\s+(\S+)", dockerfile, re.MULTILINE):
+    if ref in stage_names:
+      continue
+    assert "@sha256:" in ref, f"Unpinned FROM image in Dockerfile: {ref}"
+  for ref in re.findall(r"COPY\s+--from=(\S+)", dockerfile):
+    if ref in stage_names:
+      continue
+    assert "@sha256:" in ref, f"Unpinned COPY --from image in Dockerfile: {ref}"
+  assert "--require-hashes" in dockerfile
+
