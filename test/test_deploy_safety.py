@@ -786,4 +786,3 @@ def test_dockerfile_external_images_are_digest_pinned_and_hash_verified():
       continue
     assert "@sha256:" in ref, f"Unpinned COPY --from image in Dockerfile: {ref}"
   assert "--require-hashes" in dockerfile
-
