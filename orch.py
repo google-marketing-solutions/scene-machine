@@ -1275,13 +1275,11 @@ def _read_project_list_docs(
     thumbnail = {}
     thumbnail_persist = True
     if isinstance(scene, dict):
-      low_quality = scene.get('lowQualityThumbnail')
-      high_quality = scene.get('highQualityThumbnail')
+      low_quality = None
+      high_quality = None
       if scene.get('type') == 'generated':
         candidates = scene.get('candidates')
         selected_index = scene.get('selectedCandidateIndex')
-        if selected_index is None:
-          selected_index = 0
         candidate = None
         if (
             isinstance(candidates, list)
@@ -1289,17 +1287,17 @@ def _read_project_list_docs(
             and not isinstance(selected_index, bool)
             and 0 <= selected_index < len(candidates)
             and isinstance(candidates[selected_index], dict)
+            and not bool(candidates[selected_index].get('isArchived'))
         ):
           candidate = candidates[selected_index]
         if candidate is not None:
-          low_quality = candidate.get('lowQualityThumbnail') or low_quality
-          high_quality = (
-              candidate.get('highQualityThumbnail') or high_quality
-          )
-          thumbnail_persist = not bool(candidate.get('isArchived'))
-        reference_image = scene.get('referenceImage')
-        if reference_image is not None:
-          thumbnail['referenceImage'] = reference_image
+          low_quality = candidate.get('lowQualityThumbnail')
+          high_quality = candidate.get('highQualityThumbnail')
+        else:
+          thumbnail_persist = False
+      else:
+        low_quality = scene.get('lowQualityThumbnail')
+        high_quality = scene.get('highQualityThumbnail')
       if low_quality is not None:
         thumbnail['lowQualityThumbnail'] = low_quality
       if high_quality is not None:

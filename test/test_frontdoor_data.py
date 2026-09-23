@@ -1200,8 +1200,8 @@ def test_project_list_returns_page_summary_and_selects_only_card_root_fields(
               'candidates': [
                   {'prompt': 'hidden zero', 'lowQualityThumbnail': 'zero.jpg'},
                   {
-                      'prompt': 'hidden one',
-                      'isArchived': True,
+                      'prompt': 'active one',
+                      'isArchived': False,
                       'lowQualityThumbnail': 'selected-low.jpg',
                       'highQualityThumbnail': {'path': 'selected-high.jpg'},
                   },
@@ -1221,9 +1221,8 @@ def test_project_list_returns_page_summary_and_selects_only_card_root_fields(
       'thumbnail': {
           'lowQualityThumbnail': 'selected-low.jpg',
           'highQualityThumbnail': {'path': 'selected-high.jpg'},
-          'referenceImage': {'path': 'reference.png'},
       },
-      'thumbnailPersist': False,
+      'thumbnailPersist': True,
   }]
   assert fake_db.select_calls == [[
       'id', 'name', 'lastEdited', 'createdBy', 'aspectRatio'
@@ -1265,7 +1264,7 @@ def test_project_summary_keeps_provided_image_material_and_empty_projects(
   assert by_id['empty-summary']['thumbnailPersist'] is True
 
 
-def test_project_summary_uses_first_candidate_when_selected_index_is_null(
+def test_project_summary_omits_thumbnail_when_unselected_or_archived(
     monkeypatch, orchestrator_module
 ):
   del orchestrator_module
@@ -1278,7 +1277,9 @@ def test_project_summary_uses_first_candidate_when_selected_index_is_null(
           'storyboard': [{
               'type': 'generated',
               'selectedCandidateIndex': None,
+              'referenceImage': {'path': 'reference.png'},
               'candidates': [{
+                  'isArchived': True,
                   'lowQualityThumbnail': 'first-candidate.jpg',
               }],
           }],
@@ -1287,9 +1288,8 @@ def test_project_summary_uses_first_candidate_when_selected_index_is_null(
 
   summary = client.get('/api/projects').get_json()['projects'][0]
 
-  assert summary['thumbnail'] == {
-      'lowQualityThumbnail': 'first-candidate.jpg'
-  }
+  assert summary['thumbnail'] == {}
+  assert summary['thumbnailPersist'] is False
 
 
 def test_project_list_keeps_project_with_missing_first_scene(

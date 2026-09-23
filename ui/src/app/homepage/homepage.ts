@@ -104,7 +104,10 @@ export class Homepage {
     project: ProjectSummary | ProjectConfig,
   ): ThumbnailMaterial {
     if ('thumbnail' in project && project.thumbnail) {
-      return project.thumbnail;
+      return {
+        lowQualityThumbnail: project.thumbnail.lowQualityThumbnail,
+        highQualityThumbnail: project.thumbnail.highQualityThumbnail,
+      };
     }
     if (
       !('storyboard' in project) ||
@@ -122,16 +125,15 @@ export class Homepage {
     }
     if (this.config.isGeneratedScene(firstScene)) {
       const selectedCandidate =
-        firstScene.candidates?.[firstScene.selectedCandidateIndex ?? 0];
-
+        firstScene.selectedCandidateIndex !== undefined
+          ? firstScene.candidates?.[firstScene.selectedCandidateIndex]
+          : undefined;
+      if (!selectedCandidate || selectedCandidate.isArchived) {
+        return {};
+      }
       return {
-        lowQualityThumbnail:
-          selectedCandidate?.lowQualityThumbnail ||
-          firstScene.lowQualityThumbnail,
-        highQualityThumbnail:
-          selectedCandidate?.highQualityThumbnail ||
-          firstScene.highQualityThumbnail,
-        referenceImage: firstScene.referenceImage,
+        lowQualityThumbnail: selectedCandidate.lowQualityThumbnail,
+        highQualityThumbnail: selectedCandidate.highQualityThumbnail,
       };
     }
     return {};
@@ -141,15 +143,12 @@ export class Homepage {
     const thumb = this.getThumbnailMaterial(project);
     const hasThumb =
       !!thumb.lowQualityThumbnail || !!thumb.highQualityThumbnail;
-    const referenceImage =
-      thumb.referenceImage?.preview ?? thumb.referenceImage;
-    const hasReference = !!(referenceImage?.path || referenceImage?.url);
 
     return {
       ...thumb,
-      referenceImage,
-      showReference: !hasThumb && hasReference,
-      showPlaceholder: !hasThumb && !hasReference,
+      referenceImage: undefined,
+      showReference: false,
+      showPlaceholder: !hasThumb,
     };
   }
 
@@ -170,7 +169,9 @@ export class Homepage {
     }
     const scene = project.storyboard?.[0];
     if (!scene || !this.config.isGeneratedScene(scene)) return true;
-    return !scene.candidates?.[scene.selectedCandidateIndex ?? 0]?.isArchived;
+    if (scene.selectedCandidateIndex === undefined) return false;
+    const selected = scene.candidates?.[scene.selectedCandidateIndex];
+    return !!selected && !selected.isArchived;
   }
 
   getAspectRatio(project: ProjectSummary | ProjectConfig): string {

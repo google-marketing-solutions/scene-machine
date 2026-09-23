@@ -330,6 +330,7 @@ def _populate_large_project(fake_db, orch):
               'runNumber': index,
               'prompt': 'A repeated prompt ' * 30,
               'video': {'path': f'videos/{index}.mp4'},
+              'lowQualityThumbnail': 'data:image/png;base64,' + ('a' * 2000),
           }
           for index in range(8)
       ],

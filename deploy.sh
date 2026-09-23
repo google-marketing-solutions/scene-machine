@@ -862,9 +862,11 @@ COMMIT_DATE=$(git log -1 --format=%cI 2>/dev/null || echo "unknown")
 GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 echo "${GIT_BRANCH}/${COMMIT_DATE}" > deployed_version.txt
 sync
+BUILD_MACHINE_ARGS=()
 if ! gcloud artifacts repositories describe "${ARTIFACT_REPO}" --project=$PROJECT --location="$REGION" &> /dev/null; then
   echo "Creating artifact repository: $ARTIFACT_REPO"
   gcloud artifacts repositories create "${ARTIFACT_REPO}" --repository-format=docker --project=$PROJECT --location="$REGION"
+  BUILD_MACHINE_ARGS=(--machine-type=e2-highcpu-8)
 fi
 # NOTE: the repo's .gcloudignore excludes ui/* but re-includes ui/dist/ and
 # ui/remix-engine-status-viewer/ — both are LOAD-BEARING for this build: the
@@ -887,13 +889,14 @@ echo "  (this step is quiet — the build runs remotely; a heartbeat prints belo
 BUILD_SUBS="_IMAGE=${IMAGE}"
 if [ "$NO_BUILD_CACHE" = "1" ]; then
   BUILD_SUBS="${BUILD_SUBS},_USE_CACHE=0"
+  BUILD_MACHINE_ARGS=(--machine-type=e2-highcpu-8)
   echo "  Docker layer cache: OFF (--no-build-cache; forcing a cold rebuild)."
 else
   echo "  Docker layer cache: ON (reuses unchanged layers from the previous image)."
 fi
 run_with_heartbeat "Cloud Build" \
   gcloud builds submit . --config=cloudbuild.yaml --substitutions="$BUILD_SUBS" \
-    --project=$PROJECT --region=$REGION
+    "${BUILD_MACHINE_ARGS[@]}" --project=$PROJECT --region=$REGION
 
 # --- Cloud Run: worker (private, Cloud-Tasks-invoked) --------------------------
 WORKER_DEPLOY_PID=""

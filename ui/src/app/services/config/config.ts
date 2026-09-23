@@ -464,6 +464,14 @@ export function resolveSceneRenderClip(
     if (!candidate) {
       return {state: 'invalid'};
     }
+    // An archived candidate must never reach the render workflow, even while
+    // it is still the selected index. Archiving removes the card from the
+    // storyboard, so reporting 'not-selected' keeps the rendered output
+    // consistent with what the user can still see. 'invalid' would be wrong
+    // here: that state disables the Render button for the whole project.
+    if (candidate.isArchived) {
+      return {state: 'not-selected'};
+    }
     video = candidate.video;
     sourceDuration = candidate.durationSeconds;
     trim = candidate.trim;
@@ -525,18 +533,26 @@ export function findTransitionContractViolation(
   const renderable: Array<{
     scene: GeneratedScene | ProvidedVideoScene;
     duration: number;
+    prevStoryboardSceneReady: boolean;
   }> = [];
-  for (const scene of scenes) {
+  for (let i = 0; i < scenes.length; i++) {
+    const scene = scenes[i];
     const resolution = resolveSceneRenderClip(scene);
     if (resolution.state === 'ready') {
-      renderable.push({scene, duration: resolution.clip.duration});
+      const prevStoryboardSceneReady =
+        i > 0 && resolveSceneRenderClip(scenes[i - 1]).state === 'ready';
+      renderable.push({
+        scene,
+        duration: resolution.clip.duration,
+        prevStoryboardSceneReady,
+      });
     }
   }
   // The first clip has nothing to transition from, so ffmpeg ignores its
   // transition; start at the second.
   for (let index = 1; index < renderable.length; index++) {
-    const {scene, duration} = renderable[index];
-    if (!scene.transition) {
+    const {scene, duration, prevStoryboardSceneReady} = renderable[index];
+    if (!prevStoryboardSceneReady || !scene.transition) {
       continue;
     }
     const overlap = scene.transitionOverlap ?? DEFAULT_TRANSITION_OVERLAP;
@@ -1031,6 +1047,62 @@ export class ConfigService {
     }
     if (!data.visualOverlays) {
       data.visualOverlays = [];
+    }
+    if (Array.isArray(data.storyboard)) {
+      data.storyboard = data.storyboard.map(scene => {
+        if (!this.isGeneratedScene(scene)) {
+          return scene;
+        }
+        const hasCandidates = (scene.candidates?.length ?? 0) > 0;
+        if (scene.selectedCandidateIndex === undefined && !hasCandidates) {
+          return scene;
+        }
+        const selected =
+          scene.selectedCandidateIndex !== undefined
+            ? scene.candidates?.[scene.selectedCandidateIndex]
+            : undefined;
+        if (selected && !selected.isArchived) {
+          return scene;
+        }
+        const nextActiveIndex =
+          scene.candidates?.findIndex(c => !c.isArchived) ?? -1;
+        const updatedScene: GeneratedScene = {...scene};
+        if (nextActiveIndex >= 0 && scene.candidates) {
+          const activeCandidate = scene.candidates[nextActiveIndex];
+          updatedScene.selectedCandidateIndex = nextActiveIndex;
+          updatedScene.prompt = activeCandidate.prompt;
+          if (activeCandidate.referenceImage) {
+            updatedScene.referenceImage = activeCandidate.referenceImage;
+          } else {
+            delete updatedScene.referenceImage;
+          }
+          delete updatedScene.lowQualityThumbnail;
+          delete updatedScene.highQualityThumbnail;
+        } else {
+          delete updatedScene.selectedCandidateIndex;
+          updatedScene.prompt = '';
+          delete updatedScene.referenceImage;
+          delete updatedScene.lowQualityThumbnail;
+          delete updatedScene.highQualityThumbnail;
+          delete updatedScene.transition;
+          delete updatedScene.transitionOverlap;
+        }
+        return updatedScene;
+      });
+      for (let i = 0; i < data.storyboard.length; i++) {
+        if (resolveSceneRenderClip(data.storyboard[i]).state !== 'ready') {
+          const current = {...data.storyboard[i]};
+          delete current.transition;
+          delete current.transitionOverlap;
+          data.storyboard[i] = current;
+          if (i + 1 < data.storyboard.length) {
+            const next = {...data.storyboard[i + 1]};
+            delete next.transition;
+            delete next.transitionOverlap;
+            data.storyboard[i + 1] = next;
+          }
+        }
+      }
     }
     // Snap resolution/duration/aspect ratio a persisted project's own (still
     // valid) model no longer allows, so a stale combination from before a

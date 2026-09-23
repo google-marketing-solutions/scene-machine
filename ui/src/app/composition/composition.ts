@@ -113,23 +113,58 @@ export class Composition {
   });
 
   private sceneRenderClips = computed(() =>
-    this.scenes().map(scene => ({
-      scene,
-      resolution: resolveSceneRenderClip(scene),
-    })),
+    this.scenes().map((scene, index, allScenes) => {
+      const resolution = resolveSceneRenderClip(scene);
+      const prevScene = index > 0 ? allScenes[index - 1] : undefined;
+      const prevNotReady =
+        prevScene !== undefined &&
+        resolveSceneRenderClip(prevScene).state !== 'ready';
+      const canTransitionFromPrev = index > 0 && !prevNotReady;
+      const effectiveScene =
+        !canTransitionFromPrev &&
+        (scene.transition !== undefined ||
+          scene.transitionOverlap !== undefined)
+          ? {
+              ...scene,
+              transition: undefined,
+              transitionOverlap: undefined,
+            }
+          : scene;
+      return {
+        scene: effectiveScene,
+        resolution,
+        canTransitionFromPrev,
+      };
+    }),
   );
 
   filmstripScenes = computed(() =>
     this.sceneRenderClips()
       .filter(({resolution}) => resolution.state === 'ready')
-      .map(({scene}) => scene),
+      .map(({scene, canTransitionFromPrev}, index) =>
+        index === 0 &&
+        (scene.transition || scene.transitionOverlap !== undefined)
+          ? {
+              ...scene,
+              transition: undefined,
+              transitionOverlap: undefined,
+              canTransitionFromPrev: false,
+            }
+          : {
+              ...scene,
+              canTransitionFromPrev: index > 0 && canTransitionFromPrev,
+            },
+      ),
   );
 
   playlist = computed(() => {
+    let readyIndex = 0;
     return this.sceneRenderClips().flatMap(({scene, resolution}) => {
       if (resolution.state !== 'ready') {
         return [];
       }
+      const isFirst = readyIndex === 0;
+      readyIndex++;
       const {video, start, duration} = resolution.clip;
       return [
         {
@@ -140,7 +175,8 @@ export class Composition {
           end: start + duration,
           duration,
           includeAudio: resolution.clip.includeAudio,
-          transitionOverlap: scene.transitionOverlap,
+          transitionOverlap:
+            !isFirst && scene.transition ? scene.transitionOverlap : undefined,
           type: scene.type,
         },
       ];
