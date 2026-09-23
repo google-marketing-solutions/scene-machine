@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # Copyright 2026 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,36 +13,51 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# --- Single-stage slim image -------------------------------------------------
-# python:3.13-slim is ~850 MB smaller than the full python:3.13 image: faster to
-# pull, build, push to Artifact Registry, and cold-start on Cloud Run. Every
-# package in requirements.txt publishes a prebuilt cp313 manylinux wheel
-# (--only-binary=:all:), so no C compiler or multi-stage /install copy is needed.
-FROM python:3.13-slim@sha256:c33f0bc4364a6881bed1ec0cc2665e6c53c87a43e774aaeab88e6f17af105e4f
+# ==============================================================================
+# Stage 1: OS Runtime + FFmpeg (Runs concurrently with Stage 2 under BuildKit!)
+# ==============================================================================
+FROM mirror.gcr.io/library/python:3.13-slim@sha256:c33f0bc4364a6881bed1ec0cc2665e6c53c87a43e774aaeab88e6f17af105e4f AS runtime-base
 
 ENV PYTHONUNBUFFERED=1
 
-# ffmpeg + ffprobe are required by the worker's video actions (combine/convert).
-# Installed from official Debian packages with --no-install-recommends and apt
-# lists dropped in the same layer.
-RUN apt-get update \
+# Speed up dpkg on Cloud Build disks by disabling per-file fsync() during unpack
+# and strictly excluding Debian recommended GUI/X11/Mesa bloat.
+RUN echo "force-unsafe-io" > /etc/dpkg/dpkg.cfg.d/docker-apt-speedup \
+  && apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg \
-  && rm -rf /var/lib/apt/lists/*
-
-# Install locked Python dependencies from prebuilt binary wheels directly into
-# /usr/local so the entire dependency layer is cached in the final pushed image.
-COPY requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/requirements.txt \
-  && rm -f /tmp/requirements.txt
-
-# Run as a non-root user with a real home, and give it a writable app dir it
-# owns. The worker's video actions write temp files using bare relative names
-# into the process CWD (== WORKDIR), so WORKDIR must be owned by this user.
-RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
   && mkdir -p /app \
   && chown appuser:appuser /app
 
+# ==============================================================================
+# Stage 2: Python Dependency Builder via official Astral uv
+#          (Executes in ~3-6s *while* Stage 1 is still running apt-get!)
+# ==============================================================================
+FROM mirror.gcr.io/library/python:3.13-slim@sha256:c33f0bc4364a6881bed1ec0cc2665e6c53c87a43e774aaeab88e6f17af105e4f AS venv-builder
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
 WORKDIR /app
+COPY requirements.txt .
+RUN uv venv /opt/venv \
+  && uv pip install --no-cache --require-hashes -r requirements.txt
+
+# ==============================================================================
+# Stage 3: Final Image Assembly (< 1 second merge)
+# ==============================================================================
+FROM runtime-base AS final
+
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+COPY --from=venv-builder /opt/venv /opt/venv
 
 
 # Runtime files only (not the whole repo): explicit copies keep docs, examples,
