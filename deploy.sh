@@ -407,6 +407,34 @@ echo "════════════════════════�
 # human think-time at the prompt doesn't pollute the timing deliverable.
 SCRIPT_START=$(date +%s)
 
+# Render UI env + config and kick off the local Angular UI build in the
+# background right away so local CPU work (npm ci / ng build) overlaps with
+# cloud API, service-account, IAM, Cloud Tasks, bucket, and Firestore setup.
+export UI_CONTROL_PLANE_MODE="iap"
+envsubst < ./ui/src/env.template.txt > ./ui/src/env.ts
+generate_config
+if grep -q "controlPlaneMode: 'none'" ./ui/src/env.ts; then
+  echo "ERROR: ui/src/env.ts rendered with controlPlaneMode 'none' (sign-in disabled)." >&2
+  exit 1
+fi
+UI_BUILD_PID=""
+UI_BUILD_LOG=""
+if [ "$SKIP_UI_BUILD" != "1" ]; then
+  UI_BUILD_LOG=$(mktemp)
+  (
+    export NG_CLI_ANALYTICS=ci
+    if [ -f ui/node_modules/.package-lock.stamp ] \
+        && cmp -s ui/package-lock.json ui/node_modules/.package-lock.stamp; then
+      echo "  ✓ ui/package-lock.json unchanged — skipping npm ci."
+    else
+      ( cd ui && npm ci )
+      cp ui/package-lock.json ui/node_modules/.package-lock.stamp
+    fi
+    ( cd ui && npx ng build --configuration production )
+  ) >"$UI_BUILD_LOG" 2>&1 &
+  UI_BUILD_PID=$!
+fi
+
 # --- Enable services ---------------------------------------------------------
 # Note: compute.googleapis.com is enabled here so the default Compute Engine
 # service account (used for role bindings below) is guaranteed to exist.
@@ -817,23 +845,13 @@ if [ "$SKIP_UI_BUILD" = "1" ]; then
   echo "[skip] Building the Angular UI — skipped (--skip-ui-build); reusing ui/dist."
 else
   phase "Building the Angular UI (npm ci + ng build)..."
-  export NG_CLI_ANALYTICS=ci
-  LOCK_HASH=$(sha256sum ui/package-lock.json | awk '{print $1}')
-  if [ -d ui/node_modules ] && [ -f ui/node_modules/.package-lock.sha256 ] \
-      && [ "$(cat ui/node_modules/.package-lock.sha256)" = "$LOCK_HASH" ]; then
-    echo "  ✓ ui/package-lock.json unchanged — skipping npm ci."
-    (
-      cd ui \
-        && npx ng build --configuration production
-    )
-  else
-    (
-      cd ui \
-        && npm ci \
-        && printf '%s\n' "$LOCK_HASH" > node_modules/.package-lock.sha256 \
-        && npx ng build --configuration production
-    )
+  if ! wait "$UI_BUILD_PID"; then
+    cat "$UI_BUILD_LOG" >&2
+    rm -f "$UI_BUILD_LOG"
+    exit 1
   fi
+  cat "$UI_BUILD_LOG"
+  rm -f "$UI_BUILD_LOG"
 fi
 
 # --- Version stamp + Artifact Registry + ONE image build -----------------------
@@ -879,6 +897,7 @@ run_with_heartbeat "Cloud Build" \
 
 # --- Cloud Run: worker (private, Cloud-Tasks-invoked) --------------------------
 WORKER_DEPLOY_PID=""
+WORKER_ERR_FILE=""
 if [ "$APP_ONLY" = "1" ]; then
   phase "Reusing existing 'worker' Cloud Run service (--app-only)..."
   echo "[skip] Deploying 'worker' — skipped (--app-only); reusing the live service."
@@ -892,41 +911,22 @@ if [ "$APP_ONLY" = "1" ]; then
   echo "  Reusing worker: ${WORKER_URL}"
 else
   EXISTING_WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)' 2>/dev/null || true)
-  if [ -n "$EXISTING_WORKER_URL" ]; then
-    phase "Deploying 'worker' and 'app' Cloud Run services in parallel..."
-    WORKER_URL="$EXISTING_WORKER_URL"
-    (
-      gcloud run deploy worker --image "$IMAGE" --region "$REGION" --project "$PROJECT" \
-        --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated \
-        --service-account="$RUNTIME_SA" \
-        --set-env-vars=ROLE=worker,GUNICORN_TIMEOUT=1830 >/dev/null 2>&1
-      add_run_invoker_binding worker "$REGION" "$PROJECT" "serviceAccount:${RUNTIME_SA}" >/dev/null
-    ) &
-    WORKER_DEPLOY_PID=$!
-    echo "  Started background 'worker' rollout (${WORKER_URL})..."
-  else
-    phase "Deploying 'worker' Cloud Run service (private)..."
-    # GUNICORN_TIMEOUT just above the worker's 1800s Cloud Run request timeout so
-    # gunicorn reaps a thread only AFTER Cloud Run has already returned, never
-    # killing a legitimate long render mid-flight. (D7)
-    gcloud run deploy worker --image "$IMAGE" --region $REGION --project $PROJECT \
+  WORKER_URL="${EXISTING_WORKER_URL:-https://worker-${PROJECT_NUMBER}.${REGION}.run.app}"
+  WORKER_ERR_FILE=$(mktemp)
+  (
+    if ! gcloud run deploy worker --image "$IMAGE" --region "$REGION" --project "$PROJECT" \
       --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated \
       --service-account="$RUNTIME_SA" \
-      --set-env-vars=ROLE=worker,GUNICORN_TIMEOUT=1830
-    WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)')
-    echo "✓ Worker deployed: ${WORKER_URL}"
-
-    # The only run.invoker grant the runtime SA gets: service-scoped to the
-    # worker, exactly what the Cloud-Tasks-minted OIDC tokens need to invoke it.
-    # (There is no project-wide run.invoker, so the app cannot invoke other
-    # Cloud Run services.)
-    echo "Granting service-scoped run.invoker on 'worker' to ${RUNTIME_SA}..."
-    add_run_invoker_binding worker "$REGION" "$PROJECT" "serviceAccount:${RUNTIME_SA}"
-  fi
+      --set-env-vars=ROLE=worker,GUNICORN_TIMEOUT=1830 >/dev/null 2>"$WORKER_ERR_FILE"; then
+      exit 1
+    fi
+    add_run_invoker_binding worker "$REGION" "$PROJECT" "serviceAccount:${RUNTIME_SA}" >/dev/null 2>>"$WORKER_ERR_FILE"
+  ) &
+  WORKER_DEPLOY_PID=$!
 fi
 
 # --- Cloud Run: app (UI + same-origin /api control plane) -----------------------
-phase "Deploying 'app' Cloud Run service (AUTH_MODE=${AUTH_MODE})..."
+phase "Deploying 'worker' and 'app' Cloud Run services in parallel (AUTH_MODE=${AUTH_MODE})..."
 IAP_FLAG_AVAILABLE=true
 # IAP front door. The --iap flag (built-in IAP for Cloud Run, GA March 2026) may
 # not exist on older gcloud installs — gate it behind a CLI capability check and
@@ -967,7 +967,13 @@ IAP_SA="service-${PROJECT_NUMBER}@gcp-sa-iap.iam.gserviceaccount.com"
 echo "Granting service-scoped run.invoker on 'app' to the IAP service agent..."
 add_run_invoker_binding app "$REGION" "$PROJECT" "serviceAccount:${IAP_SA}"
 if [ -n "$WORKER_DEPLOY_PID" ]; then
-  wait "$WORKER_DEPLOY_PID"
+  if ! wait "$WORKER_DEPLOY_PID"; then
+    cat "$WORKER_ERR_FILE" >&2
+    rm -f "$WORKER_ERR_FILE"
+    exit 1
+  fi
+  rm -f "$WORKER_ERR_FILE"
+  WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)')
   echo "✓ Worker deployed: ${WORKER_URL}"
 fi
 APP_URL=$(gcloud run services describe app --region=$REGION --project=$PROJECT --format='value(status.url)')
