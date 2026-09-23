@@ -678,6 +678,9 @@ echo "Granting the runtime SA self-impersonation (signBlob + Cloud Tasks OIDC)..
 add_sa_iam_binding "${RUNTIME_SA}" "serviceAccount:${RUNTIME_SA}" "roles/iam.serviceAccountTokenCreator" "$PROJECT"
 add_sa_iam_binding "${RUNTIME_SA}" "serviceAccount:${RUNTIME_SA}" "roles/iam.serviceAccountUser" "$PROJECT"
 
+# --- Non-IAM runtime infrastructure + Firestore seed (overlapped with Cloud Build) ---
+INFRA_SETUP_LOG=$(mktemp)
+(
 # --- Cloud Tasks queues -------------------------------------------------------
 phase "Setting up Cloud Tasks queues..."
 QUEUES=("Other" "Gemini" "Veo")
@@ -792,6 +795,74 @@ else
     gcloud firestore databases describe --database="$FIRESTORE_DB_UI" --project=$PROJECT --format="value(locationId)"
 fi
 
+# --- SceneMachineUser custom role -----------------------------------------------
+phase "Ensuring SceneMachineUser custom role matches user-role.yaml..."
+if ! gcloud iam roles describe SceneMachineUser --project=$PROJECT &> /dev/null; then
+  echo "SceneMachineUser role doesn't exist. Creating it..."
+  gcloud iam roles create SceneMachineUser --project=$PROJECT --file=./user-role.yaml
+else
+  echo "SceneMachineUser role exists. Syncing it to user-role.yaml..."
+  gcloud iam roles update SceneMachineUser --project=$PROJECT --file=./user-role.yaml --quiet || true
+fi
+
+# --- Seed Firestore config (front-door topology) --------------------------------
+phase "Adding default Scene Machine configurations to Firestore..."
+ADC_TOKEN=$(gcloud auth application-default print-access-token)
+CONFIG_SEED_STATUS=$(curl -s -X PATCH \
+"https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/global" \
+  -H "Authorization: Bearer ${ADC_TOKEN}" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  -H "Content-Type: application/json" \
+  -o /dev/null -w '%{http_code}' \
+  -d @<(envsubst < ./firestore_config_frontdoor.template.json))
+if [ "$CONFIG_SEED_STATUS" != "200" ]; then
+  echo "ERROR: seeding the UI config (config/global) failed (HTTP ${CONFIG_SEED_STATUS:-no response})." >&2
+  echo "       The app's backend wiring was not written; aborting." >&2
+  exit 1
+fi
+
+MODELS_SEED_STATUS=$(python3 scripts/seed_config_models.py convert < ui/definitions/models.json | curl -s -X PATCH \
+"https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/models" \
+  -H "Authorization: Bearer ${ADC_TOKEN}" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  -H "Content-Type: application/json" \
+  -o /dev/null -w '%{http_code}' \
+  -d @-)
+if [ "$MODELS_SEED_STATUS" != "200" ]; then
+  echo "ERROR: seeding the model catalog (config/models) failed (HTTP ${MODELS_SEED_STATUS:-no response})." >&2
+  echo "       The runtime model catalog was not written; aborting." >&2
+  exit 1
+fi
+
+if ! ANNOUNCEMENT_SEED_STATUS=$(GOOGLE_CLOUD_PROJECT="$PROJECT" \
+  GOOGLE_OAUTH_ACCESS_TOKEN="${ADC_TOKEN}" \
+  python3 scripts/seed_announcement.py seed \
+  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config?documentId=announcement" \
+  "$ANNOUNCEMENT_MARKDOWN_FILE" "$ANNOUNCEMENT_ENABLED"); then
+  echo "ERROR: seeding homepage announcement failed." >&2
+  echo "       Existing operator content was not overwritten; aborting." >&2
+  exit 1
+fi
+
+for template in creative_templates/*.json; do
+  [ -e "$template" ] || continue
+  template_name=$(basename "$template" .json)
+
+  TEMPLATE_SEED_STATUS=$(curl -s -X PATCH \
+  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/creativeTemplates/${template_name}" \
+    -H "Authorization: Bearer ${ADC_TOKEN}" \
+    -H "x-goog-user-project: ${PROJECT}" \
+    -H "Content-Type: application/json" \
+    -o /dev/null -w '%{http_code}' \
+    -d @"$template")
+  if [ "$TEMPLATE_SEED_STATUS" != "200" ]; then
+    echo "ERROR: seeding creative template '${template_name}' failed (HTTP ${TEMPLATE_SEED_STATUS:-no response})." >&2
+    exit 1
+  fi
+done
+) >"$INFRA_SETUP_LOG" 2>&1 &
+INFRA_SETUP_PID=$!
+
 # --- Render UI env + config (must precede the single image build) -------------
 # Order matters: these artifacts are baked into the image (Dockerfile
 # `COPY . .`), so they must exist before `gcloud builds submit`.
@@ -898,6 +969,15 @@ run_with_heartbeat "Cloud Build" \
   gcloud builds submit . --config=cloudbuild.yaml --substitutions="$BUILD_SUBS" \
     "${BUILD_MACHINE_ARGS[@]}" --project=$PROJECT --region=$REGION
 
+phase "Completing overlapped infrastructure & Firestore setup..."
+if ! wait "$INFRA_SETUP_PID"; then
+  cat "$INFRA_SETUP_LOG" >&2
+  rm -f "$INFRA_SETUP_LOG"
+  exit 1
+fi
+cat "$INFRA_SETUP_LOG"
+rm -f "$INFRA_SETUP_LOG"
+
 # --- Cloud Run: worker (private, Cloud-Tasks-invoked) --------------------------
 WORKER_DEPLOY_PID=""
 WORKER_ERR_FILE=""
@@ -996,92 +1076,6 @@ phase "Applying GCS bucket CORS for returned Cloud Run origins..."
 export UI_CORS_ORIGINS
 envsubst < ./gcs-cors-config.template.json > ./gcs-cors-config.json
 gcloud storage buckets update gs://$GCS_BUCKET --cors-file=./gcs-cors-config.json --project=$PROJECT
-
-# --- SceneMachineUser custom role -----------------------------------------------
-phase "Ensuring SceneMachineUser custom role matches user-role.yaml..."
-if ! gcloud iam roles describe SceneMachineUser --project=$PROJECT &> /dev/null; then
-  echo "SceneMachineUser role doesn't exist. Creating it..."
-  gcloud iam roles create SceneMachineUser --project=$PROJECT --file=./user-role.yaml
-else
-  # Update (not skip) so an edited user-role.yaml — e.g. the slimmed
-  # IAP-access-only permission set — actually takes effect on a project where the
-  # role already exists, instead of being silently ignored. '|| true' tolerates
-  # the benign "no changes to apply" case on a re-deploy; the role keeps its
-  # IAP-access permission regardless, so user admission is never at risk here.
-  echo "SceneMachineUser role exists. Syncing it to user-role.yaml..."
-  gcloud iam roles update SceneMachineUser --project=$PROJECT --file=./user-role.yaml --quiet || true
-fi
-
-# --- Seed Firestore config (front-door topology) --------------------------------
-# Uses firestore_config_frontdoor.template.json: the UI Firestore config doc with
-# the backend base fixed to the same-origin '/api' and no API key. Owner-
-# credential REST writes bypass the (deliberately read-only) config rules — by
-# design.
-phase "Adding default Scene Machine configurations to Firestore..."
-# Capture the HTTP status (as the other REST calls in this script do): a non-200
-# here means the UI's same-origin '/api' wiring was NOT written, so fail loudly
-# instead of reporting a successful deploy with a broken app config.
-CONFIG_SEED_STATUS=$(curl -s -X PATCH \
-"https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/global" \
-  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-  -H "x-goog-user-project: ${PROJECT}" \
-  -H "Content-Type: application/json" \
-  -o /dev/null -w '%{http_code}' \
-  -d @<(envsubst < ./firestore_config_frontdoor.template.json))
-if [ "$CONFIG_SEED_STATUS" != "200" ]; then
-  echo "ERROR: seeding the UI config (config/global) failed (HTTP ${CONFIG_SEED_STATUS:-no response})." >&2
-  echo "       The app's backend wiring was not written; aborting." >&2
-  exit 1
-fi
-
-# The model catalog: config/models is overwritten from the repo file on every
-# deploy. Operators may edit the live doc between deploys; the pre-flight
-# preview above showed what this write replaces. Same fail-loudly contract as
-# the config/global seed.
-MODELS_SEED_STATUS=$(python3 scripts/seed_config_models.py convert < ui/definitions/models.json | curl -s -X PATCH \
-"https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/models" \
-  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-  -H "x-goog-user-project: ${PROJECT}" \
-  -H "Content-Type: application/json" \
-  -o /dev/null -w '%{http_code}' \
-  -d @-)
-if [ "$MODELS_SEED_STATUS" != "200" ]; then
-  echo "ERROR: seeding the model catalog (config/models) failed (HTTP ${MODELS_SEED_STATUS:-no response})." >&2
-  echo "       The runtime model catalog was not written; aborting." >&2
-  exit 1
-fi
-
-# The announcement is operator-authored after the first deploy. Firestore's
-# create operation makes the initial seed race-safe and returns 409 when an
-# operator document already exists; either result is a successful deploy.
-if ! ANNOUNCEMENT_SEED_STATUS=$(GOOGLE_CLOUD_PROJECT="$PROJECT" \
-  GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth application-default print-access-token)" \
-  python3 scripts/seed_announcement.py seed \
-  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config?documentId=announcement" \
-  "$ANNOUNCEMENT_MARKDOWN_FILE" "$ANNOUNCEMENT_ENABLED"); then
-  echo "ERROR: seeding homepage announcement failed." >&2
-  echo "       Existing operator content was not overwritten; aborting." >&2
-  exit 1
-fi
-
-for template in creative_templates/*.json; do
-  # Skip cleanly if the directory is empty/absent: without 'nullglob' the glob
-  # would otherwise stay literal and run the body once on a non-existent file.
-  [ -e "$template" ] || continue
-  template_name=$(basename "$template" .json)
-
-  TEMPLATE_SEED_STATUS=$(curl -s -X PATCH \
-  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/creativeTemplates/${template_name}" \
-    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-    -H "x-goog-user-project: ${PROJECT}" \
-    -H "Content-Type: application/json" \
-    -o /dev/null -w '%{http_code}' \
-    -d @"$template")
-  if [ "$TEMPLATE_SEED_STATUS" != "200" ]; then
-    echo "ERROR: seeding creative template '${template_name}' failed (HTTP ${TEMPLATE_SEED_STATUS:-no response})." >&2
-    exit 1
-  fi
-done
 
 # --- Automated provisioning complete: timing checkpoint ----------------------------
 close_phase

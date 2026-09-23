@@ -12,31 +12,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# --- Build stage -------------------------------------------------------------
-# The full python:3.13 image carries the compilers/headers that a dependency
-# without a prebuilt cp313 wheel would need. Install everything into a
-# relocatable prefix (/install) that the slim runtime can drop in as-is, so the
-# build can never fail for lack of a compiler on the slim base.
-FROM python:3.13@sha256:e72bfff2ccf413e3c329074d643fac616d7e1dfe85ac57e527f1d13cd8e0ee6c AS builder
-
-ENV PYTHONUNBUFFERED=1
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir --require-hashes --prefix=/install -r requirements.txt
-
-# --- Runtime stage -----------------------------------------------------------
-# python:3.13-slim is ~850 MB smaller than the full image: faster to push to the
-# registry and faster to cold-start. It carries only ffmpeg, the dependencies
-# built above, and the app — no compilers or build cruft.
+# --- Single-stage slim image -------------------------------------------------
+# python:3.13-slim is ~850 MB smaller than the full python:3.13 image: faster to
+# pull, build, push to Artifact Registry, and cold-start on Cloud Run. Every
+# package in requirements.txt publishes a prebuilt cp313 manylinux wheel
+# (--only-binary=:all:), so no C compiler or multi-stage /install copy is needed.
 FROM python:3.13-slim@sha256:c33f0bc4364a6881bed1ec0cc2665e6c53c87a43e774aaeab88e6f17af105e4f
 
 ENV PYTHONUNBUFFERED=1
 
-# ffmpeg is required by the worker's video actions (combine/convert). One layer,
-# no recommended extras, apt lists dropped to keep the image small.
+# ffmpeg + ffprobe are required by the worker's video actions (combine/convert).
+# Installed from official Debian packages with --no-install-recommends and apt
+# lists dropped in the same layer.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg \
   && rm -rf /var/lib/apt/lists/*
+
+# Install locked Python dependencies from prebuilt binary wheels directly into
+# /usr/local so the entire dependency layer is cached in the final pushed image.
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir --only-binary=:all: --require-hashes -r /tmp/requirements.txt \
+  && rm -f /tmp/requirements.txt
 
 # Run as a non-root user with a real home, and give it a writable app dir it
 # owns. The worker's video actions write temp files using bare relative names
@@ -47,10 +43,6 @@ RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
 
 WORKDIR /app
 
-# Drop in the dependencies built in the full image (same python 3.13, so the
-# installed packages and gunicorn entry point land on /usr/local and PATH).
-# Left root-owned and world-readable — import/exec only need read access.
-COPY --from=builder /install /usr/local
 
 # Runtime files only (not the whole repo): explicit copies keep docs, examples,
 # tests, deploy scripts, and .git out of the image. Root-owned but world-readable
