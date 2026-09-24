@@ -31,6 +31,8 @@ import sys
 import threading
 import uuid
 
+import pytest
+
 from google.api_core import exceptions as google_exceptions
 from google.cloud import firestore
 
@@ -1661,6 +1663,235 @@ def test_project_patch_prunes_removed_scenes(monkeypatch, orchestrator_module):
   assert len(_scenes_docs(fake_db, 'shrink')) == 1
   body = client.get('/api/projects/shrink').get_json()
   assert [s['d'] for s in body['storyboard']] == ['0']
+
+@pytest.mark.parametrize(
+    'path_template',
+    [
+        '/api/projects/{id}',
+        '/api/projects/{id}/editor',
+        '/api/projects/{id}?view=editor',
+    ],
+)
+def test_project_patch_omitting_storyboard_leaves_scenes_intact(
+    monkeypatch, orchestrator_module, path_template
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project_id = f'keep-scenes-{uuid.uuid4().hex[:8]}'
+
+  assert (
+      client.post(
+          '/api/projects',
+          json={
+              'id': project_id,
+              'name': 'Original',
+              'inputConfig': {'productDescription': 'Keep for editor saves'},
+              'storyboard': [{'d': '0'}, {'d': '1'}, {'d': '2'}],
+          },
+      ).status_code
+      == 200
+  )
+  assert len(_scenes_docs(fake_db, project_id)) == 3
+
+  # PATCH {"name": "Renamed"} must leave all 3 scenes intact (SM-6 fix).
+  url = path_template.format(id=project_id)
+  response = client.patch(url, json={'name': 'Renamed'})
+  assert response.status_code == 200
+
+  # The GET below rebuilds storyboard from the subcollection, so check the
+  # stored root placeholder directly.
+  assert fake_db.collection('projects').docs[project_id]['storyboard'] == []
+  scenes = _scenes_docs(fake_db, project_id)
+  assert len(scenes) == 3
+  assert [scenes[f'{i:06d}']['d'] for i in range(3)] == ['0', '1', '2']
+
+  body = client.get(f'/api/projects/{project_id}').get_json()
+  assert body['name'] == 'Renamed'
+  assert [s['d'] for s in body['storyboard']] == ['0', '1', '2']
+
+  if path_template == '/api/projects/{id}':
+    # Full PATCH replaces root fields; only an omitted storyboard is preserved.
+    assert 'inputConfig' not in body
+  else:
+    assert body['inputConfig'] == {
+        'productDescription': 'Keep for editor saves'
+    }
+
+
+@pytest.mark.parametrize(
+    'path_template',
+    [
+        '/api/projects/{id}',
+        '/api/projects/{id}/editor',
+        '/api/projects/{id}?view=editor',
+    ],
+)
+def test_project_patch_empty_payload_leaves_scenes_intact(
+    monkeypatch, orchestrator_module, path_template
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project_id = f'empty-patch-{uuid.uuid4().hex[:8]}'
+
+  assert (
+      client.post(
+          '/api/projects',
+          json={
+              'id': project_id,
+              'name': 'Original',
+              'storyboard': [{'d': '0'}, {'d': '1'}, {'d': '2'}],
+          },
+      ).status_code
+      == 200
+  )
+  assert len(_scenes_docs(fake_db, project_id)) == 3
+
+  url = path_template.format(id=project_id)
+  response = client.patch(url, json={})
+  assert response.status_code == 200
+
+  scenes = _scenes_docs(fake_db, project_id)
+  assert len(scenes) == 3
+  body = client.get(f'/api/projects/{project_id}').get_json()
+  assert [s['d'] for s in body['storyboard']] == ['0', '1', '2']
+
+
+@pytest.mark.parametrize('storyboard', [None, 'not-a-list', {'d': '0'}])
+@pytest.mark.parametrize(
+    'path_template',
+    [
+        '/api/projects/{id}',
+        '/api/projects/{id}/editor',
+        '/api/projects/{id}?view=editor',
+    ],
+)
+def test_project_patch_non_list_storyboard_leaves_scenes_intact(
+    monkeypatch, orchestrator_module, path_template, storyboard
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project_id = f'null-storyboard-{uuid.uuid4().hex[:8]}'
+
+  assert (
+      client.post(
+          '/api/projects',
+          json={
+              'id': project_id,
+              'name': 'Original',
+              'storyboard': [{'d': '0'}, {'d': '1'}, {'d': '2'}],
+          },
+      ).status_code
+      == 200
+  )
+
+  # Clients that serialize unset optional fields as null must not wipe scenes.
+  url = path_template.format(id=project_id)
+  response = client.patch(url, json={'name': 'n', 'storyboard': storyboard})
+  assert response.status_code == 200
+
+  assert fake_db.collection('projects').docs[project_id]['storyboard'] == []
+  scenes = _scenes_docs(fake_db, project_id)
+  assert [scenes[f'{i:06d}']['d'] for i in range(3)] == ['0', '1', '2']
+
+
+@pytest.mark.parametrize(
+    'path_template',
+    [
+        '/api/projects/{id}',
+        '/api/projects/{id}/editor',
+        '/api/projects/{id}?view=editor',
+    ],
+)
+def test_project_patch_explicit_empty_storyboard_deletes_all_scenes(
+    monkeypatch, orchestrator_module, path_template
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project_id = f'clear-scenes-{uuid.uuid4().hex[:8]}'
+
+  assert (
+      client.post(
+          '/api/projects',
+          json={
+              'id': project_id,
+              'name': 'Original',
+              'storyboard': [{'d': '0'}, {'d': '1'}, {'d': '2'}],
+          },
+      ).status_code
+      == 200
+  )
+  assert len(_scenes_docs(fake_db, project_id)) == 3
+
+  url = path_template.format(id=project_id)
+  response = client.patch(url, json={'storyboard': []})
+  assert response.status_code == 200
+
+  assert len(_scenes_docs(fake_db, project_id)) == 0
+  body = client.get(f'/api/projects/{project_id}').get_json()
+  assert body['storyboard'] == []
+
+
+@pytest.mark.parametrize(
+    'path_template',
+    [
+        '/api/projects/{id}',
+        '/api/projects/{id}/editor',
+        '/api/projects/{id}?view=editor',
+    ],
+)
+def test_project_patch_shrinking_storyboard_deletes_trailing_scenes(
+    monkeypatch, orchestrator_module, path_template
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project_id = f'shrink-5-to-3-{uuid.uuid4().hex[:8]}'
+
+  assert (
+      client.post(
+          '/api/projects',
+          json={
+              'id': project_id,
+              'name': 'Original',
+              'storyboard': [{'d': str(i)} for i in range(5)],
+          },
+      ).status_code
+      == 200
+  )
+  assert len(_scenes_docs(fake_db, project_id)) == 5
+
+  url = path_template.format(id=project_id)
+  response = client.patch(
+      url,
+      json={
+          'storyboard': [{'d': f'{i}-updated'} for i in range(3)],
+      },
+  )
+  assert response.status_code == 200
+
+  # Scenes live only in the subcollection, never inline on the root doc.
+  assert fake_db.collection('projects').docs[project_id]['storyboard'] == []
+  scenes = _scenes_docs(fake_db, project_id)
+  assert len(scenes) == 3
+  assert set(scenes.keys()) == {'000000', '000001', '000002'}
+  assert [scenes[f'{i:06d}']['d'] for i in range(3)] == [
+      '0-updated',
+      '1-updated',
+      '2-updated',
+  ]
+  assert '000003' not in scenes
+  assert '000004' not in scenes
+
+  body = client.get(f'/api/projects/{project_id}').get_json()
+  assert [s['d'] for s in body['storyboard']] == [
+      '0-updated',
+      '1-updated',
+      '2-updated',
+  ]
 
 
 def test_project_delete_clears_scenes_subcollection(

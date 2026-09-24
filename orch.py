@@ -1175,22 +1175,23 @@ def _write_project_doc(
   precondition, scene writes retain their existing set behavior, and the
   stale-scene prune scan is skipped: a brand-new project has no prior scenes
   to prune, and callers cap create at _MAX_CREATE_SCENES so this always fits
-  one atomic batch.
+  one atomic batch. When create is false, an omitted or non-list storyboard
+  (e.g. null) leaves the scenes subcollection untouched; only an explicit list
+  (including []) writes and prunes scenes.
   """
-  scenes = payload.get('storyboard')
-  if not isinstance(scenes, list):
-    scenes = []
   root = dict(payload)
   root['storyboard'] = []
-  scenes_ref = doc_ref.collection(_SCENES_SUBCOLLECTION)
   ops = [('create' if create else 'set', doc_ref, root)]
-  for index, scene in enumerate(scenes):
-    ops.append(('set', scenes_ref.document(_scene_doc_id(index)), scene))
-  if not create:
-    keep_ids = {_scene_doc_id(i) for i in range(len(scenes))}
-    for snapshot in scenes_ref.stream():
-      if snapshot.id not in keep_ids:
-        ops.append(('delete', scenes_ref.document(snapshot.id), None))
+  scenes = payload.get('storyboard')
+  if isinstance(scenes, list):
+    scenes_ref = doc_ref.collection(_SCENES_SUBCOLLECTION)
+    for index, scene in enumerate(scenes):
+      ops.append(('set', scenes_ref.document(_scene_doc_id(index)), scene))
+    if not create:
+      keep_ids = {_scene_doc_id(i) for i in range(len(scenes))}
+      for snapshot in scenes_ref.stream():
+        if snapshot.id not in keep_ids:
+          ops.append(('delete', scenes_ref.document(snapshot.id), None))
   _commit_in_batches(ui_db, ops)
 
 
@@ -1205,29 +1206,31 @@ def _write_editor_project_doc(
   The root update is deliberately field-based: unlike a read-modify-write
   replacement, it cannot copy a stale inputConfig snapshot over a concurrent
   Setup save. Fields omitted by the editor payload retain the legacy full-save
-  replacement behavior through DELETE_FIELD updates.
+  replacement behavior through DELETE_FIELD updates, except storyboard: the
+  root always keeps the [] placeholder, and an omitted or non-list storyboard
+  (e.g. null) leaves the scenes subcollection untouched.
   """
   root_updates = {
       field_path.FieldPath(key).to_api_repr(): firestore.DELETE_FIELD
       for key in stored
-      if key not in payload and key != 'inputConfig'
+      if key not in payload and key not in ('inputConfig', 'storyboard')
   }
   root_updates.update({
       field_path.FieldPath(key).to_api_repr(): value
       for key, value in payload.items()
   })
-  scenes = payload.get('storyboard')
-  if not isinstance(scenes, list):
-    scenes = []
   root_updates[field_path.FieldPath('storyboard').to_api_repr()] = []
-  scenes_ref = doc_ref.collection(_SCENES_SUBCOLLECTION)
-  ops = [('update', doc_ref, root_updates)]
-  for index, scene in enumerate(scenes):
-    ops.append(('set', scenes_ref.document(_scene_doc_id(index)), scene))
-  keep_ids = {_scene_doc_id(i) for i in range(len(scenes))}
-  for snapshot in scenes_ref.stream():
-    if snapshot.id not in keep_ids:
-      ops.append(('delete', scenes_ref.document(snapshot.id), None))
+  ops = []
+  scenes = payload.get('storyboard')
+  if isinstance(scenes, list):
+    scenes_ref = doc_ref.collection(_SCENES_SUBCOLLECTION)
+    for index, scene in enumerate(scenes):
+      ops.append(('set', scenes_ref.document(_scene_doc_id(index)), scene))
+    keep_ids = {_scene_doc_id(i) for i in range(len(scenes))}
+    for snapshot in scenes_ref.stream():
+      if snapshot.id not in keep_ids:
+        ops.append(('delete', scenes_ref.document(snapshot.id), None))
+  ops.insert(0, ('update', doc_ref, root_updates))
   _commit_in_batches(ui_db, ops)
 
 
@@ -1392,7 +1395,9 @@ def project_detail_handler(
 
   The default PATCH is the faithful port of the UI's whole-document autosave:
   a full set() with createdBy stripped from the payload (immutable; the stored
-  owner is preserved) and lastEdited refreshed server-side. PATCH
+  owner is preserved) and lastEdited refreshed server-side. An omitted
+  storyboard preserves scenes; other omitted mutable root fields are removed.
+  PATCH
   ?view=editor is the legacy form of the explicit editor exception. The
   dedicated PATCH /api/projects/<id>/editor route is the preferred form; both
   use field updates so the omitted Setup inputConfig cannot be overwritten by
