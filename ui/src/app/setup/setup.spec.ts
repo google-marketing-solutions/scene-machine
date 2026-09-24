@@ -26,19 +26,176 @@ import {ComponentFixture, TestBed} from '@angular/core/testing';
 import {MatSelectHarness} from '@angular/material/select/testing';
 import {MatSlideToggle} from '@angular/material/slide-toggle';
 import {MatSlider} from '@angular/material/slider';
+import {MatDialog} from '@angular/material/dialog';
 import {MatSnackBar} from '@angular/material/snack-bar';
 import {By} from '@angular/platform-browser';
-import {provideRouter} from '@angular/router';
+import {ActivatedRoute, Router, provideRouter} from '@angular/router';
 import {RouterTestingHarness} from '@angular/router/testing';
+import {of} from 'rxjs';
 import {beforeEach, describe, expect, it, vi} from 'vitest';
 import {routes} from '../app.routes';
 import {ClientMediaService} from '../services/client-media/client-media';
-import {ConfigService, ProjectConfig} from '../services/config/config';
+import {
+  ConfigService,
+  GeneratedScene,
+  ProjectConfig,
+} from '../services/config/config';
 import {ImagePreviewService} from '../services/image-preview/image-preview';
 import {ImageImportService} from '../services/image-import/image-import';
 import {RemixEngineService} from '../services/remix-engine/remix-engine';
 import {TemplatesService} from '../services/templates/templates';
 import {Setup} from './setup';
+
+describe('Setup storyboard dispatch validation', () => {
+  let component: Setup;
+  let projectConfigSignal: WritableSignal<ProjectConfig>;
+  let configMock: {
+    projectConfig: {value: WritableSignal<ProjectConfig>};
+    setupInputsLoaded: () => boolean;
+    updateProjectConfig: ReturnType<typeof vi.fn>;
+  };
+  let dialogMock: {open: ReturnType<typeof vi.fn>};
+  let remixMock: {generateCandidates: ReturnType<typeof vi.fn>};
+  let snackBarMock: {open: ReturnType<typeof vi.fn>};
+  let navigate: ReturnType<typeof vi.fn>;
+  let dialogResult: GeneratedScene[] | undefined;
+
+  const validScene = (): GeneratedScene => ({
+    id: 'scene-1',
+    type: 'generated',
+    name: 'Scene 1',
+    prompt: 'A product scene',
+    referenceImage: {
+      path: 'input/product.jpg',
+      url: 'https://signed.example/input/product.jpg',
+    },
+  });
+
+  beforeEach(async () => {
+    projectConfigSignal = signal<ProjectConfig>({
+      id: 'project-1',
+      name: 'Test Project',
+      aspectRatio: '16:9',
+      resolution: '720p',
+      candidateDurationSeconds: 5,
+      generateAudio: false,
+      numberOfCandidates: 1,
+      model: 'veo-default',
+      inputConfig: {products: [], composition: '', style: '', audience: ''},
+      storyboard: [],
+      audioTracks: [],
+      visualOverlays: [],
+    });
+    configMock = {
+      projectConfig: {value: projectConfigSignal},
+      setupInputsLoaded: () => true,
+      updateProjectConfig: vi.fn((partial: Partial<ProjectConfig>) =>
+        projectConfigSignal.update(current => ({...current, ...partial})),
+      ),
+    };
+    dialogResult = undefined;
+    dialogMock = {
+      open: vi.fn(() => ({afterClosed: () => of(dialogResult)})),
+    };
+    remixMock = {generateCandidates: vi.fn()};
+    snackBarMock = {open: vi.fn()};
+    navigate = vi.fn();
+
+    TestBed.configureTestingModule({
+      imports: [Setup],
+      providers: [
+        {provide: ConfigService, useValue: configMock},
+        {provide: MatDialog, useValue: dialogMock},
+        {provide: RemixEngineService, useValue: remixMock},
+        {provide: MatSnackBar, useValue: snackBarMock},
+        {provide: Router, useValue: {navigate}},
+        {
+          provide: ActivatedRoute,
+          useValue: {snapshot: {paramMap: {get: () => 'project-1'}}},
+        },
+        {provide: ClientMediaService, useValue: {convertImage: vi.fn()}},
+        {
+          provide: ImageImportService,
+          useValue: {
+            importText: vi.fn(),
+            imageFilesFromDataTransfer: vi.fn().mockReturnValue([]),
+            imageUrlFromDataTransfer: vi.fn().mockReturnValue(null),
+            isEditableTarget: vi.fn().mockReturnValue(false),
+          },
+        },
+        {
+          provide: ImagePreviewService,
+          useValue: {create: vi.fn()},
+        },
+        {
+          provide: TemplatesService,
+          useValue: {templates: {value: () => undefined}},
+        },
+      ],
+    });
+    TestBed.overrideComponent(Setup, {set: {template: ''}});
+    TestBed.overrideProvider(MatDialog, {useValue: dialogMock});
+    TestBed.overrideProvider(MatSnackBar, {useValue: snackBarMock});
+    await TestBed.compileComponents();
+
+    const fixture = TestBed.createComponent(Setup);
+    component = fixture.componentInstance;
+    fixture.detectChanges();
+    component.creationMode.set('ai');
+  });
+
+  it('rejects a valid scene followed by a legacy invalid reference before dispatch', () => {
+    dialogResult = [
+      validScene(),
+      {
+        ...validScene(),
+        id: 'scene-2',
+        referenceImage: {url: undefined, path: undefined},
+      } as unknown as GeneratedScene,
+    ];
+
+    component.generateStoryboard();
+
+    expect(snackBarMock.open).toHaveBeenCalledWith(
+      'Cannot generate videos: one or more storyboard scenes are missing a product image.',
+      'Dismiss',
+      {panelClass: ['error-snackbar']},
+    );
+    expect(configMock.updateProjectConfig).not.toHaveBeenCalled();
+    expect(remixMock.generateCandidates).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('rejects a scene with no reference mapping before dispatch', () => {
+    dialogResult = [{...validScene(), referenceImage: undefined}];
+
+    component.generateStoryboard();
+
+    expect(snackBarMock.open).toHaveBeenCalled();
+    expect(configMock.updateProjectConfig).not.toHaveBeenCalled();
+    expect(remixMock.generateCandidates).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('stores and dispatches a fresh valid storyboard result', () => {
+    const scene = validScene();
+    dialogResult = [scene];
+
+    component.generateStoryboard();
+
+    expect(configMock.updateProjectConfig).toHaveBeenCalledWith({
+      storyboard: [scene],
+    });
+    expect(remixMock.generateCandidates).toHaveBeenCalledWith(scene, {
+      durationSeconds: 5,
+      generateAudio: false,
+      model: 'veo-default',
+      resolution: '720p',
+    });
+    expect(navigate).toHaveBeenCalledWith(['project-1', 'storyboard']);
+    expect(snackBarMock.open).not.toHaveBeenCalled();
+  });
+});
 
 describe('Setup', () => {
   let component: Setup;

@@ -285,19 +285,25 @@ def execute(
 
   # Group images by product ID to build context
   products: dict[str, Product] = {}
+  valid_product_image_combinations = {}
 
   for img_obj in images:
     product_id = str(img_obj.get(Dimension.PRODUCT_ID.value, "1"))
-    product_description = str(img_obj.get("product_description", None))
+    desc = img_obj.get("product_description")
+    product_description = str(desc) if desc is not None else ""
     if product_id not in products:
       products[product_id] = Product(product_id, product_description)
+    if product_id not in valid_product_image_combinations:
+      valid_product_image_combinations[product_id] = set()
 
+    image_id = str(img_obj.get(Dimension.IMAGE_ID.value, "1"))
     product = products[product_id]
     image = Image(
-        id=str(img_obj.get(Dimension.IMAGE_ID.value, "1")),
+        id=image_id,
         uri=gcs.get_uri(img_obj[Key.FILE.value]),
     )
     product.images.append(image)
+    valid_product_image_combinations[product_id].add(image_id)
 
   # Add products and images
   prompt_parts.append(genai.types.Part.from_text(text="### Products & Images:\n\n"))
@@ -373,41 +379,71 @@ def execute(
       ],
   )
 
-  start_time = time.time()
-  response = client.models.generate_content(
-      model=gemini_model,
-      contents=prompt_parts,
-      config=config,
-  )
-  end_time = time.time()
-  logger.info(
-      "Gemini API request completed in %.2f seconds.", end_time - start_time
-  )
-
-  segments = []
-  if (
-      response.candidates
-      and response.candidates[0].content
-      and response.candidates[0].content.parts
-  ):
-    parts = list(response.candidates[0].content.parts)
-    for part in parts:
-      if part.text:
-        segments.append(part.text)
-  storyboard_text = "".join(segments)
-  if not storyboard_text:
-    raise ValueError(
-        "The model returned no storyboard text. This can happen when the"
-        " model reaches the output token limit before emitting a response."
+  result = None
+  for _ in range(4):  # 1 initial call + 3 retries
+    start_time = time.time()
+    response = client.models.generate_content(
+        model=gemini_model,
+        contents=prompt_parts,
+        config=config,
     )
-  json_result = json.loads(storyboard_text)
+    end_time = time.time()
+    logger.info(
+        "Gemini API request completed in %.2f seconds.", end_time - start_time
+    )
 
-  if not json_result.get("storyboard"):
-    raise ValueError("No storyboard found in the response.")
+    segments = []
+    if (
+        response.candidates
+        and response.candidates[0].content
+        and response.candidates[0].content.parts
+    ):
+      parts = list(response.candidates[0].content.parts)
+      for part in parts:
+        if part.text:
+          segments.append(part.text)
+    storyboard_text = "".join(segments)
+    if not storyboard_text:
+      raise ValueError(
+          "The model returned no storyboard text. This can happen when the"
+          " model reaches the output token limit before emitting a response."
+      )
+    candidate_result = json.loads(storyboard_text)
+
+    if not candidate_result.get("storyboard"):
+      raise ValueError("No storyboard found in the response.")
+
+    is_valid = True
+    for scene in candidate_result["storyboard"]:
+      product_id = scene.get(Dimension.PRODUCT_ID.value)
+      image_id = scene.get(Dimension.IMAGE_ID.value)
+      video_prompt = scene.get("video_prompt")
+      scene_name = scene.get("scene_name")
+      if (
+          product_id not in valid_product_image_combinations
+          or image_id
+          not in valid_product_image_combinations.get(product_id, set())
+          or not video_prompt
+          or not scene_name
+      ):
+        is_valid = False
+        logger.warning(
+            "Invalid scene from Gemini: product_id=%s, image_id=%s",
+            product_id,
+            image_id,
+        )
+        break  # This scene is invalid, so the whole result is.
+    if is_valid:
+      result = candidate_result
+      break
+  if not result:
+    raise RuntimeError(
+        "Gemini repeatedly scripted invalid image/product combinations"
+    )
 
   valid_scenes = []
 
-  for scene in json_result["storyboard"]:
+  for scene in result["storyboard"]:
     image_id = scene.get(Dimension.IMAGE_ID.value)
     product_id = scene.get(Dimension.PRODUCT_ID.value)
     video_prompt = scene.get("video_prompt")

@@ -811,6 +811,20 @@ export class Setup {
         .afterClosed()
         .subscribe((result: GeneratedScene[] | undefined) => {
           if (result) {
+            if (
+              result.some(
+                scene =>
+                  typeof scene.referenceImage?.path !== 'string' ||
+                  scene.referenceImage.path.trim() === '',
+              )
+            ) {
+              this.snackBar.open(
+                'Cannot generate videos: one or more storyboard scenes are missing a product image.',
+                'Dismiss',
+                {panelClass: ['error-snackbar']},
+              );
+              return;
+            }
             this.config.updateProjectConfig({storyboard: [...result]});
             for (const scene of result) {
               void this.remixEngineService.generateCandidates(scene, {
