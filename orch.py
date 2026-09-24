@@ -1175,16 +1175,15 @@ def _write_project_doc(
   precondition, scene writes retain their existing set behavior, and the
   stale-scene prune scan is skipped: a brand-new project has no prior scenes
   to prune, and callers cap create at _MAX_CREATE_SCENES so this always fits
-  one atomic batch. When create is false, an omitted storyboard key leaves the
-  scenes subcollection untouched.
+  one atomic batch. When create is false, an omitted or non-list storyboard
+  (e.g. null) leaves the scenes subcollection untouched; only an explicit list
+  (including []) writes and prunes scenes.
   """
   root = dict(payload)
   root['storyboard'] = []
   ops = [('create' if create else 'set', doc_ref, root)]
-  if create or 'storyboard' in payload:
-    scenes = payload.get('storyboard')
-    if not isinstance(scenes, list):
-      scenes = []
+  scenes = payload.get('storyboard')
+  if isinstance(scenes, list):
     scenes_ref = doc_ref.collection(_SCENES_SUBCOLLECTION)
     for index, scene in enumerate(scenes):
       ops.append(('set', scenes_ref.document(_scene_doc_id(index)), scene))
@@ -1207,8 +1206,9 @@ def _write_editor_project_doc(
   The root update is deliberately field-based: unlike a read-modify-write
   replacement, it cannot copy a stale inputConfig snapshot over a concurrent
   Setup save. Fields omitted by the editor payload retain the legacy full-save
-  replacement behavior through DELETE_FIELD updates, except storyboard which
-  leaves the scenes subcollection untouched when omitted.
+  replacement behavior through DELETE_FIELD updates, except storyboard: the
+  root always keeps the [] placeholder, and an omitted or non-list storyboard
+  (e.g. null) leaves the scenes subcollection untouched.
   """
   root_updates = {
       field_path.FieldPath(key).to_api_repr(): firestore.DELETE_FIELD
@@ -1219,12 +1219,10 @@ def _write_editor_project_doc(
       field_path.FieldPath(key).to_api_repr(): value
       for key, value in payload.items()
   })
+  root_updates[field_path.FieldPath('storyboard').to_api_repr()] = []
   ops = []
-  if 'storyboard' in payload:
-    scenes = payload.get('storyboard')
-    if not isinstance(scenes, list):
-      scenes = []
-    root_updates[field_path.FieldPath('storyboard').to_api_repr()] = []
+  scenes = payload.get('storyboard')
+  if isinstance(scenes, list):
     scenes_ref = doc_ref.collection(_SCENES_SUBCOLLECTION)
     for index, scene in enumerate(scenes):
       ops.append(('set', scenes_ref.document(_scene_doc_id(index)), scene))

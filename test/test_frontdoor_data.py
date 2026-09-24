@@ -1699,6 +1699,9 @@ def test_project_patch_omitting_storyboard_leaves_scenes_intact(
   response = client.patch(url, json={'name': 'Renamed'})
   assert response.status_code == 200
 
+  # The GET below rebuilds storyboard from the subcollection, so check the
+  # stored root placeholder directly.
+  assert fake_db.collection('projects').docs[project_id]['storyboard'] == []
   scenes = _scenes_docs(fake_db, project_id)
   assert len(scenes) == 3
   assert [scenes[f'{i:06d}']['d'] for i in range(3)] == ['0', '1', '2']
@@ -1753,6 +1756,45 @@ def test_project_patch_empty_payload_leaves_scenes_intact(
   assert len(scenes) == 3
   body = client.get(f'/api/projects/{project_id}').get_json()
   assert [s['d'] for s in body['storyboard']] == ['0', '1', '2']
+
+
+@pytest.mark.parametrize('storyboard', [None, 'not-a-list', {'d': '0'}])
+@pytest.mark.parametrize(
+    'path_template',
+    [
+        '/api/projects/{id}',
+        '/api/projects/{id}/editor',
+        '/api/projects/{id}?view=editor',
+    ],
+)
+def test_project_patch_non_list_storyboard_leaves_scenes_intact(
+    monkeypatch, orchestrator_module, path_template, storyboard
+):
+  del orchestrator_module
+  orch, fake_db, _ = _load_app(monkeypatch)
+  client = orch.app.test_client()
+  project_id = f'null-storyboard-{uuid.uuid4().hex[:8]}'
+
+  assert (
+      client.post(
+          '/api/projects',
+          json={
+              'id': project_id,
+              'name': 'Original',
+              'storyboard': [{'d': '0'}, {'d': '1'}, {'d': '2'}],
+          },
+      ).status_code
+      == 200
+  )
+
+  # Clients that serialize unset optional fields as null must not wipe scenes.
+  url = path_template.format(id=project_id)
+  response = client.patch(url, json={'name': 'n', 'storyboard': storyboard})
+  assert response.status_code == 200
+
+  assert fake_db.collection('projects').docs[project_id]['storyboard'] == []
+  scenes = _scenes_docs(fake_db, project_id)
+  assert [scenes[f'{i:06d}']['d'] for i in range(3)] == ['0', '1', '2']
 
 
 @pytest.mark.parametrize(
@@ -1831,6 +1873,8 @@ def test_project_patch_shrinking_storyboard_deletes_trailing_scenes(
   )
   assert response.status_code == 200
 
+  # Scenes live only in the subcollection, never inline on the root doc.
+  assert fake_db.collection('projects').docs[project_id]['storyboard'] == []
   scenes = _scenes_docs(fake_db, project_id)
   assert len(scenes) == 3
   assert set(scenes.keys()) == {'000000', '000001', '000002'}
