@@ -211,10 +211,14 @@ export class MediaCacheEngine {
         return {fallbackUrl};
       }
 
-      await this.enqueueMutation(async () => {
-        if (this.version(scope.projectId, file.path!) !== version) return;
-        await this.store(cache, request, blob);
-      });
+      try {
+        await this.enqueueMutation(async () => {
+          if (this.version(scope.projectId, file.path!) !== version) return;
+          await this.store(cache, request, blob);
+        });
+      } catch {
+        // Cache persistence failure should not discard the downloaded blob.
+      }
       return {blob, fallbackUrl};
     } catch {
       return {fallbackUrl: fallbackUrl || (await this.safeResolve(file))};
