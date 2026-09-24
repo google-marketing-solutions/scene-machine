@@ -109,6 +109,9 @@ def _clean_duration(
 
   Returns:
     Frame-aligned clip duration in seconds.
+
+  Raises:
+    ValueError: If duration <= 0 and the source duration is unknown.
   """
   frame_duration = 1.0 / target_fps
   if duration > 0:
@@ -117,8 +120,13 @@ def _clean_duration(
         if source_duration > 0
         else duration
     )
-  else:
+  elif source_duration > 0:
     effective_duration = min(source_duration, available_duration)
+  else:
+    raise ValueError(
+        'Explicit positive duration is required when video source duration is'
+        ' unknown'
+    )
   total_frames = max(1, round(effective_duration / frame_duration))
   return total_frames * frame_duration
 

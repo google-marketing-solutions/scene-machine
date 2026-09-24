@@ -295,16 +295,16 @@ class TestFFMPEG(unittest.TestCase):
     )
     self.assertEqual(ffmpeg3.inputs[0]['duration'], 10.0)
 
-    # Control 2: skip_time=3, duration=7 is unchanged (7.0 s)
+    # Control 2: skip_time=3, duration=4 (< available 7 s) is unchanged (4.0 s)
     ffmpeg4 = FFMPEG()
     ffmpeg4.add_video(
         path='clip.mp4',
         skip_time=3.0,
-        duration=7.0,
+        duration=4.0,
         transition=None,
         transition_overlap=0,
     )
-    self.assertEqual(ffmpeg4.inputs[0]['duration'], 7.0)
+    self.assertEqual(ffmpeg4.inputs[0]['duration'], 4.0)
 
   @mock.patch('actions_lib.ffmpeg.get_video_properties')
   def test_unknown_source_duration_uses_requested_duration(
@@ -328,6 +328,28 @@ class TestFFMPEG(unittest.TestCase):
 
     self.assertEqual(ffmpeg.inputs[0]['skip'], 3.0)
     self.assertEqual(ffmpeg.inputs[0]['duration'], 4.0)
+
+  @mock.patch('actions_lib.ffmpeg.get_video_properties')
+  def test_unknown_source_duration_requires_explicit_duration(
+      self, mock_get_props
+  ):
+    mock_get_props.return_value = {
+        'duration': 0.0,
+        'dimensions': '1280:720',
+        'fps': 30.0,
+        'has_audio': True,
+    }
+
+    ffmpeg = FFMPEG()
+    with self.assertRaisesRegex(ValueError, 'Explicit positive duration'):
+      ffmpeg.add_video(
+          path='unknown-duration.mp4',
+          skip_time=0.0,
+          duration=-1.0,
+          transition=None,
+          transition_overlap=0,
+      )
+    self.assertEqual(ffmpeg.inputs, [])
 
   @mock.patch('actions_lib.ffmpeg.get_video_properties')
   def test_negative_times_and_excessive_skip_raise(self, mock_get_props):
@@ -528,9 +550,9 @@ class TestFFMPEG(unittest.TestCase):
       v_dur, a_dur = None, None
       for s in probe_data.get('streams', []):
         if s.get('codec_type') == 'video':
-          v_dur = float(s.get('duration', probe_data['format']['duration']))
+          v_dur = float(s['duration'])
         elif s.get('codec_type') == 'audio':
-          a_dur = float(s.get('duration', probe_data['format']['duration']))
+          a_dur = float(s['duration'])
 
       self.assertIsNotNone(v_dur)
       self.assertIsNotNone(a_dur)
@@ -568,9 +590,9 @@ class TestFFMPEG(unittest.TestCase):
       v_dur, a_dur = None, None
       for s in probe_data.get('streams', []):
         if s.get('codec_type') == 'video':
-          v_dur = float(s.get('duration', probe_data['format']['duration']))
+          v_dur = float(s['duration'])
         elif s.get('codec_type') == 'audio':
-          a_dur = float(s.get('duration', probe_data['format']['duration']))
+          a_dur = float(s['duration'])
 
       self.assertIsNotNone(v_dur)
       self.assertIsNotNone(a_dur)
