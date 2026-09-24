@@ -417,10 +417,14 @@ def execute(
     for scene in candidate_result["storyboard"]:
       product_id = scene.get(Dimension.PRODUCT_ID.value)
       image_id = scene.get(Dimension.IMAGE_ID.value)
+      video_prompt = scene.get("video_prompt")
+      scene_name = scene.get("scene_name")
       if (
           product_id not in valid_product_image_combinations
           or image_id
           not in valid_product_image_combinations.get(product_id, set())
+          or not video_prompt
+          or not scene_name
       ):
         is_valid = False
         logger.warning(

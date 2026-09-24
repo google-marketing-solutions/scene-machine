@@ -2032,7 +2032,12 @@ export class RemixEngineService {
           generateAudio: this.configService.globalConfig.value()!.generateAudio,
         } as GeneratedScene;
         if (referenceImage) {
-          scene.referenceImage = referenceImage;
+          scene.referenceImage = {
+            ...referenceImage,
+            ...(referenceImage.preview
+              ? {preview: {...referenceImage.preview}}
+              : {}),
+          };
         }
         return scene;
       });

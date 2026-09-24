@@ -115,6 +115,43 @@ class TestGenerateStoryboard(unittest.TestCase):
     )
 
   @patch("actions.generate_storyboard.genai.Client")
+  def test_execute_empty_scene_fields_trigger_retry(
+      self, mock_genai_client_class
+  ):
+    for field in ("video_prompt", "scene_name"):
+      with self.subTest(field=field):
+        mock_client = MagicMock()
+        mock_genai_client_class.return_value = mock_client
+        scene = {
+            "image_id": "i1",
+            "product_id": "p1",
+            "scene_name": "Scene 1",
+            "video_prompt": "Prompt 1",
+        }
+        empty_resp = self._make_mock_response(
+            {"storyboard": [{**scene, field: ""}]}
+        )
+        valid_resp = self._make_mock_response({"storyboard": [scene]})
+        mock_client.models.generate_content.side_effect = [
+            empty_resp,
+            valid_resp,
+        ]
+        self.mock_gcs.store.reset_mock()
+
+        generate_storyboard.execute(
+            self.mock_gcs,
+            self.mock_params,
+            self.mock_images,
+            self.mock_user_prompt,
+            self.gemini_model,
+            self.gemini_model_location,
+        )
+
+        self.assertEqual(mock_client.models.generate_content.call_count, 2)
+        stored = json.loads(self.mock_gcs.store.call_args.args[0])
+        self.assertEqual(len(stored["storyboard"]), 1)
+
+  @patch("actions.generate_storyboard.genai.Client")
   def test_execute_exhausting_retries_raises_runtime_error(
       self, mock_genai_client_class
   ):
