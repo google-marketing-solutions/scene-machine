@@ -201,6 +201,42 @@ describe('Setup full-load failure', () => {
     expect(fixture.nativeElement.querySelector('.setup-container')).toBeNull();
     expect(config.projectConfig.value().inputConfig).toBeUndefined();
     http.expectNone('/api/projects/proj-unsettled');
+
+    const retry = fixture.nativeElement.querySelector(
+      '.loading-state button',
+    ) as HTMLButtonElement | null;
+    expect(retry?.textContent).toContain('Retry');
+    retry?.click();
+    TestBed.tick();
+    const retryGet = http.expectOne('/api/projects/proj-unsettled');
+    retryGet.flush({
+      id: 'proj-unsettled',
+      name: 'Server Name',
+      aspectRatio: '16:9',
+      resolution: '720p',
+      candidateDurationSeconds: 4,
+      generateAudio: false,
+      numberOfCandidates: 1,
+      model: 'veo-default',
+      inputConfig: {products: [], composition: 'Recovered composition'},
+      storyboard: [],
+      audioTracks: [],
+      visualOverlays: [],
+    });
+    TestBed.tick();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(config.setupInputsError()).toBe(false);
+    expect(config.setupInputsLoaded()).toBe(true);
+    expect(config.projectConfig.value().name).toBe('In-Flight');
+    expect(config.projectConfig.value().inputConfig).toEqual({
+      products: [],
+      composition: 'Recovered composition',
+    });
+    expect(
+      fixture.nativeElement.querySelector('.setup-container'),
+    ).not.toBeNull();
   });
 });
 

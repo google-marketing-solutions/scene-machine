@@ -1199,6 +1199,38 @@ describe('ConfigService (mediated data plane)', () => {
       expect(service.setupInputsLoaded()).toBe(true);
     });
 
+    it('keeps a locally created project ready after leaving an editor route or failed load', async () => {
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') return of({});
+        if (url === '/api/projects/project-a?view=editor') {
+          return of({...service.projectConfig.value(), id: 'project-a'});
+        }
+        return of({});
+      });
+      service.loadProjectConfig('project-a', 'editor');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().id).toBe('project-a');
+      });
+      (service as any).projectLoadErrorValue.set(new Error('stale failure'));
+      httpClientMock.get.mockClear();
+
+      service.resetProjectConfig();
+      service.setNewProject('project-b');
+      expect(service.setupInputsLoaded()).toBe(true);
+      service.saveNow();
+
+      service.loadProjectConfig('project-b', 'full');
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      expect(httpClientMock.get).not.toHaveBeenCalledWith(
+        '/api/projects/project-b',
+      );
+      expect(service.projectLoadError()).toBe(false);
+      expect(service.setupInputsError()).toBe(false);
+      expect(service.setupInputsLoaded()).toBe(true);
+      expect(service.projectConfig.value().id).toBe('project-b');
+    });
+
     it('keeps a locally created full project ready after leaving another project', () => {
       service.projectConfig.value.set({
         ...service.projectConfig.value(),

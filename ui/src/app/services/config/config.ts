@@ -1513,8 +1513,10 @@ export class ConfigService {
     // would otherwise be silently dropped once the config resets (the
     // post-reset emission has id === '' / shouldSave === false).
     this.flushPendingSave();
+    this.projectLoadErrorValue.set(undefined);
     this.setupInputsHydrated.set(false);
     this.projectId.set(null);
+    this.projectView.set('full');
     this.projectConfig.set({...this.DEFAULT_PROJECT_CONFIG()});
     this.shouldSave = false;
   }
@@ -1533,7 +1535,9 @@ export class ConfigService {
     // Not persisted yet: the first autosave POSTs /api/projects, where the
     // server stamps createdBy from the verified identity. Left undefined here.
     this.persistedProjectIds.delete(uuid);
+    this.projectLoadErrorValue.set(undefined);
     this.setupInputsHydrated.set(true);
+    this.projectView.set('full');
     const project = {
       ...this.DEFAULT_PROJECT_CONFIG(),
       id: uuid,
