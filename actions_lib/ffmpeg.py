@@ -76,14 +76,59 @@ _XFADE_TRANSITIONS = frozenset({
 })
 
 
-def _require_finite_number(value: Any, name: str) -> float:
+def _require_finite_number(
+    value: Any, name: str, *, min_value: float | None = None
+) -> float:
   if (
       isinstance(value, bool)
       or not isinstance(value, (int, float))
       or not math.isfinite(value)
   ):
     raise ValueError(f'{name} must be a finite number: {value!r}')
-  return float(value)
+  val = float(value)
+  if min_value is not None and val < min_value:
+    if min_value == 0.0:
+      raise ValueError(f'{name} must be non-negative: {value!r}')
+    raise ValueError(f'{name} must be >= {min_value}: {value!r}')
+  return val
+
+
+def _clean_duration(
+    duration: float,
+    available_duration: float,
+    source_duration: float,
+    target_fps: float,
+) -> float:
+  """Clamps clip duration to known footage and aligns it to frame boundaries.
+
+  Args:
+    duration: Caller-requested duration in seconds (<= 0 means use remaining).
+    available_duration: Remaining footage after skip_time in seconds.
+    source_duration: Probed source container duration in seconds (0 if unknown).
+    target_fps: Output frame rate used to quantize duration to whole frames.
+
+  Returns:
+    Frame-aligned clip duration in seconds.
+
+  Raises:
+    ValueError: If duration <= 0 and the source duration is unknown.
+  """
+  frame_duration = 1.0 / target_fps
+  if duration > 0:
+    effective_duration = (
+        min(duration, available_duration)
+        if source_duration > 0
+        else duration
+    )
+  elif source_duration > 0:
+    effective_duration = min(source_duration, available_duration)
+  else:
+    raise ValueError(
+        'Explicit positive duration is required when video source duration is'
+        ' unknown'
+    )
+  total_frames = max(1, round(effective_duration / frame_duration))
+  return total_frames * frame_duration
 
 
 def _require_int(value: Any, name: str) -> int:
@@ -225,7 +270,7 @@ class FFMPEG:
     Returns:
       the instance of FFMPEG so that calls can be chained.
     """
-    skip_time = _require_finite_number(skip_time, 'skip_time')
+    skip_time = _require_finite_number(skip_time, 'skip_time', min_value=0.0)
     duration = _require_finite_number(duration, 'duration')
     if transition is not None:
       if transition not in _XFADE_TRANSITIONS:
@@ -233,22 +278,40 @@ class FFMPEG:
       transition_overlap = _require_finite_number(
           0.0 if transition_overlap is None else transition_overlap,
           'transition_overlap',
+          min_value=0.0,
       )
     else:
       if transition_overlap is not None:
         transition_overlap = _require_finite_number(
-            transition_overlap, 'transition_overlap'
+            transition_overlap, 'transition_overlap', min_value=0.0
         )
     properties = get_video_properties(path)
+    if properties['duration'] > 0 and skip_time >= properties['duration']:
+      raise ValueError(
+          f'skip_time ({skip_time}) must be less than video duration'
+          f" ({properties['duration']})"
+      )
+    available_duration = max(0.0, properties['duration'] - skip_time)
+
+    fps_changed = False
     if properties['fps'] > self.target_fps:
       self.target_fps = properties['fps']
-    # Recompute the duration to be an integer multiple of frames
-    frame_duration = 1.0 / self.target_fps
-    if duration > 0:
-      total_frames = round(duration / frame_duration)
-      clean_duration = total_frames * frame_duration
-    else:
-      clean_duration = properties['duration']
+      fps_changed = True
+
+    clean_duration = _clean_duration(
+        duration, available_duration, properties['duration'], self.target_fps
+    )
+
+    if fps_changed:
+      for item in self.inputs:
+        if item['type'] == 'video':
+          item['duration'] = _clean_duration(
+              item['raw_duration'],
+              item['available_duration'],
+              item['source_duration'],
+              self.target_fps,
+          )
+
     self.inputs.append({
         'type': 'video',
         'path': path,
@@ -257,6 +320,9 @@ class FFMPEG:
         'has_audio': properties['has_audio'] and include_audio,
         'transition': transition,
         'transition_overlap': transition_overlap,
+        'raw_duration': duration,
+        'available_duration': available_duration,
+        'source_duration': properties['duration'],
     })
     return self
 
@@ -274,8 +340,10 @@ class FFMPEG:
     Returns:
       the instance of FFMPEG so that calls can be chained.
     """
-    start_time = _require_finite_number(start_time, 'start_time')
-    skip_time = _require_finite_number(skip_time, 'skip_time')
+    start_time = _require_finite_number(
+        start_time, 'start_time', min_value=0.0
+    )
+    skip_time = _require_finite_number(skip_time, 'skip_time', min_value=0.0)
     duration = _require_finite_number(duration, 'duration')
     self.inputs.append({
         'type': 'audio',
@@ -314,8 +382,14 @@ class FFMPEG:
 
     TODO: use the start_time to start the clip at the right place.
     """
-    start_time = _require_finite_number(start_time, 'start_time')
+    start_time = _require_finite_number(
+        start_time, 'start_time', min_value=0.0
+    )
     duration = _require_finite_number(duration, 'duration')
+    if duration <= 0:
+      raise ValueError(
+          f'Image overlay requires an explicit positive duration: {duration!r}'
+      )
     offset_x = _require_int(offset_x, 'offset_x')
     offset_y = _require_int(offset_y, 'offset_y')
     width = _require_int(width, 'width')
