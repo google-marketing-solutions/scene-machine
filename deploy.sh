@@ -102,26 +102,55 @@ fmt_hms() {
 # terminal shows nothing for minutes during the image build. Returns the wrapped
 # command's own exit code, so `set -e` still aborts the deploy if the build fails.
 run_with_heartbeat() {
-  local label=$1; shift
+  local label=$1 log_file=$2; shift 2
   local hb_secs=${HEARTBEAT_SECS:-20}
   local start rc=0
   start=$(date +%s)
-  "$@" &
-  local cmd_pid=$!
-  # Heartbeat in a background subshell: it watches the command's PID and exits
-  # when the command does. cmd_pid/start are inherited from this function scope.
-  (
-    while kill -0 "$cmd_pid" 2>/dev/null; do
-      sleep "$hb_secs"
-      kill -0 "$cmd_pid" 2>/dev/null || break
-      echo "    … ${label} still running ($(fmt_hms $(( $(date +%s) - start ))) elapsed)"
-    done
-  ) &
-  local hb_pid=$!
+  # Put the build command and any children in their own process group so an
+  # interrupted deploy can stop the entire upload/build CLI tree without ps.
+  python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+    "$@" >"$log_file" 2>&1 &
+  HEARTBEAT_CMD_PID=$!
+  local cmd_pid=$HEARTBEAT_CMD_PID
+  # A single Python watcher has no sleep/tail child to orphan on interruption.
+  # Show gcloud's build-log link as soon as it appears, even though the complete
+  # command output is replayed only after the build finishes.
+  python3 -c '
+import os, sys, time
+pid, interval, label, start, log = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3], int(sys.argv[4]), sys.argv[5]
+next_heartbeat = time.monotonic() + interval
+shown_link = False
+while True:
+    if not shown_link:
+        try:
+            with open(log, encoding="utf-8", errors="replace") as output:
+                for line in output:
+                    if line.startswith("Logs are available at ["):
+                        print(f"    {line.rstrip()}", flush=True)
+                        shown_link = True
+                        break
+        except FileNotFoundError:
+            pass
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        break
+    now = time.monotonic()
+    if now >= next_heartbeat:
+        elapsed = int(time.time()) - start
+        print(f"    … {label} still running ({elapsed // 3600}h {elapsed % 3600 // 60:02}m {elapsed % 60:02}s elapsed)", flush=True)
+        next_heartbeat = now + interval
+    time.sleep(0.5)
+' "$cmd_pid" "$hb_secs" "$label" "$start" "$log_file" &
+  HEARTBEAT_PID=$!
+  local hb_pid=$HEARTBEAT_PID
   wait "$cmd_pid" || rc=$?
   kill "$hb_pid" 2>/dev/null || true
   wait "$hb_pid" 2>/dev/null || true
-  return $rc
+  HEARTBEAT_CMD_PID=""
+  HEARTBEAT_PID=""
+  cat "$log_file"
+  return "$rc"
 }
 
 # Emits the closing timing line for the current phase: wall-clock time of day,
@@ -407,6 +436,82 @@ echo "════════════════════════�
 # human think-time at the prompt doesn't pollute the timing deliverable.
 SCRIPT_START=$(date +%s)
 
+UI_BUILD_PID=""; INFRA_SETUP_PID=""; HEARTBEAT_CMD_PID=""; HEARTBEAT_PID=""
+UI_BUILD_LOG=""; INFRA_SETUP_LOG=""; BUILD_SUBMIT_LOG=""
+
+cleanup() {
+  local pid log
+  # The UI and infra jobs start with Bash monitor mode, and the Cloud Build
+  # command starts with setsid. Each PID is therefore its own process-group
+  # leader; signalling its negative PGID stops descendants without ps/pgrep.
+  for pid in "${UI_BUILD_PID:-}" "${INFRA_SETUP_PID:-}" "${HEARTBEAT_CMD_PID:-}"; do
+    [ -n "$pid" ] || continue
+    kill -TERM -- "-$pid" 2>/dev/null || true
+  done
+  if [ -n "${UI_BUILD_PID:-}${INFRA_SETUP_PID:-}${HEARTBEAT_CMD_PID:-}" ]; then
+    sleep 1
+  fi
+  for pid in "${UI_BUILD_PID:-}" "${INFRA_SETUP_PID:-}" "${HEARTBEAT_CMD_PID:-}"; do
+    [ -n "$pid" ] || continue
+    kill -KILL -- "-$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
+  if [ -n "${HEARTBEAT_PID:-}" ]; then
+    kill "$HEARTBEAT_PID" 2>/dev/null || true
+    wait "$HEARTBEAT_PID" 2>/dev/null || true
+  fi
+  for log in "${UI_BUILD_LOG:-}" "${INFRA_SETUP_LOG:-}"; do
+    [ -n "$log" ] || continue
+    if [ -s "$log" ]; then
+      echo "--- background log: $log ---" >&2
+      cat "$log" >&2
+    fi
+    rm -f "$log"
+  done
+  if [ -n "${BUILD_SUBMIT_LOG:-}" ]; then
+    if [ -s "$BUILD_SUBMIT_LOG" ]; then
+      echo "--- background log: $BUILD_SUBMIT_LOG ---" >&2
+      cat "$BUILD_SUBMIT_LOG" >&2
+    fi
+    rm -f "$BUILD_SUBMIT_LOG"
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# Render UI env + config and kick off the local Angular UI build in the
+# background right away so local CPU work (npm ci / ng build) overlaps with
+# cloud API, service-account, IAM, Cloud Tasks, bucket, and Firestore setup.
+export UI_CONTROL_PLANE_MODE="iap"
+envsubst < ./ui/src/env.template.txt > ./ui/src/env.ts
+generate_config
+if grep -q "controlPlaneMode: 'none'" ./ui/src/env.ts; then
+  echo "ERROR: ui/src/env.ts rendered with controlPlaneMode 'none' (sign-in disabled)." >&2
+  exit 1
+fi
+if [ "$SKIP_UI_BUILD" != "1" ]; then
+  UI_BUILD_LOG=$(mktemp)
+  # A separate job-control process group lets EXIT cleanup stop npm/ng children.
+  set -m
+  (
+    export NG_CLI_ANALYTICS=ci
+    ( cd ui && npm ci )
+    ( cd ui && npx ng build --configuration production )
+  ) </dev/null >"$UI_BUILD_LOG" 2>&1 &
+  UI_BUILD_PID=$!
+  set +m
+elif [ ! -d ui/dist ]; then
+  echo "ERROR: --skip-ui-build given but ui/dist does not exist." >&2
+  echo "       Run a normal deploy once (or 'cd ui && npx ng build') first." >&2
+  exit 1
+elif grep -rqs 'controlPlaneMode:"none"' ui/dist || grep -rqs "controlPlaneMode:'none'" ui/dist; then
+  echo "ERROR: the existing ui/dist was built for local dev (controlPlaneMode 'none'," >&2
+  echo "       sign-in disabled). Refusing to deploy it. Drop --skip-ui-build and run a" >&2
+  echo "       normal deploy to rebuild the UI first." >&2
+  exit 1
+fi
+
 # --- Enable services ---------------------------------------------------------
 # Note: compute.googleapis.com is enabled here so the default Compute Engine
 # service account (used for role bindings below) is guaranteed to exist.
@@ -524,13 +629,14 @@ gcloud services identity create --service=iap.googleapis.com --project=$PROJECT 
 # --- Derived values ----------------------------------------------------------
 phase "Resolving project number and runtime service account..."
 PROJECT_NUMBER=$(gcloud projects describe $PROJECT --format="value(projectNumber)")
-# Two distinct identities (least privilege, P2#1):
+# Separate build and runtime identities (P2#1):
 #   BUILD_SA   - the default Compute Engine SA, which is also the default Cloud
 #                Build identity. Used ONLY to build and push the container image
 #                (`gcloud builds submit`, no --service-account). It holds the
 #                build-time roles (artifactregistry.writer, logging.logWriter,
 #                storage.objectUser for the source) and is NOT a request-serving
-#                identity.
+#                identity. On some projects it also inherits project Editor;
+#                these grants do not remove that pre-existing broad access.
 #   RUNTIME_SA - a dedicated SA that the app + worker Cloud Run services run as.
 #                It carries only the roles the running app needs. Crucially it
 #                does NOT get roles/artifactregistry.writer, so a compromise of
@@ -650,8 +756,12 @@ echo "Granting the runtime SA self-impersonation (signBlob + Cloud Tasks OIDC)..
 add_sa_iam_binding "${RUNTIME_SA}" "serviceAccount:${RUNTIME_SA}" "roles/iam.serviceAccountTokenCreator" "$PROJECT"
 add_sa_iam_binding "${RUNTIME_SA}" "serviceAccount:${RUNTIME_SA}" "roles/iam.serviceAccountUser" "$PROJECT"
 
+# --- Non-IAM runtime infrastructure (overlapped with Cloud Build) ---
+INFRA_SETUP_LOG=$(mktemp)
+set -m
+(
 # --- Cloud Tasks queues -------------------------------------------------------
-phase "Setting up Cloud Tasks queues..."
+echo "[>] Setting up Cloud Tasks queues..."
 QUEUES=("Other" "Gemini" "Veo")
 for QUEUE_SUFFIX in "${QUEUES[@]}"; do
   QUEUE_NAME="${TASKS_QUEUE_PREFIX}${QUEUE_SUFFIX}"
@@ -698,7 +808,7 @@ echo "  ✓ ${#QUEUES[@]} Cloud Tasks queues ready (${QUEUES[*]/#/${TASKS_QUEUE_
 # deployer sets ADOPT_EXISTING_BUCKET=1 — so a shared bucket cannot have its
 # contents exposed through signed URLs. (Needs roles/storage.admin, already
 # required.)
-phase "Setting up GCS bucket..."
+echo "[>] Setting up GCS bucket..."
 DEFAULT_BUCKET="${PROJECT}-scene-machine"
 if ! gcloud storage buckets describe "gs://$GCS_BUCKET" --project=$PROJECT &> /dev/null; then
     echo "Creating dedicated GCS bucket gs://$GCS_BUCKET in ${REGION}..."
@@ -739,7 +849,7 @@ else
 fi
 
 # --- Firestore databases (two) -------------------------------------------------
-phase "Setting up Firestore databases..."
+echo "[>] Setting up Firestore databases..."
 if ! gcloud firestore databases describe --database="$FIRESTORE_DB" --project=$PROJECT &> /dev/null; then
     echo "Creating Firestore database: $FIRESTORE_DB"
     gcloud firestore databases create --database="$FIRESTORE_DB" --project=$PROJECT --location="$REGION"
@@ -764,38 +874,24 @@ else
     gcloud firestore databases describe --database="$FIRESTORE_DB_UI" --project=$PROJECT --format="value(locationId)"
 fi
 
-# --- Render UI env + config (must precede the single image build) -------------
-# Order matters: these artifacts are baked into the image (Dockerfile
-# `COPY . .`), so they must exist before `gcloud builds submit`.
-phase "Rendering ui/src/env.ts and ui/definitions/config.json..."
-# IAP is the only deployable front-door mode (controlPlaneMode 'none' is local
-# dev only), and the data plane is always mediated, so there is nothing to
-# choose here — the UI is always built for IAP.
-export UI_CONTROL_PLANE_MODE="iap"
-echo "  Front-door auth: IAP (the only deployable mode)"
-# env.ts: UI_CONTROL_PLANE_MODE
-# is additionally exported for the front-door env.template.txt field
-# (controlPlaneMode) — a no-op against templates that don't reference it.
-envsubst < ./ui/src/env.template.txt > ./ui/src/env.ts
-# config.json: read by the backend (orch.py) for the project/bucket/database
-# params and rendered into the deploy. The app serves the SPA, /api and the
-# status viewer from one Cloud Run service, so the browser always calls /api
-# RELATIVE to wherever the page loaded; no app host is baked in. Only
-# $FIRESTORE_DB / $GCS_BUCKET / $PROJECT / $REGION / $TASKS_QUEUE_PREFIX are
-# substituted.
-generate_config
-
-# Safety: never build or ship a UI rendered for LOCAL DEV (controlPlaneMode
-# 'none' turns the sign-in gate off). The line above always sets 'iap', so this
-# only trips on a stray UI_CONTROL_PLANE_MODE override; fail loudly rather than
-# deploy an app with authentication disabled.
-if grep -q "controlPlaneMode: 'none'" ./ui/src/env.ts; then
-  echo "ERROR: ui/src/env.ts rendered with controlPlaneMode 'none' (sign-in disabled)." >&2
-  echo "       Refusing to build a deploy with the front-door auth gate off." >&2
-  echo "       This should not happen on a normal deploy; check for a stray" >&2
-  echo "       UI_CONTROL_PLANE_MODE in your environment, then re-run $0." >&2
-  exit 1
+# --- SceneMachineUser custom role -----------------------------------------------
+echo "[>] Ensuring SceneMachineUser custom role matches user-role.yaml..."
+if ! gcloud iam roles describe SceneMachineUser --project=$PROJECT &> /dev/null; then
+  echo "SceneMachineUser role doesn't exist. Creating it..."
+  gcloud iam roles create SceneMachineUser --project=$PROJECT --file=./user-role.yaml
+else
+  echo "SceneMachineUser role exists. Syncing it to user-role.yaml..."
+  gcloud iam roles update SceneMachineUser --project=$PROJECT --file=./user-role.yaml --quiet || true
 fi
+
+) </dev/null >"$INFRA_SETUP_LOG" 2>&1 &
+INFRA_SETUP_PID=$!
+set +m
+
+# --- UI env + config (rendered at SCRIPT_START before UI_BUILD_PID) -----------
+phase "Rendering ui/src/env.ts and ui/definitions/config.json..."
+echo "  Front-door auth: IAP (the only deployable mode)"
+
 
 # --- UI build ------------------------------------------------------------------
 if [ "$SKIP_UI_BUILD" = "1" ]; then
@@ -817,12 +913,14 @@ if [ "$SKIP_UI_BUILD" = "1" ]; then
   echo "[skip] Building the Angular UI — skipped (--skip-ui-build); reusing ui/dist."
 else
   phase "Building the Angular UI (npm ci + ng build)..."
-  export NG_CLI_ANALYTICS=ci
-  (
-    cd ui \
-      && npm ci \
-      && npx ng build --configuration production
-  )
+  if ! wait "$UI_BUILD_PID"; then
+    UI_BUILD_PID=""
+    exit 1
+  fi
+  UI_BUILD_PID=""
+  cat "$UI_BUILD_LOG"
+  rm -f "$UI_BUILD_LOG"
+  UI_BUILD_LOG=""
 fi
 
 # --- Version stamp + Artifact Registry + ONE image build -----------------------
@@ -837,6 +935,8 @@ if ! gcloud artifacts repositories describe "${ARTIFACT_REPO}" --project=$PROJEC
   echo "Creating artifact repository: $ARTIFACT_REPO"
   gcloud artifacts repositories create "${ARTIFACT_REPO}" --repository-format=docker --project=$PROJECT --location="$REGION"
 fi
+# The default public Cloud Build pool avoids the high-CPU pool's measured
+# provisioning queue on both cached and no-cache builds.
 # NOTE: the repo's .gcloudignore excludes ui/* but re-includes ui/dist/ and
 # ui/remix-engine-status-viewer/ — both are LOAD-BEARING for this build: the
 # front-door app service serves the built SPA (ui/dist/ui/browser) and the
@@ -862,40 +962,87 @@ if [ "$NO_BUILD_CACHE" = "1" ]; then
 else
   echo "  Docker layer cache: ON (reuses unchanged layers from the previous image)."
 fi
-run_with_heartbeat "Cloud Build" \
-  gcloud builds submit . --config=cloudbuild.yaml --substitutions="$BUILD_SUBS" \
-    --project=$PROJECT --region=$REGION
+BUILD_ATTEMPT=0
+BUILD_MAX_ATTEMPTS=4
+while true; do
+  BUILD_ATTEMPT=$((BUILD_ATTEMPT + 1))
+  BUILD_SUBMIT_LOG=$(mktemp)
+  if run_with_heartbeat "Cloud Build" "$BUILD_SUBMIT_LOG" \
+    gcloud builds submit . --config=cloudbuild.yaml --substitutions="$BUILD_SUBS" \
+      --project=$PROJECT --region=$REGION; then
+    # Identify this build, not whatever a concurrent deploy later writes to
+    # :latest. Fail closed if gcloud's success output lacks its build URL.
+    if ! BUILD_ID=$(python3 deploy/resolve_build_image.py build-id \
+      "$PROJECT" "$REGION" "$BUILD_SUBMIT_LOG"); then
+      rm -f "$BUILD_SUBMIT_LOG"
+      BUILD_SUBMIT_LOG=""
+      echo "ERROR: Cloud Build succeeded but its ID could not be verified; refusing to deploy a mutable image tag." >&2
+      exit 1
+    fi
+    rm -f "$BUILD_SUBMIT_LOG"
+    BUILD_SUBMIT_LOG=""
+    break
+  fi
+  if [ "$BUILD_ATTEMPT" -lt "$BUILD_MAX_ATTEMPTS" ] \
+      && grep -qiE 'PERMISSION_DENIED|permission_denied|HTTPError 403|HTTP[[:space:]/:]+403|status[[:space:]:=]+403|does not have storage\.objects' "$BUILD_SUBMIT_LOG"; then
+    rm -f "$BUILD_SUBMIT_LOG"
+    BUILD_SUBMIT_LOG=""
+    BUILD_RETRY_DELAY=$((BUILD_ATTEMPT * 15))
+    echo "  ⚠ Cloud Build hit transient IAM propagation delay (attempt ${BUILD_ATTEMPT}/${BUILD_MAX_ATTEMPTS}); retrying in ${BUILD_RETRY_DELAY}s..."
+    sleep "$BUILD_RETRY_DELAY"
+    continue
+  fi
+  rm -f "$BUILD_SUBMIT_LOG"
+  BUILD_SUBMIT_LOG=""
+  exit 1
+done
+
+# Cloud Build reports the digest of the image it actually pushed. Using that
+# immutable image for both services prevents a later :latest push from changing
+# which code this deploy promotes between the worker and app steps.
+if ! IMAGE_DIGEST=$(gcloud builds describe "$BUILD_ID" \
+  --project="$PROJECT" --region="$REGION" --format=json \
+  | python3 deploy/resolve_build_image.py digest "$IMAGE"); then
+  echo "ERROR: could not verify the image digest from build ${BUILD_ID}; refusing to deploy a mutable image tag." >&2
+  exit 1
+fi
+DEPLOY_IMAGE="${IMAGE%:*}@${IMAGE_DIGEST}"
+echo "✓ Verified build ${BUILD_ID}; deploying immutable image ${DEPLOY_IMAGE}"
+
+phase "Completing overlapped infrastructure setup..."
+if ! wait "$INFRA_SETUP_PID"; then
+  INFRA_SETUP_PID=""
+  exit 1
+fi
+INFRA_SETUP_PID=""
+cat "$INFRA_SETUP_LOG"
+rm -f "$INFRA_SETUP_LOG"
+INFRA_SETUP_LOG=""
 
 # --- Cloud Run: worker (private, Cloud-Tasks-invoked) --------------------------
+# Cloud Run natively serves https://worker-${PROJECT_NUMBER}.${REGION}.run.app
+# on both first deploy and all subsequent deploys (listed in
+# metadata.annotations."run.googleapis.com/urls"). Using the deterministic
+# regional URL consistently avoids a second app revision rollout on cold deploy
+# and keeps warm redeploys 100% idempotent.
+WORKER_URL="https://worker-${PROJECT_NUMBER}.${REGION}.run.app"
 if [ "$APP_ONLY" = "1" ]; then
   phase "Reusing existing 'worker' Cloud Run service (--app-only)..."
   echo "[skip] Deploying 'worker' — skipped (--app-only); reusing the live service."
-  # The app deploy below needs WORKER_URL; read it from the live worker.
-  WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)' 2>/dev/null || true)
-  if [ -z "$WORKER_URL" ]; then
+  if ! gcloud run services describe worker --region=$REGION --project=$PROJECT >/dev/null 2>&1; then
     echo "ERROR: --app-only given but no existing 'worker' service in ${PROJECT}/${REGION}." >&2
     echo "       Deploy once without --app-only, then re-run with --app-only." >&2
     exit 1
   fi
   echo "  Reusing worker: ${WORKER_URL}"
 else
-  phase "Deploying 'worker' Cloud Run service (private)..."
-  # GUNICORN_TIMEOUT just above the worker's 1800s Cloud Run request timeout so
-  # gunicorn reaps a thread only AFTER Cloud Run has already returned, never
-  # killing a legitimate long render mid-flight. (D7)
-  gcloud run deploy worker --image "$IMAGE" --region $REGION --project $PROJECT \
+  phase "Deploying 'worker' Cloud Run service..."
+  gcloud run deploy worker --image "$DEPLOY_IMAGE" --region "$REGION" --project "$PROJECT" \
     --cpu=8 --memory=16G --timeout=1800 --no-allow-unauthenticated \
     --service-account="$RUNTIME_SA" \
     --set-env-vars=ROLE=worker,GUNICORN_TIMEOUT=1830
-  WORKER_URL=$(gcloud run services describe worker --region=$REGION --project=$PROJECT --format='value(status.url)')
-  echo "✓ Worker deployed: ${WORKER_URL}"
-
-  # The only run.invoker grant the runtime SA gets: service-scoped to the
-  # worker, exactly what the Cloud-Tasks-minted OIDC tokens need to invoke it.
-  # (There is no project-wide run.invoker, so the app cannot invoke other
-  # Cloud Run services.)
-  echo "Granting service-scoped run.invoker on 'worker' to ${RUNTIME_SA}..."
   add_run_invoker_binding worker "$REGION" "$PROJECT" "serviceAccount:${RUNTIME_SA}"
+  echo "✓ Worker deployed: ${WORKER_URL}"
 fi
 
 # --- Cloud Run: app (UI + same-origin /api control plane) -----------------------
@@ -904,11 +1051,11 @@ IAP_FLAG_AVAILABLE=true
 # IAP front door. The --iap flag (built-in IAP for Cloud Run, GA March 2026) may
 # not exist on older gcloud installs — gate it behind a CLI capability check and
 # fall back to a private deploy + manual enable instruction.
-if ! gcloud run deploy --help 2>/dev/null | grep -q -- '--iap'; then
+if ! gcloud run deploy --help 2>/dev/null | grep -- '--iap' >/dev/null; then
   IAP_FLAG_AVAILABLE=false
 fi
 if [ "$IAP_FLAG_AVAILABLE" = "true" ]; then
-  gcloud run deploy app --image "$IMAGE" --region $REGION --project $PROJECT \
+  gcloud run deploy app --image "$DEPLOY_IMAGE" --region $REGION --project $PROJECT \
     --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated --iap \
     --service-account="$RUNTIME_SA" \
     --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI},DICTATION_ENABLED=${DICTATION_ENABLED},DICTATION_MODE=${DICTATION_MODE}
@@ -920,7 +1067,7 @@ else
   # step if 'services update' lacks --iap too.
   echo "⚠ 'gcloud run deploy' lacks --iap; deploying the app private, then"
   echo "  enabling IAP via 'gcloud run services update'."
-  gcloud run deploy app --image "$IMAGE" --region $REGION --project $PROJECT \
+  gcloud run deploy app --image "$DEPLOY_IMAGE" --region $REGION --project $PROJECT \
     --cpu=2 --memory=2Gi --timeout=300 --min-instances=${APP_MIN_INSTANCES} --no-allow-unauthenticated \
     --service-account="$RUNTIME_SA" \
     --set-env-vars=ROLE=app,AUTH_MODE=iap,WORKER_URL=${WORKER_URL},IAP_AUDIENCE=${IAP_AUDIENCE},FIRESTORE_DB_UI=${FIRESTORE_DB_UI},DICTATION_ENABLED=${DICTATION_ENABLED},DICTATION_MODE=${DICTATION_MODE}
@@ -941,6 +1088,63 @@ echo "Granting service-scoped run.invoker on 'app' to the IAP service agent..."
 add_run_invoker_binding app "$REGION" "$PROJECT" "serviceAccount:${IAP_SA}"
 APP_URL=$(gcloud run services describe app --region=$REGION --project=$PROJECT --format='value(status.url)')
 echo "✓ App deployed: ${APP_URL}"
+
+phase "Seeding Firestore config after both services are deployed..."
+# --- Seed Firestore config (front-door topology) --------------------------------
+echo "[>] Adding default Scene Machine configurations to Firestore..."
+ADC_TOKEN=$(gcloud auth application-default print-access-token)
+CONFIG_SEED_STATUS=$(curl -s -X PATCH \
+"https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/global" \
+  -H "Authorization: Bearer ${ADC_TOKEN}" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  -H "Content-Type: application/json" \
+  -o /dev/null -w '%{http_code}' \
+  -d @<(envsubst < ./firestore_config_frontdoor.template.json))
+if [ "$CONFIG_SEED_STATUS" != "200" ]; then
+  echo "ERROR: seeding the UI config (config/global) failed (HTTP ${CONFIG_SEED_STATUS:-no response})." >&2
+  echo "       The app's backend wiring was not written; aborting." >&2
+  exit 1
+fi
+
+MODELS_SEED_STATUS=$(python3 scripts/seed_config_models.py convert < ui/definitions/models.json | curl -s -X PATCH \
+"https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/models" \
+  -H "Authorization: Bearer ${ADC_TOKEN}" \
+  -H "x-goog-user-project: ${PROJECT}" \
+  -H "Content-Type: application/json" \
+  -o /dev/null -w '%{http_code}' \
+  -d @-)
+if [ "$MODELS_SEED_STATUS" != "200" ]; then
+  echo "ERROR: seeding the model catalog (config/models) failed (HTTP ${MODELS_SEED_STATUS:-no response})." >&2
+  echo "       The runtime model catalog was not written; aborting." >&2
+  exit 1
+fi
+
+if ! ANNOUNCEMENT_SEED_STATUS=$(GOOGLE_CLOUD_PROJECT="$PROJECT" \
+  GOOGLE_OAUTH_ACCESS_TOKEN="${ADC_TOKEN}" \
+  python3 scripts/seed_announcement.py seed \
+  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config?documentId=announcement" \
+  "$ANNOUNCEMENT_MARKDOWN_FILE" "$ANNOUNCEMENT_ENABLED"); then
+  echo "ERROR: seeding homepage announcement failed." >&2
+  echo "       Existing operator content was not overwritten; aborting." >&2
+  exit 1
+fi
+
+for template in creative_templates/*.json; do
+  [ -e "$template" ] || continue
+  template_name=$(basename "$template" .json)
+
+  TEMPLATE_SEED_STATUS=$(curl -s -X PATCH \
+  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/creativeTemplates/${template_name}" \
+    -H "Authorization: Bearer ${ADC_TOKEN}" \
+    -H "x-goog-user-project: ${PROJECT}" \
+    -H "Content-Type: application/json" \
+    -o /dev/null -w '%{http_code}' \
+    -d @"$template")
+  if [ "$TEMPLATE_SEED_STATUS" != "200" ]; then
+    echo "ERROR: seeding creative template '${template_name}' failed (HTTP ${TEMPLATE_SEED_STATUS:-no response})." >&2
+    exit 1
+  fi
+done
 # Nothing was predicted: the image carries only same-origin URLs, so the app and
 # its status viewer work on this first deploy. The actual Cloud Run hosts,
 # known only now, feed the GCS bucket CORS list below, so the browser
@@ -956,92 +1160,6 @@ phase "Applying GCS bucket CORS for returned Cloud Run origins..."
 export UI_CORS_ORIGINS
 envsubst < ./gcs-cors-config.template.json > ./gcs-cors-config.json
 gcloud storage buckets update gs://$GCS_BUCKET --cors-file=./gcs-cors-config.json --project=$PROJECT
-
-# --- SceneMachineUser custom role -----------------------------------------------
-phase "Ensuring SceneMachineUser custom role matches user-role.yaml..."
-if ! gcloud iam roles describe SceneMachineUser --project=$PROJECT &> /dev/null; then
-  echo "SceneMachineUser role doesn't exist. Creating it..."
-  gcloud iam roles create SceneMachineUser --project=$PROJECT --file=./user-role.yaml
-else
-  # Update (not skip) so an edited user-role.yaml — e.g. the slimmed
-  # IAP-access-only permission set — actually takes effect on a project where the
-  # role already exists, instead of being silently ignored. '|| true' tolerates
-  # the benign "no changes to apply" case on a re-deploy; the role keeps its
-  # IAP-access permission regardless, so user admission is never at risk here.
-  echo "SceneMachineUser role exists. Syncing it to user-role.yaml..."
-  gcloud iam roles update SceneMachineUser --project=$PROJECT --file=./user-role.yaml --quiet || true
-fi
-
-# --- Seed Firestore config (front-door topology) --------------------------------
-# Uses firestore_config_frontdoor.template.json: the UI Firestore config doc with
-# the backend base fixed to the same-origin '/api' and no API key. Owner-
-# credential REST writes bypass the (deliberately read-only) config rules — by
-# design.
-phase "Adding default Scene Machine configurations to Firestore..."
-# Capture the HTTP status (as the other REST calls in this script do): a non-200
-# here means the UI's same-origin '/api' wiring was NOT written, so fail loudly
-# instead of reporting a successful deploy with a broken app config.
-CONFIG_SEED_STATUS=$(curl -s -X PATCH \
-"https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/global" \
-  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-  -H "x-goog-user-project: ${PROJECT}" \
-  -H "Content-Type: application/json" \
-  -o /dev/null -w '%{http_code}' \
-  -d @<(envsubst < ./firestore_config_frontdoor.template.json))
-if [ "$CONFIG_SEED_STATUS" != "200" ]; then
-  echo "ERROR: seeding the UI config (config/global) failed (HTTP ${CONFIG_SEED_STATUS:-no response})." >&2
-  echo "       The app's backend wiring was not written; aborting." >&2
-  exit 1
-fi
-
-# The model catalog: config/models is overwritten from the repo file on every
-# deploy. Operators may edit the live doc between deploys; the pre-flight
-# preview above showed what this write replaces. Same fail-loudly contract as
-# the config/global seed.
-MODELS_SEED_STATUS=$(python3 scripts/seed_config_models.py convert < ui/definitions/models.json | curl -s -X PATCH \
-"https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config/models" \
-  -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-  -H "x-goog-user-project: ${PROJECT}" \
-  -H "Content-Type: application/json" \
-  -o /dev/null -w '%{http_code}' \
-  -d @-)
-if [ "$MODELS_SEED_STATUS" != "200" ]; then
-  echo "ERROR: seeding the model catalog (config/models) failed (HTTP ${MODELS_SEED_STATUS:-no response})." >&2
-  echo "       The runtime model catalog was not written; aborting." >&2
-  exit 1
-fi
-
-# The announcement is operator-authored after the first deploy. Firestore's
-# create operation makes the initial seed race-safe and returns 409 when an
-# operator document already exists; either result is a successful deploy.
-if ! ANNOUNCEMENT_SEED_STATUS=$(GOOGLE_CLOUD_PROJECT="$PROJECT" \
-  GOOGLE_OAUTH_ACCESS_TOKEN="$(gcloud auth application-default print-access-token)" \
-  python3 scripts/seed_announcement.py seed \
-  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/config?documentId=announcement" \
-  "$ANNOUNCEMENT_MARKDOWN_FILE" "$ANNOUNCEMENT_ENABLED"); then
-  echo "ERROR: seeding homepage announcement failed." >&2
-  echo "       Existing operator content was not overwritten; aborting." >&2
-  exit 1
-fi
-
-for template in creative_templates/*.json; do
-  # Skip cleanly if the directory is empty/absent: without 'nullglob' the glob
-  # would otherwise stay literal and run the body once on a non-existent file.
-  [ -e "$template" ] || continue
-  template_name=$(basename "$template" .json)
-
-  TEMPLATE_SEED_STATUS=$(curl -s -X PATCH \
-  "https://firestore.googleapis.com/v1/projects/${PROJECT}/databases/${FIRESTORE_DB_UI}/documents/creativeTemplates/${template_name}" \
-    -H "Authorization: Bearer $(gcloud auth application-default print-access-token)" \
-    -H "x-goog-user-project: ${PROJECT}" \
-    -H "Content-Type: application/json" \
-    -o /dev/null -w '%{http_code}' \
-    -d @"$template")
-  if [ "$TEMPLATE_SEED_STATUS" != "200" ]; then
-    echo "ERROR: seeding creative template '${template_name}' failed (HTTP ${TEMPLATE_SEED_STATUS:-no response})." >&2
-    exit 1
-  fi
-done
 
 # --- Automated provisioning complete: timing checkpoint ----------------------------
 close_phase

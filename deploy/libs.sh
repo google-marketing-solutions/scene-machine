@@ -200,17 +200,28 @@ add_iam_binding() {
   fi
 
   if [ -n "$role" ] && [ -n "$member" ] && [ -n "$project" ]; then
-    if gcloud projects get-iam-policy "$project" \
-        --flatten="bindings[].members" \
-        --filter="bindings.role=${role} AND bindings.members=${member}" \
-        --format="value(bindings.role)" 2>/dev/null | grep -q .; then
+    if [ "${_CACHED_IAM_PROJECT:-}" != "$project" ]; then
+      if _CACHED_PROJECT_IAM_POLICY=$(gcloud projects get-iam-policy "$project" \
+          --flatten="bindings[].members" \
+          --format="value(bindings.role,bindings.members)" 2>/dev/null); then
+        _CACHED_IAM_PROJECT="$project"
+      else
+        _CACHED_IAM_PROJECT=""
+        _CACHED_PROJECT_IAM_POLICY=""
+      fi
+    fi
+    if [ "${_CACHED_IAM_PROJECT:-}" = "$project" ] \
+        && grep -Fqx "${role}"$'\t'"${member}" <<<"$_CACHED_PROJECT_IAM_POLICY"; then
       echo "  ✓ ${member} already has ${role} — skipping."
       return 0
     fi
   fi
 
   _retry_iam_write "$label" "$propagating_runtime_sa" \
-    gcloud projects add-iam-policy-binding "$@"
+    gcloud projects add-iam-policy-binding "$@" || return $?
+  if [ "${_CACHED_IAM_PROJECT:-}" = "$project" ] && [ -n "$role" ] && [ -n "$member" ]; then
+    _CACHED_PROJECT_IAM_POLICY="${_CACHED_PROJECT_IAM_POLICY}"$'\n'"${role}"$'\t'"${member}"
+  fi
 }
 
 # Service-scoped run.invoker on a Cloud Run SERVICE, with the same pre-check +

@@ -12,45 +12,50 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# --- Build stage -------------------------------------------------------------
-# The full python:3.13 image carries the compilers/headers that a dependency
-# without a prebuilt cp313 wheel would need. Install everything into a
-# relocatable prefix (/install) that the slim runtime can drop in as-is, so the
-# build can never fail for lack of a compiler on the slim base.
-FROM python:3.13@sha256:e72bfff2ccf413e3c329074d643fac616d7e1dfe85ac57e527f1d13cd8e0ee6c AS builder
+# ==============================================================================
+# Stage 1: OS Runtime + FFmpeg (Runs concurrently with Stage 2 under BuildKit!)
+# ==============================================================================
+FROM python:3.13-slim@sha256:c33f0bc4364a6881bed1ec0cc2665e6c53c87a43e774aaeab88e6f17af105e4f AS runtime-base
 
 ENV PYTHONUNBUFFERED=1
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --require-hashes --prefix=/install -r requirements.txt
-
-# --- Runtime stage -----------------------------------------------------------
-# python:3.13-slim is ~850 MB smaller than the full image: faster to push to the
-# registry and faster to cold-start. It carries only ffmpeg, the dependencies
-# built above, and the app — no compilers or build cruft.
-FROM python:3.13-slim@sha256:c33f0bc4364a6881bed1ec0cc2665e6c53c87a43e774aaeab88e6f17af105e4f
-
-ENV PYTHONUNBUFFERED=1
-
-# ffmpeg is required by the worker's video actions (combine/convert). One layer,
-# no recommended extras, apt lists dropped to keep the image small.
+# Exclude Debian recommended GUI/X11/Mesa packages.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg \
-  && rm -rf /var/lib/apt/lists/*
-
-# Run as a non-root user with a real home, and give it a writable app dir it
-# owns. The worker's video actions write temp files using bare relative names
-# into the process CWD (== WORKDIR), so WORKDIR must be owned by this user.
-RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
+  && rm -rf /var/lib/apt/lists/* \
+  && useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
   && mkdir -p /app \
   && chown appuser:appuser /app
 
-WORKDIR /app
+# ==============================================================================
+# Stage 2: Python Dependency Builder via official Astral uv (digest-pinned)
+#          (Executes in ~3-6s *while* Stage 1 is still running apt-get!)
+# ==============================================================================
+FROM python:3.13-slim@sha256:c33f0bc4364a6881bed1ec0cc2665e6c53c87a43e774aaeab88e6f17af105e4f AS venv-builder
 
-# Drop in the dependencies built in the full image (same python 3.13, so the
-# installed packages and gunicorn entry point land on /usr/local and PATH).
-# Left root-owned and world-readable — import/exec only need read access.
-COPY --from=builder /install /usr/local
+COPY --from=ghcr.io/astral-sh/uv:0.12.18@sha256:3adc3706091ce7c2fe595e669628caedd6d951551b92b258b7e7dbe06d9440bc /uv /bin/uv
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /app
+COPY requirements.txt .
+RUN uv venv /opt/venv \
+  && uv pip install --no-cache --only-binary :all: --require-hashes -r requirements.txt
+
+# ==============================================================================
+# Stage 3: Final Image Assembly (< 1 second merge)
+# ==============================================================================
+FROM runtime-base AS final
+
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+COPY --from=venv-builder /opt/venv /opt/venv
+
 
 # Runtime files only (not the whole repo): explicit copies keep docs, examples,
 # tests, deploy scripts, and .git out of the image. Root-owned but world-readable
