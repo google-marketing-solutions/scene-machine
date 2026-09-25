@@ -1156,6 +1156,10 @@ def test_duration_non_int_rejected_when_resolution_omitted():
 def test_non_bool_generate_audio_rejected(bad_audio):
   params = {**_FULL_VALID_VIDEO, 'generate_audio': bad_audio}
   assert _code(_sub('generate_video', params)) == 'MALFORMED_SUBMISSION'
+  # The type check runs before capability checks, so an audio-always-on model
+  # reports the malformed value rather than AUDIO_REQUIRED.
+  omni = {**_OMNI, 'generate_audio': bad_audio}
+  assert _code(_sub('generate_video', omni)) == 'MALFORMED_SUBMISSION'
 
 
 @pytest.mark.parametrize('good_audio', (True, False))
