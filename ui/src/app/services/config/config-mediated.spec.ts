@@ -1075,6 +1075,162 @@ describe('ConfigService (mediated data plane)', () => {
       errorSpy.mockRestore();
     });
 
+    it('leaves projectConfig.error() undefined after load failure, setting projectLoadError instead', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') return of({});
+        return throwError(() => new HttpErrorResponse({status: 500}));
+      });
+
+      service.loadProjectConfig('proj-err', 'full');
+      await vi.waitFor(() => {
+        expect(service.projectLoadError()).toBe(true);
+      });
+
+      // rxResource catches the error and degrades to DEFAULT_PROJECT_CONFIG,
+      // so projectConfig.error() is permanently undefined.
+      expect(service.projectConfig.error()).toBeUndefined();
+      expect(service.setupInputsError()).toBe(true);
+      expect(service.setupInputsLoaded()).toBe(false);
+      errorSpy.mockRestore();
+    });
+
+    it('evaluates setupInputsLoaded to false when projectLoadError is set even if id matches', () => {
+      service.projectConfig.value.set({
+        ...service.projectConfig.value(),
+        id: 'proj-matched',
+      });
+      service.loadProjectConfig('proj-matched', 'full');
+      expect(service.setupInputsLoaded()).toBe(true);
+
+      // When a load error is recorded, setupInputsLoaded must be false even though
+      // value().id === projectId() is true.
+      (service as any).projectLoadErrorValue.set(new Error('load failed'));
+      expect(service.projectLoadError()).toBe(true);
+      expect(service.setupInputsLoaded()).toBe(false);
+    });
+
+    it('evaluates setupInputsLoaded to false on 404 with in-flight autosave to prevent destructive full PATCH', async () => {
+      const editorProject = {
+        ...service.projectConfig.value(),
+        id: 'proj-hydrate',
+        inputConfig: undefined,
+      };
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') return of({});
+        if (url.includes('/api/projects/proj-hydrate')) {
+          if (url.endsWith('?view=editor')) {
+            return of(editorProject);
+          }
+          return throwError(() => new HttpErrorResponse({status: 404}));
+        }
+        return of({});
+      });
+
+      service.loadProjectConfig('proj-hydrate', 'editor');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().id).toBe('proj-hydrate');
+      });
+      markPersisted('proj-hydrate');
+
+      const inFlightPatch = new Subject<any>();
+      httpClientMock.patch.mockReturnValue(inFlightPatch);
+      service.updateProjectConfig({name: 'in-flight'});
+      service.saveNow();
+
+      service.loadProjectConfig('proj-hydrate', 'full');
+      await vi.waitFor(() => {
+        expect(httpClientMock.get).toHaveBeenCalledWith(
+          '/api/projects/proj-hydrate',
+        );
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // On 404 with localProjectAtLoad, the loader preserves local latestSource so the user
+      // is not disrupted, but setupInputsLoaded MUST be false because full server inputs were not hydrated.
+      expect(service.setupInputsLoaded()).toBe(false);
+      expect(service.projectConfig.value().id).toBe('proj-hydrate');
+      expect(service.projectConfig.value().inputConfig).toBeUndefined();
+      expect(service.setupInputsError()).toBe(true);
+      expect(service.projectLoadError()).toBe(false);
+    });
+
+    it('navigates home and resets project on 404 without local copy', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') return of({});
+        return throwError(() => new HttpErrorResponse({status: 404}));
+      });
+
+      service.loadProjectConfig('non-existent', 'full');
+      await vi.waitFor(() => {
+        expect(httpClientMock.get).toHaveBeenCalledWith(
+          '/api/projects/non-existent',
+        );
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(service.setupInputsLoaded()).toBe(false);
+      expect(service.projectConfig.value().id).toBe('');
+      expect(TestBed.inject(Router).navigate).toHaveBeenCalledWith(['/']);
+      errorSpy.mockRestore();
+    });
+
+    it('yields setupInputsLoaded === true on normal successful load', async () => {
+      const fullProject = {
+        ...service.projectConfig.value(),
+        id: 'proj-ok',
+        inputConfig: {products: [], composition: 'ok'},
+      };
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') return of({});
+        if (url === '/api/projects/proj-ok') return of(fullProject);
+        return of({});
+      });
+
+      service.loadProjectConfig('proj-ok', 'full');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().id).toBe('proj-ok');
+      });
+
+      expect(service.projectLoadError()).toBe(false);
+      expect(service.setupInputsLoaded()).toBe(true);
+    });
+
+    it('keeps a locally created project ready after leaving an editor route or failed load', async () => {
+      httpClientMock.get.mockImplementation((url: string) => {
+        if (url === '/api/config') return of({});
+        if (url === '/api/projects/project-a?view=editor') {
+          return of({...service.projectConfig.value(), id: 'project-a'});
+        }
+        return of({});
+      });
+      service.loadProjectConfig('project-a', 'editor');
+      await vi.waitFor(() => {
+        expect(service.projectConfig.value().id).toBe('project-a');
+      });
+      (service as any).projectLoadErrorValue.set(new Error('stale failure'));
+      httpClientMock.get.mockClear();
+
+      service.resetProjectConfig();
+      service.setNewProject('project-b');
+      expect(service.setupInputsLoaded()).toBe(true);
+      service.saveNow();
+
+      service.loadProjectConfig('project-b', 'full');
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      expect(httpClientMock.get).not.toHaveBeenCalledWith(
+        '/api/projects/project-b',
+      );
+      expect(service.projectLoadError()).toBe(false);
+      expect(service.setupInputsError()).toBe(false);
+      expect(service.setupInputsLoaded()).toBe(true);
+      expect(service.projectConfig.value().id).toBe('project-b');
+    });
+
     it('keeps a locally created full project ready after leaving another project', () => {
       service.projectConfig.value.set({
         ...service.projectConfig.value(),

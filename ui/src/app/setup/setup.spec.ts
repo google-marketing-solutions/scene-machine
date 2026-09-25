@@ -280,6 +280,121 @@ describe('Setup full-load failure', () => {
       fixture.nativeElement.querySelector('.setup-container'),
     ).not.toBeNull();
   });
+
+  it('does not show an error before a project load or while the load is pending', () => {
+    expect(config.setupInputsError()).toBe(false);
+    expect(fixture.nativeElement.textContent).not.toContain(
+      'Could not load this project',
+    );
+    config.loadProjectConfig('pending-project', 'full');
+    expect(config.setupInputsError()).toBe(false);
+    TestBed.tick();
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelector('mat-spinner')).not.toBeNull();
+    expect(config.setupInputsError()).toBe(false);
+    http
+      .expectOne('/api/projects/pending-project')
+      .flush('failed', {status: 500, statusText: 'Server Error'});
+  });
+
+  it('offers recovery without blank inputs or full PATCH after both load and pending save return 404', async () => {
+    (
+      config as unknown as {persistedProjectIds: Set<string>}
+    ).persistedProjectIds.add('proj-unsettled');
+
+    config.loadProjectConfig('proj-unsettled', 'editor');
+    TestBed.tick();
+    const editorReq = http.expectOne(
+      '/api/projects/proj-unsettled?view=editor',
+    );
+    editorReq.flush({
+      id: 'proj-unsettled',
+      name: 'Editor Project',
+      aspectRatio: '16:9',
+      resolution: '720p',
+      candidateDurationSeconds: 4,
+      generateAudio: false,
+      numberOfCandidates: 1,
+      model: 'veo-default',
+      inputConfig: undefined,
+      storyboard: [],
+      audioTracks: [],
+      visualOverlays: [],
+    });
+    TestBed.tick();
+    await fixture.whenStable();
+
+    config.updateProjectConfig({name: 'In-Flight'});
+    config.saveNow();
+    const inFlightPatch = http.expectOne('/api/projects/proj-unsettled/editor');
+
+    config.loadProjectConfig('proj-unsettled', 'full');
+    expect(config.setupInputsError()).toBe(false);
+    TestBed.tick();
+    expect(config.setupInputsError()).toBe(false);
+    const fullGet = http.expectOne('/api/projects/proj-unsettled');
+    fullGet.flush('Not found', {status: 404, statusText: 'Not Found'});
+    TestBed.tick();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(config.setupInputsLoaded()).toBe(false);
+    expect(config.projectConfig.value().inputConfig).toBeUndefined();
+    http.expectNone('/api/projects/proj-unsettled');
+
+    inFlightPatch.flush('Not found', {status: 404, statusText: 'Not Found'});
+    TestBed.tick();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(config.projectLoadError()).toBe(false);
+    expect(config.setupInputsError()).toBe(true);
+    expect(fixture.nativeElement.querySelector('mat-spinner')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain(
+      'Could not load this project',
+    );
+    const home = fixture.nativeElement.querySelector('a[href="/"]');
+    expect(home?.textContent).toContain('Back to projects');
+    expect(fixture.nativeElement.querySelector('.setup-container')).toBeNull();
+    expect(config.projectConfig.value().inputConfig).toBeUndefined();
+    http.expectNone('/api/projects/proj-unsettled');
+
+    const retry = fixture.nativeElement.querySelector(
+      '.loading-state button',
+    ) as HTMLButtonElement | null;
+    expect(retry?.textContent).toContain('Retry');
+    retry?.click();
+    TestBed.tick();
+    const retryGet = http.expectOne('/api/projects/proj-unsettled');
+    retryGet.flush({
+      id: 'proj-unsettled',
+      name: 'Server Name',
+      aspectRatio: '16:9',
+      resolution: '720p',
+      candidateDurationSeconds: 4,
+      generateAudio: false,
+      numberOfCandidates: 1,
+      model: 'veo-default',
+      inputConfig: {products: [], composition: 'Recovered composition'},
+      storyboard: [],
+      audioTracks: [],
+      visualOverlays: [],
+    });
+    TestBed.tick();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(config.setupInputsError()).toBe(false);
+    expect(config.setupInputsLoaded()).toBe(true);
+    expect(config.projectConfig.value().name).toBe('In-Flight');
+    expect(config.projectConfig.value().inputConfig).toEqual({
+      products: [],
+      composition: 'Recovered composition',
+    });
+    expect(
+      fixture.nativeElement.querySelector('.setup-container'),
+    ).not.toBeNull();
+  });
 });
 
 describe('Setup image upload', () => {

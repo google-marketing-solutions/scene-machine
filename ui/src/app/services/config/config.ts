@@ -644,6 +644,7 @@ export class ConfigService {
   private projectId = signal<string | null>(null);
   private projectView = signal<ProjectConfigView>('full');
   private projectLoadErrorValue = signal<unknown>(undefined);
+  private setupInputsHydrated = signal<boolean>(false);
   /**
    * Mediated mode only: ids known to exist server-side (loaded via GET or
    * already POSTed). First save of a new project goes through
@@ -946,6 +947,7 @@ export class ConfigService {
     loader: async ({params, abortSignal}) => {
       if (params.projectId === null) {
         this.projectLoadErrorValue.set(undefined);
+        this.setupInputsHydrated.set(false);
         return {...this.DEFAULT_PROJECT_CONFIG()};
       }
       const isCurrentLoad = () =>
@@ -954,6 +956,7 @@ export class ConfigService {
         this.projectView() === params.view;
       if (isCurrentLoad()) {
         this.projectLoadErrorValue.set(undefined);
+        this.setupInputsHydrated.set(false);
       }
       const localProjectAtLoad = this.projectWithUnsettledSave(
         params.projectId,
@@ -967,6 +970,9 @@ export class ConfigService {
         if (isCurrentLoad()) {
           this.projectLoadErrorValue.set(undefined);
           this.persistedProjectIds.add(params.projectId);
+          if (params.view === 'full') {
+            this.setupInputsHydrated.set(true);
+          }
         }
         if (localProjectAtLoad) {
           const latest =
@@ -1021,16 +1027,32 @@ export class ConfigService {
       (!!this.projectLoadErrorValue() || !!this.projectConfig.error()),
   );
   readonly setupInputsError = computed(
-    () => this.projectView() === 'full' && this.projectLoadError(),
-  );
-  readonly setupInputsLoaded = computed(
     () =>
       this.projectView() === 'full' &&
-      !this.projectConfig.isLoading() &&
-      !this.projectConfig.error() &&
-      (this.projectConfig.value().id === this.projectId() ||
-        (this.projectId() === null && !!this.projectConfig.value().id)),
+      (this.projectLoadError() ||
+        (this.projectId() !== null &&
+          !this.projectConfig.isLoading() &&
+          this.projectConfig.value().id === this.projectId() &&
+          !this.setupInputsHydrated())),
   );
+  /**
+   * Setup may expose its input fields only when the current project's
+   * inputConfig came from a successful full server load, or the project was
+   * created locally.
+   */
+  readonly setupInputsLoaded = computed(() => {
+    const isLocalNewProject =
+      this.projectId() === null && !!this.projectConfig.value().id;
+    const isHydratedServerProject =
+      this.setupInputsHydrated() &&
+      this.projectConfig.value().id === this.projectId();
+    return (
+      this.projectView() === 'full' &&
+      !this.projectConfig.isLoading() &&
+      !this.projectLoadError() &&
+      (isLocalNewProject || isHydratedServerProject)
+    );
+  });
 
   private normalizeLoadedProject(data: ProjectConfig): ProjectConfig {
     if (data.renderRuns) {
@@ -1491,7 +1513,10 @@ export class ConfigService {
     // would otherwise be silently dropped once the config resets (the
     // post-reset emission has id === '' / shouldSave === false).
     this.flushPendingSave();
+    this.projectLoadErrorValue.set(undefined);
+    this.setupInputsHydrated.set(false);
     this.projectId.set(null);
+    this.projectView.set('full');
     this.projectConfig.set({...this.DEFAULT_PROJECT_CONFIG()});
     this.shouldSave = false;
   }
@@ -1510,6 +1535,9 @@ export class ConfigService {
     // Not persisted yet: the first autosave POSTs /api/projects, where the
     // server stamps createdBy from the verified identity. Left undefined here.
     this.persistedProjectIds.delete(uuid);
+    this.projectLoadErrorValue.set(undefined);
+    this.setupInputsHydrated.set(true);
+    this.projectView.set('full');
     const project = {
       ...this.DEFAULT_PROJECT_CONFIG(),
       id: uuid,

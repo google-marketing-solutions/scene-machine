@@ -20,6 +20,7 @@
     <button mat-button type="button" (click)="config.reloadProjectConfig()">
       Retry
     </button>
+    <a mat-button routerLink="/">Back to projects</a>
   </div>
 } @else if (setupLoading() || !setupReady()) {
   <div class="loading-state">
