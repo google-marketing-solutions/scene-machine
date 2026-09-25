@@ -903,6 +903,10 @@ def test_add_iam_binding_caches_policy_and_recovers_after_fetch_error(tmp_path):
       f'  printf "roles/datastore.user\\t{sa_member}\\n"\n'
       "  exit 0\n"
       "fi\n"
+      'if [[ "$1 $2" == "projects add-iam-policy-binding"'
+      ' && "$*" == *"roles/run.admin"* ]]; then\n'
+      "  exit 1\n"
+      "fi\n"
       "exit 0\n"
   )
   fake_gcloud.chmod(0o755)
@@ -916,6 +920,14 @@ def test_add_iam_binding_caches_policy_and_recovers_after_fetch_error(tmp_path):
     add_iam_binding p1 --member="{sa_member}" --role="roles/datastore.user"
     add_iam_binding p1 --member="{sa_member}" --role="roles/aiplatform.user"
     add_iam_binding p1 --member="{sa_member}" --role="roles/aiplatform.user"
+    if add_iam_binding p1 --member="{sa_member}" --role="roles/run.admin"; then
+      echo "UNEXPECTED_ADD_SUCCESS" >&2
+      exit 1
+    fi
+    if grep -Fq "roles/run.admin" <<<"$_CACHED_PROJECT_IAM_POLICY"; then
+      echo "CACHE_POISONED" >&2
+      exit 1
+    fi
   """
   proc = subprocess.run(
       ["bash", "-c", script], capture_output=True, text=True, check=False
@@ -924,7 +936,10 @@ def test_add_iam_binding_caches_policy_and_recovers_after_fetch_error(tmp_path):
   calls = calls_log.read_text().splitlines()
   get_calls = [c for c in calls if c.startswith("projects get-iam-policy")]
   add_calls = [
-      c for c in calls if c.startswith("projects add-iam-policy-binding")
+      c
+      for c in calls
+      if c.startswith("projects add-iam-policy-binding")
+      and "roles/run.admin" not in c
   ]
   assert len(get_calls) == 2, f"Expected 2 get-iam-policy calls, got: {calls}"
   assert (
@@ -965,14 +980,16 @@ def test_deploy_cleanup_trap_dumps_logs_and_unlinks_on_abort(tmp_path):
           "-c",
           f'set -euo pipefail\n{trap_block}\nINFRA_SETUP_LOG="{bg_log}"\n'
           'set -m\n'
-          f'( sleep 30 & echo "$!" > "{child_pid_file}"; wait ) &\n'
+          f'( sleep 30 & echo "$!" > "{child_pid_file}"; wait )'
+          f' </dev/null >>"{bg_log}" 2>&1 &\n'
           'INFRA_SETUP_PID=$!\nset +m\n'
-          f'while [ ! -f "{child_pid_file}" ]; do sleep 0.01; done\n'
+          f'while [ ! -s "{child_pid_file}" ]; do sleep 0.01; done\n'
           'exit 1\n',
       ],
       capture_output=True,
       text=True,
       check=False,
+      timeout=10,
   )
   assert abort_run.returncode == 1
   assert "--- background log:" in abort_run.stderr
@@ -1091,6 +1108,8 @@ def test_build_receipt_resolves_only_its_own_successful_image(tmp_path):
           ]},
       },
       {**receipt, 'results': {'images': []}},
+      {**receipt, 'results': {'images': [{'name': image, 'digest': None}]}},
+      {**receipt, 'results': {'images': [{'name': image, 'digest': 123}]}},
       None,
       {**receipt, 'results': None},
       {**receipt, 'results': {'images': [None]}},
@@ -1101,6 +1120,78 @@ def test_build_receipt_resolves_only_its_own_successful_image(tmp_path):
     )
     assert rejected.returncode != 0
     assert 'Traceback' not in rejected.stderr
+    assert 'expected string or bytes-like' not in rejected.stderr
+
+
+def test_skip_ui_build_fails_fast_and_build_id_failure_clears_log(tmp_path):
+  """--skip-ui-build validates ui/dist early; build-id error clears log."""
+  text = _deploy_sh()
+  start = text.index('if [ "$SKIP_UI_BUILD" != "1" ]; then')
+  end = text.index('# --- Enable services', start)
+  assert end > start
+  skip_block = text[start:end]
+
+  missing = subprocess.run(
+      ['bash', '-c', f'set -euo pipefail\nSKIP_UI_BUILD=1\n{skip_block}\n'],
+      cwd=tmp_path,
+      capture_output=True,
+      text=True,
+      check=False,
+  )
+  assert missing.returncode == 1
+  assert '--skip-ui-build given but ui/dist does not exist' in missing.stderr
+
+  dist = tmp_path / 'ui' / 'dist'
+  dist.mkdir(parents=True)
+  (dist / 'main.js').write_text('const c = {controlPlaneMode:"none"};')
+  dev_dist = subprocess.run(
+      ['bash', '-c', f'set -euo pipefail\nSKIP_UI_BUILD=1\n{skip_block}\n'],
+      cwd=tmp_path,
+      capture_output=True,
+      text=True,
+      check=False,
+  )
+  assert dev_dist.returncode == 1
+  assert 'existing ui/dist was built for local dev' in dev_dist.stderr
+
+  (dist / 'main.js').write_text('const c = {controlPlaneMode:"iap"};')
+  valid_dist = subprocess.run(
+      ['bash', '-c', f'set -euo pipefail\nSKIP_UI_BUILD=1\n{skip_block}\n'],
+      cwd=tmp_path,
+      capture_output=True,
+      text=True,
+      check=False,
+  )
+  assert valid_dist.returncode == 0
+
+  trap_match = re.search(
+      r'(UI_BUILD_PID="";.*?trap cleanup EXIT)', text, re.DOTALL
+  )
+  loop_start = text.index('BUILD_ATTEMPT=0')
+  loop_end = text.index('\n# Cloud Build reports the digest', loop_start)
+  loop_block = text[loop_start:loop_end]
+  script = (
+      'set -euo pipefail\n'
+      f'{trap_match.group(1)}\n'
+      'PROJECT=p REGION=us-central1 BUILD_SUBS=""\n'
+      'run_with_heartbeat() {\n'
+      '  local log="$2"\n'
+      '  echo "Cloud Build finished without receipt URL" > "$log"\n'
+      '  cat "$log"\n'
+      '  return 0\n'
+      '}\n'
+      f'{loop_block}\n'
+  )
+  res = subprocess.run(
+      ['bash', '-c', script],
+      cwd=_REPO,
+      capture_output=True,
+      text=True,
+      check=False,
+  )
+  assert res.returncode == 1
+  assert 'ID could not be verified' in res.stderr
+  assert '--- background log:' not in res.stderr
 
 
 def test_cloud_build_cold_image_still_exports_cache_for_the_next_warm_build(tmp_path):

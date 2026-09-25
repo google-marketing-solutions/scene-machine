@@ -78,7 +78,11 @@ def digest(image: str, receipt: dict[str, Any]) -> str:
   matches = [
       entry.get("digest", "") for entry in images if entry.get("name") == image
   ]
-  if len(matches) != 1 or not re.fullmatch(r"sha256:[0-9a-f]{64}", matches[0]):
+  if (
+      len(matches) != 1
+      or not isinstance(matches[0], str)
+      or not re.fullmatch(r"sha256:[0-9a-f]{64}", matches[0])
+  ):
     raise ValueError(
         "expected exactly one valid digest for the requested image"
     )

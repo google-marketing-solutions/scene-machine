@@ -501,6 +501,15 @@ if [ "$SKIP_UI_BUILD" != "1" ]; then
   ) </dev/null >"$UI_BUILD_LOG" 2>&1 &
   UI_BUILD_PID=$!
   set +m
+elif [ ! -d ui/dist ]; then
+  echo "ERROR: --skip-ui-build given but ui/dist does not exist." >&2
+  echo "       Run a normal deploy once (or 'cd ui && npx ng build') first." >&2
+  exit 1
+elif grep -rqs 'controlPlaneMode:"none"' ui/dist || grep -rqs "controlPlaneMode:'none'" ui/dist; then
+  echo "ERROR: the existing ui/dist was built for local dev (controlPlaneMode 'none'," >&2
+  echo "       sign-in disabled). Refusing to deploy it. Drop --skip-ui-build and run a" >&2
+  echo "       normal deploy to rebuild the UI first." >&2
+  exit 1
 fi
 
 # --- Enable services ---------------------------------------------------------
@@ -965,6 +974,8 @@ while true; do
     # :latest. Fail closed if gcloud's success output lacks its build URL.
     if ! BUILD_ID=$(python3 deploy/resolve_build_image.py build-id \
       "$PROJECT" "$REGION" "$BUILD_SUBMIT_LOG"); then
+      rm -f "$BUILD_SUBMIT_LOG"
+      BUILD_SUBMIT_LOG=""
       echo "ERROR: Cloud Build succeeded but its ID could not be verified; refusing to deploy a mutable image tag." >&2
       exit 1
     fi

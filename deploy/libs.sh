@@ -218,7 +218,7 @@ add_iam_binding() {
   fi
 
   _retry_iam_write "$label" "$propagating_runtime_sa" \
-    gcloud projects add-iam-policy-binding "$@"
+    gcloud projects add-iam-policy-binding "$@" || return $?
   if [ "${_CACHED_IAM_PROJECT:-}" = "$project" ] && [ -n "$role" ] && [ -n "$member" ]; then
     _CACHED_PROJECT_IAM_POLICY="${_CACHED_PROJECT_IAM_POLICY}"$'\n'"${role}"$'\t'"${member}"
   fi
