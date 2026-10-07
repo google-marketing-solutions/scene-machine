@@ -26,6 +26,7 @@ _REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _MODELS = {
     'gemini-3.5-flash': {'family': 'gemini', 'locations': ['global']},
+    'gemini-nano-banana-2.1': {'family': 'image', 'locations': ['global']},
     'gemini-3-pro-image': {'family': 'image', 'locations': ['global']},
     'veo-3.1-generate-001': {'family': 'veo', 'locations': ['global', 'us-central1']},
     'gemini-omni-1.1-flash-preview': {'family': 'omni', 'locations': ['global']},
@@ -63,6 +64,18 @@ def test_omni_video_model_passes_at_global():
 def test_omni_video_model_rejects_regional_location():
   errors = validate_config_models.collect_errors(
       {'VEO_MODEL': 'gemini-omni-1.1-flash-preview', 'VEO_REGION': 'us-central1'},
+      _MODELS)
+  assert any('not allowed' in error for error in errors)
+
+
+def test_nano_banana_2_1_image_model_validation():
+  assert validate_config_models.collect_errors(
+      {'IMAGE_MODEL': 'gemini-nano-banana-2.1',
+       'IMAGE_MODEL_REGION': 'global'},
+      _MODELS) == []
+  errors = validate_config_models.collect_errors(
+      {'IMAGE_MODEL': 'gemini-nano-banana-2.1',
+       'IMAGE_MODEL_REGION': 'us-central1'},
       _MODELS)
   assert any('not allowed' in error for error in errors)
 

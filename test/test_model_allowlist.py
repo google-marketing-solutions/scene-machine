@@ -80,6 +80,16 @@ def test_shipped_catalog_passes_the_runtime_shape_check():
   assert validate_catalog_shape(_MODELS, _MODELS['actions']) is None
 
 
+def test_nano_banana_2_1_is_default_image_model_and_global_only():
+  assert _MODELS['defaults']['image'] == 'gemini-nano-banana-2.1'
+  entry = _MODELS['models']['gemini-nano-banana-2.1']
+  assert entry['family'] == 'image'
+  assert is_pair_allowed('generate_image', 'gemini-nano-banana-2.1', 'global')
+  assert is_pair_allowed('outpaint_image', 'gemini-nano-banana-2.1', 'global')
+  assert not is_pair_allowed(
+      'generate_image', 'gemini-nano-banana-2.1', 'us-central1')
+
+
 def test_outpaint_models_cover_2k_and_4k():
   # The outpainter only ever requests 2K or 4K (outpainter.py _pick_image_size),
   # so any model serving outpaint_image must offer both.
