@@ -78,6 +78,8 @@ def test_nano_banana_2_1_image_model_validation():
        'IMAGE_MODEL_REGION': 'us-central1'},
       _MODELS)
   assert any('not allowed' in error for error in errors)
+  env = _parse_shell_env(os.path.join(_REPO, 'config.template.txt'))
+  assert env['IMAGE_MODEL'] == load_shipped_allowlist()['defaults']['image']
 
 
 def test_unknown_model_flagged():
