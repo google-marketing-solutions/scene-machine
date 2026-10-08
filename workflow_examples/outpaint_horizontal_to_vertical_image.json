@@ -19,7 +19,7 @@
       },
       "parameters": {
         "target_ratio": "9:16",
-        "image_model": "gemini-3-pro-image",
+        "image_model": "gemini-nano-banana-2.1",
         "image_model_location": "global"
       }
     },

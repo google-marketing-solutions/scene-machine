@@ -381,7 +381,7 @@ gcloud auth application-default login   # 2. Application Default Credentials (AD
     `GEMINI_REGION`        | Region for model invocation.                               | Check locations availability. Recommended `global`.
     `VEO_MODEL`            | Video generation model.                                    | `gemini-omni-1.1-flash-preview` (global-only) or a Veo model
     `VEO_REGION`           | Region for video model invocation.                        | `global` for Omni; check availability for Veo.
-    `IMAGE_MODEL`          | Image model for outpainting and image generation.          | `gemini-3-pro-image` (Nano Banana Pro), `gemini-3.1-flash-image` (Nano Banana 2)
+    `IMAGE_MODEL`          | Image model for outpainting and image generation.          | `gemini-nano-banana-2.1` (Nano Banana 2.1, default), `gemini-3-pro-image` (Nano Banana Pro), `gemini-3.1-flash-image` (Nano Banana 2)
     `IMAGE_MODEL_REGION`   | Region for image model invocation.                         | Check availability. Recommended `global`.
     `GCS_BUCKET`           | Dedicated storage bucket for project images and assets. | Must be globally unique. Auto-created by the deploy. Must not be shared with other data (see Storage note).
     `FIRESTORE_DB`         | Firestore database ID used by the backend modules.         | Defaults to `scene-machine`.

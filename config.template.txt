@@ -31,8 +31,8 @@ export VEO_REGION=global # choose from: https://docs.cloud.google.com/vertex-ai/
 # Image model (used for both outpainting and image generation).
 # All available models can be found at:
 # https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/models#gemini-models
-# Recommended models: gemini-3-pro-image (Nano Banana Pro), gemini-3.1-flash-image (Nano Banana 2)
-export IMAGE_MODEL=gemini-3-pro-image
+# Recommended models: gemini-nano-banana-2.1 (Nano Banana 2.1), gemini-3-pro-image (Nano Banana Pro), gemini-3.1-flash-image (Nano Banana 2)
+export IMAGE_MODEL=gemini-nano-banana-2.1
 export IMAGE_MODEL_REGION=global # choose from: https://docs.cloud.google.com/vertex-ai/generative-ai/docs/learn/locations#google-models
 
 # These resources will be created automatically if they don't exist
