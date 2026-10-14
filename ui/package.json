@@ -35,7 +35,7 @@
   },
   "devDependencies": {
     "@angular/build": "^21.2.21",
-    "@angular/cli": "^21.2.21",
+    "@angular/cli": "^21.2.26",
     "@angular/compiler-cli": "^21.2.20",
     "@types/node": "^22.7.5",
     "baseline-browser-mapping": "^2.11.21",
