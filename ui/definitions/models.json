@@ -1,7 +1,7 @@
 {
   "defaults": {
     "gemini": "gemini-3.8-flash",
-    "image": "gemini-3-pro-image",
+    "image": "gemini-nano-banana-2.1",
     "veo": "veo-3.1-generate-001"
   },
   "actions": {
@@ -98,6 +98,15 @@
         "allowed_aspect_ratios": ["16:9", "9:16"],
         "allowed_resolutions": ["360p", "720p", "1080p", "4k"],
         "duration_by_resolution": {"360p": [3, 4, 5, 6, 7, 8, 9, 10], "720p": [3, 4, 5, 6, 7, 8, 9, 10], "1080p": [3, 4, 5, 6, 7, 8, 9, 10], "4k": [3, 4, 5, 6, 7, 8, 9, 10]}
+      }
+    },
+    "gemini-nano-banana-2.1": {
+      "family": "image",
+      "actions": ["generate_image", "outpaint_image"],
+      "locations": ["global"],
+      "capabilities": {
+        "image_sizes": ["1K", "2K", "4K"],
+        "supports_video_input": true
       }
     },
     "gemini-3-pro-image": {
