@@ -1,0 +1,28 @@
+{
+  "id": "storyboard_decomposition",
+  "title": "Decompose an English brand brief into a 5 x 6 s ABCD storyboard",
+  "runtime": "any shell runtime (Path C), dry-run only",
+  "prompt": "Using the scene-machine skill, create the storyboard.json for a 30-second YouTube In-Stream ad. Brand: NordicGlow Skincare. Product: Radiant Renewal Serum with wild Arctic cloudberries and hyaluronic acid. Audience: adults 25-45 who want a simple winter skincare routine. Key claim: +84% hydration in 24 hours (dermatologically tested). Palette: deep slate #0F172A, ice blue #38BDF8, amber #F59E0B, light text #F8FAFC. Tone: calm, premium, Scandinavian. CTA: Discover More at nordicglow.example. Do not render anything yet.",
+  "expected_behaviour": "The agent reads references/youtube_abcd_and_schema.md, writes a storyboard.json with five 6-second shots in the order Attract, Brand, Connect, Proof, Direct, a 50-65-word English voiceover, an English musicPrompt, typoOverlay and endcardSpec carrying all copy, brand hex codes threaded through the visual prompts, three-clause motion prompts, aspectRatio 16:9 and language en-US. It then runs the generator in dry-run and relays the plan.",
+  "deterministic_checks": [
+    "python3 benchmarks/storyboard_checks.py <storyboard.json> exits 0 (schema, 50-65 words, 4/6/8 s durations, three motion clauses, no copy in visualPrompt, ASCII music prompt, no emoji)",
+    "len(shots) == 5 and [s.abcdStage for s in shots] == ['Attract', 'Brand', 'Connect', 'Proof', 'Direct']",
+    "totalDurationSeconds == 30 and every durationSeconds == 6",
+    "aspectRatio == '16:9' and language startswith 'en'",
+    "every shots[].visualPrompt contains at least one brandPalette hex code and ends with the clean-frame sentence",
+    "endcardSpec.ctaText and endcardSpec.ctaUrl are set; the URL does not appear in any visualPrompt",
+    "python3 scene-machine/scripts/generate_ad_spot_vertex.py --storyboard <storyboard.json> exits 0 with status dry_run and planned_calls 12"
+  ],
+  "rubric_dimensions": [
+    "abcd_coverage_and_order",
+    "timing_5x6_or_3x6",
+    "voiceover_50_65_words",
+    "language_matching",
+    "no_copy_in_visual_prompts",
+    "overlays_carry_copy",
+    "motion_prompt_three_clauses",
+    "palette_threaded",
+    "no_emojis"
+  ],
+  "pass_criteria": "all deterministic checks pass and the judge mean over rubric_dimensions >= 1.5"
+}

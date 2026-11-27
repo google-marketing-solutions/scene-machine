@@ -1,0 +1,111 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# On GitHub this file lives at .github/workflows/skill-ci.yml. The jobs are
+# the CI equivalents of the Makefile targets in skills/ (make lint, make test,
+# make bench, make zip). Everything runs hermetically: no secrets, no Google
+# Cloud project, no network beyond PyPI and apt. Two Ubuntu images give two
+# ffmpeg majors (4.4 on 22.04, 6.1 on 24.04).
+
+name: skill-ci
+
+on:
+  push:
+    paths:
+      - "skills/**"
+      - ".github/workflows/skill-ci.yml"
+  pull_request:
+    paths:
+      - "skills/**"
+      - ".github/workflows/skill-ci.yml"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: skills
+
+jobs:
+  lint:
+    name: lint (ruff + skill conformance)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install ffmpeg and zip
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg zip
+      - name: Install pinned dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Lint
+        run: make lint
+
+  test:
+    name: test (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+        python: ["3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install pinned dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Hermetic tests
+        run: make test
+
+  bench:
+    name: bench (render timing, loudness, duration)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Install pinned dependencies
+        run: pip install -r requirements-dev.txt
+      - name: Benchmarks
+        run: make bench
+      # upload-artifact paths are relative to the repository root, not to the
+      # job's working-directory.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-results
+          path: skills/benchmarks/results/latest.json
+          if-no-files-found: error
+
+  zip:
+    name: zip (Gemini Enterprise upload artifact)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install zip
+        run: sudo apt-get update && sudo apt-get install -y zip
+      - name: Build dist/scene-machine.zip
+        run: make zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scene-machine-zip
+          path: skills/dist/scene-machine.zip
+          if-no-files-found: error

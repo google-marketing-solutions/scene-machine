@@ -1,0 +1,55 @@
+{
+  "id": "rt-gemini-enterprise-webchat",
+  "environment": "Gemini Enterprise Web Chat (uploaded skill)",
+  "tier": "GE",
+  "skill_discovery_dirs": [
+    "zip upload with SKILL.md at the archive root (or a single top-level folder named scene-machine)"
+  ],
+  "tools": [
+    {
+      "name": "transfer_to_agent",
+      "kind": "agent_transfer",
+      "notes": "delegates to the video specialist agent videogen_agent"
+    },
+    {
+      "name": "list_skills",
+      "kind": "other"
+    },
+    {
+      "name": "load_skill",
+      "kind": "other"
+    },
+    {
+      "name": "run_skill_script",
+      "kind": "other",
+      "notes": "UNVERIFIED whether the consumer app executes scripts/ of uploaded skills"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [],
+    "has_python3": false,
+    "has_network": false,
+    "has_ffmpeg": false,
+    "has_pillow": false,
+    "has_google_genai": false,
+    "has_gcloud_adc": false
+  },
+  "expected_path": "A",
+  "expected_detection_signals": [
+    "shell-tool-absent",
+    "media-tools-absent",
+    "agent-transfer-present",
+    "network-absent",
+    "adc-absent"
+  ],
+  "expected_first_action": "transfer_to_agent(agent_name=\"videogen_agent\") with the 8-second ABCD director prompt (aspect ratio inside the prompt text)",
+  "blockers": [
+    "one 8-second clip per turn; no stitched 30-second MP4 in chat",
+    "script sandbox is air-gapped and cannot return binary files"
+  ],
+  "verdict": "Works",
+  "evidence_urls": [
+    "https://docs.cloud.google.com/gemini-enterprise/docs/skills"
+  ],
+  "notes": "videogen_agent and gen_video are product agent names observed live, UNVERIFIED in public documentation; the aspect-ratio hand-off is undocumented (put it in the prompt text). UNVERIFIED: acceptance of extra frontmatter keys (compatibility) by the upload parser - the shipped frontmatter stays minimal. UNVERIFIED: whether run_skill_script executes scripts/ for uploaded skills; Path A does not depend on it."
+}

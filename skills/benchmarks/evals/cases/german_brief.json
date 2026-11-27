@@ -1,0 +1,27 @@
+{
+  "id": "german_brief",
+  "title": "German-language brief: German copy, English camera and music directions",
+  "runtime": "any shell runtime (Path C), dry-run only",
+  "prompt": "Erstelle mit dem scene-machine Skill das Storyboard fuer einen 30-Sekunden-Werbespot. Marke: NordicGlow Skincare, Produkt: Radiant Renewal Serum mit arktischen Moltebeeren. Zielgruppe: Erwachsene 25-45. Kernaussage: +84% Feuchtigkeit in 24 Stunden. Farben: #0F172A, #38BDF8, #F59E0B, #F8FAFC. Bitte noch nichts rendern.",
+  "expected_behaviour": "Voiceover script, voiceoverSegments, typoOverlay headlines and the endcard copy are German; visualPrompt and motionPrompt camera/lighting text are English; language is de-DE; musicPrompt is English ASCII (lyria-002 accepts en-US prompts); the voiceover has 50-65 words; the dry-run passes validation.",
+  "deterministic_checks": [
+    "language == 'de-DE' (BCP-47 with region)",
+    "audioSpec.musicPrompt.isascii() and the dry-run validation reports music_prompt_ascii true",
+    "50 <= len(audioSpec.voiceoverScript.split()) <= 65",
+    "voiceoverScript contains at least three common German function words (und, mit, fuer/fur, der, die, das, ist)",
+    "no German function words inside any motionPrompt [CAMERA TRAJECTORY] clause",
+    "python3 benchmarks/storyboard_checks.py <storyboard.json> exits 0"
+  ],
+  "rubric_dimensions": [
+    "abcd_coverage_and_order",
+    "timing_5x6_or_3x6",
+    "voiceover_50_65_words",
+    "language_matching",
+    "no_copy_in_visual_prompts",
+    "overlays_carry_copy",
+    "motion_prompt_three_clauses",
+    "palette_threaded",
+    "no_emojis"
+  ],
+  "pass_criteria": "all deterministic checks pass and the judge mean >= 1.5"
+}

@@ -1,0 +1,53 @@
+{
+  "id": "rt-antigravity-managed-agent",
+  "environment": "Gemini API managed Antigravity agent (remote sandbox)",
+  "tier": "1",
+  "skill_discovery_dirs": [
+    "<sandbox workspace>/.agent/skills/<name>/ (UNVERIFIED)"
+  ],
+  "tools": [
+    {
+      "name": "code_execution",
+      "kind": "shell",
+      "notes": "Python 3.12 sandbox; counts as a shell alias"
+    },
+    {
+      "name": "google_search",
+      "kind": "web"
+    },
+    {
+      "name": "url_context",
+      "kind": "web"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "/workspace",
+      "/tmp"
+    ],
+    "has_python3": true,
+    "has_network": true,
+    "has_ffmpeg": false,
+    "has_pillow": false,
+    "has_google_genai": false,
+    "has_gcloud_adc": false
+  },
+  "expected_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent",
+    "adc-absent"
+  ],
+  "expected_first_action": "code_execution: run env_probe.py / the generator in dry-run and report that no project or credentials are configured (plan-only)",
+  "blockers": [
+    "no Application Default Credentials in the managed sandbox",
+    "ffmpeg and Pillow are not preinstalled",
+    "UNVERIFIED: whether pip and Vertex endpoints are reachable from the sandbox"
+  ],
+  "verdict": "Works-with-fixes",
+  "evidence_urls": [
+    "https://ai.google.dev/gemini-api/docs"
+  ],
+  "notes": "UNVERIFIED: tool list (code_execution, google_search, url_context), Python version and network policy of the managed sandbox; UNVERIFIED: skill discovery directory. Terminal state without ADC: storyboard plus dry-run plan, stating plainly that no video was rendered."
+}

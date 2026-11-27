@@ -1,0 +1,59 @@
+{
+  "id": "rt-copilot-vscode",
+  "environment": "GitHub Copilot (VS Code agent mode, Copilot CLI)",
+  "tier": "2",
+  "skill_discovery_dirs": [
+    ".github/skills/<name>/ (committed content, not a symlink)",
+    "~/.copilot/skills/<name>/",
+    ".claude/skills/",
+    ".agents/skills/"
+  ],
+  "install_target": "copilot",
+  "tools": [
+    {
+      "name": "run_in_terminal",
+      "kind": "shell",
+      "notes": "UNVERIFIED exact name"
+    },
+    {
+      "name": "create_file",
+      "kind": "file_write"
+    },
+    {
+      "name": "replace_string_in_file",
+      "kind": "file_write"
+    },
+    {
+      "name": "read_file",
+      "kind": "file_read"
+    },
+    {
+      "name": "fetch_webpage",
+      "kind": "web"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "<project>",
+      "~"
+    ],
+    "has_python3": true,
+    "has_network": true
+  },
+  "expected_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent"
+  ],
+  "expected_first_action": "run_in_terminal: python3 <SKILL_DIR>/scripts/env_probe.py",
+  "blockers": [
+    "ffmpeg, Pillow and google-genai must be installed by the user (env_probe.py reports them)",
+    "Application Default Credentials and an explicit --project are required for --execute"
+  ],
+  "verdict": "Works",
+  "evidence_urls": [
+    "https://docs.github.com/en/copilot/concepts/agents/agent-skills"
+  ],
+  "notes": "UNVERIFIED: exact shell tool name (run_in_terminal). The .github/skills copy must be committed content; install.sh copies by default for this reason."
+}

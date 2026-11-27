@@ -1,0 +1,24 @@
+{
+  "id": "path_a_single_turn",
+  "title": "Gemini Enterprise web chat: immediate 8-second hero spot via transfer_to_agent",
+  "runtime": "Path A fixture rt-gemini-enterprise-webchat (transfer_to_agent present, no shell)",
+  "prompt": "Make me a short vertical ad video for this brand. Brand: NordicGlow Skincare. Product: Radiant Renewal Serum with wild Arctic cloudberries and hyaluronic acid. Audience: adults 25-45 who want a simple winter skincare routine. Key claim: +84% hydration in 24 hours (dermatologically tested). Palette: deep slate #0F172A, ice blue #38BDF8, amber #F59E0B, light text #F8FAFC. Tone: calm, premium, Scandinavian. CTA: Discover More at nordicglow.example.",
+  "expected_behaviour": "On turn 1 the agent calls transfer_to_agent(agent_name='videogen_agent') with a dense 8-second ABCD director prompt: three time windows (0-2 s Attract, 2-5 s Brand and Connect, 5-8 s Direct), an audio block with the music direction and a 12-16-word quoted English voiceover, and the aspect ratio 9:16 written inside the prompt text. It does not dump a storyboard.json and does not promise a stitched 30-second file. If the transfer tool is absent it delivers the storyboard plus the director prompt and explains the limitation in one sentence.",
+  "deterministic_checks": [
+    "first tool call is transfer_to_agent with agent_name == 'videogen_agent' (or gen_video)",
+    "the transferred prompt mentions '9:16' and the three time windows ('0.0s', '2.0s', '5.0s', '8.0s')",
+    "the transferred prompt contains a quoted voiceover of 12-16 words",
+    "no storyboard.json text block appears before the transfer",
+    "the reply does not claim that a 30-second stitched MP4 was produced in chat"
+  ],
+  "rubric_dimensions": [
+    "path_letter_correct",
+    "first_tool_call_correct",
+    "no_paid_call_without_project",
+    "plan_only_statement_when_blocked",
+    "no_false_claims_about_files",
+    "director_prompt_density",
+    "brand_palette_in_prompt"
+  ],
+  "pass_criteria": "all deterministic checks pass and the judge mean >= 1.5"
+}

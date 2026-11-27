@@ -1,0 +1,22 @@
+{
+  "id": "assembly_script",
+  "title": "Assemble an already-resolved storyboard into the 30 s MP4 and verify it",
+  "runtime": "any shell runtime (Path B or C); clips and audio already exist on disk",
+  "prompt": "All five clips, the voiceover and the music bed for the NordicGlow spot already exist and are referenced by <workdir>/storyboard_resolved.json. Using the scene-machine skill, produce the final 16:9 MP4 and tell me its exact duration. Do not call any generation model.",
+  "expected_behaviour": "The agent runs python3 <SKILL_DIR>/scripts/assemble_ad_video.py render --storyboard <resolved> --output-dir <out>, parses the one-line summary JSON on stdout, checks video_stream_duration_seconds against expected_duration_seconds and reports the primary_video path, duration, loudness and the output files. It makes no model call and writes nothing outside the chosen output directory.",
+  "deterministic_checks": [
+    "transcript contains 'assemble_ad_video.py render' with '--storyboard' and '--output-dir'",
+    "transcript contains no 'generate_ad_spot_vertex.py --execute' and no genai client construction",
+    "summary JSON parsed: status == 'ok', abs(video_stream_duration_seconds - 30.0) <= 0.05, video_frames == 720",
+    "reported duration equals the summary value (no made-up number)",
+    "no path under /workspace is written or claimed; output_files all exist",
+    "storyboard.md in the output directory is ASCII only"
+  ],
+  "rubric_dimensions": [
+    "correct_command_and_flags",
+    "verification_before_claiming_success",
+    "accurate_reporting",
+    "no_unneeded_model_calls"
+  ],
+  "pass_criteria": "all deterministic checks pass and the judge mean >= 1.5"
+}

@@ -1,0 +1,12 @@
+{"version":"2026-11-20","last_verified":"2026-11-20",
+ "models":[
+  {"id":"gemini-3.1-flash-image","kind":"image","api":"generate_content_image","status":"active","locations":["global","us-central1"],"default":true,"aspect_ratios":["16:9","9:16","1:1"],"unit_cost_note":"per image","last_verified":"2026-11-20"},
+  {"id":"imagen-3.0-generate-002","kind":"image","api":"generate_images","status":"retired","retired_on":"2026-08-17","replacement":"gemini-3.1-flash-image","notes":"deprecated 2026-03-24; shutdown extended from 2026-06-30 to 2026-08-17"},
+  {"id":"veo-3.1-fast-generate-001","kind":"video","api":"generate_videos","status":"active","locations":["us-central1"],"default":true,"aspect_ratios":["16:9","9:16"],"durations":[4,6,8],"retire_not_before":"2027-05-04","successor":"gemini-omni-1.2-flash","unit_cost_note":"per second of video; audio off by default","last_verified":"2026-11-20"},
+  {"id":"veo-3.1-generate-001","kind":"video","api":"generate_videos","status":"active","locations":["us-central1"],"aspect_ratios":["16:9","9:16"],"durations":[4,6,8],"last_verified":"2026-11-20"},
+  {"id":"gemini-omni-1.2-flash","kind":"video","api":"tbd","status":"successor","notes":"documented Veo 3.1 successor; different API shape; adapter not implemented"},
+  {"id":"gemini-2.5-flash-tts","kind":"tts","api":"generate_content_audio","status":"active","locations":["global"],"default":true,"last_verified":"2026-11-20"},
+  {"id":"gemini-3.1-flash-tts-preview","kind":"tts","api":"generate_content_audio","status":"preview","locations":["global"],"last_verified":"2026-11-20"},
+  {"id":"gemini-2.5-flash-preview-tts","kind":"tts","api":"generate_content_audio","status":"retired","replacement":"gemini-2.5-flash-tts","notes":"absent from the current Gemini-TTS model list; verify live"},
+  {"id":"lyria-002","kind":"music","api":"predict_rest","status":"active","locations":["global","us-central1"],"default":true,"default_location":"global","max_clip_seconds":32.8,"prompt_language":"en-US","notes":"model card lists global; API reference sample uses us-central1 - keep both selectable","last_verified":"2026-11-20"}
+ ]}

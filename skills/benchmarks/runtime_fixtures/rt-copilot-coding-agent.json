@@ -1,0 +1,58 @@
+{
+  "id": "rt-copilot-coding-agent",
+  "environment": "GitHub Copilot coding agent (Actions runner with egress firewall)",
+  "tier": "2",
+  "skill_discovery_dirs": [
+    ".github/skills/<name>/"
+  ],
+  "install_target": "copilot",
+  "tools": [
+    {
+      "name": "run_in_terminal",
+      "kind": "shell"
+    },
+    {
+      "name": "create_file",
+      "kind": "file_write"
+    },
+    {
+      "name": "replace_string_in_file",
+      "kind": "file_write"
+    },
+    {
+      "name": "read_file",
+      "kind": "file_read"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "<repo checkout>",
+      "/tmp"
+    ],
+    "has_python3": true,
+    "has_network": false,
+    "has_ffmpeg": false,
+    "has_pillow": false,
+    "has_google_genai": false,
+    "has_gcloud_adc": false
+  },
+  "expected_path": "NONE",
+  "expected_capability_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent",
+    "network-absent",
+    "adc-absent"
+  ],
+  "expected_first_action": "run_in_terminal: write storyboard.json and run the generator in dry-run; state that no video can be rendered without configured credentials",
+  "blockers": [
+    "egress firewall blocks Vertex AI unless the repository allow-lists it",
+    "credentials only when copilot-setup-steps provides a service account"
+  ],
+  "verdict": "Works-with-fixes",
+  "evidence_urls": [
+    "https://docs.github.com/en/copilot/concepts/agents/coding-agent"
+  ],
+  "notes": "Works-with-config: Path C only with a service account configured in copilot-setup-steps; otherwise plan-only. UNVERIFIED: default firewall allow-list and whether ffmpeg is on the runner image."
+}

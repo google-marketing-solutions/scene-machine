@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SceneMachineRuntimeFixture",
+  "description": "One fixture per agent environment. Describes the tool manifest an agent sees and the expected scene-machine execution path. Used by the table-driven runtime-detection eval (benchmark part iv) and by tests/test_runtime_fixtures.py.",
+  "type": "object",
+  "required": ["id", "environment", "tier", "tools", "filesystem", "expected_path", "expected_detection_signals", "expected_first_action", "verdict", "notes"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {"type": "string", "pattern": "^rt-[a-z0-9-]+$"},
+    "environment": {"type": "string"},
+    "environment_version": {"type": "string"},
+    "tier": {"type": "string", "enum": ["1", "2", "3", "GE"]},
+    "skill_discovery_dirs": {"type": "array", "items": {"type": "string"}},
+    "install_target": {"type": "string", "description": "install.sh --target value for this environment, if any."},
+    "tools": {
+      "type": "array",
+      "description": "Tool names exactly as exposed to the model (function-calling names).",
+      "items": {
+        "type": "object",
+        "required": ["name", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"type": "string"},
+          "kind": {"type": "string", "enum": ["shell", "file_read", "file_write", "web", "image_gen", "video_gen", "audio_gen", "speech_gen", "agent_transfer", "other"]},
+          "notes": {"type": "string"}
+        }
+      }
+    },
+    "filesystem": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "writable_roots": {"type": "array", "items": {"type": "string"}},
+        "has_ffmpeg": {"type": "boolean"},
+        "has_python3": {"type": "boolean"},
+        "has_pillow": {"type": "boolean"},
+        "has_google_genai": {"type": "boolean"},
+        "has_gcloud_adc": {"type": "boolean"},
+        "has_network": {"type": "boolean", "description": "false for sandboxes without egress; a shell path then resolves to NONE (plan-only terminal state)."}
+      }
+    },
+    "expected_path": {"type": "string", "enum": ["A", "B", "C", "NONE"], "description": "Resolved path: detect_runtime.resolve(fixture)."},
+    "expected_capability_path": {"type": "string", "enum": ["A", "B", "C", "NONE"], "description": "detect_runtime.detect(tools) before the offline terminal-state rule (defaults to expected_path)."},
+    "expected_detection_signals": {
+      "type": "array",
+      "description": "Which SKILL.md heuristics must fire for this environment, e.g. 'shell-tool-present', 'media-tools-present', 'agent-transfer-present', 'network-absent', 'adc-absent'.",
+      "items": {"type": "string"}
+    },
+    "expected_first_action": {"type": "string", "description": "What the first tool call on turn 1 should be (for the LLM-judge rubric)."},
+    "blockers": {"type": "array", "items": {"type": "string"}},
+    "verdict": {"type": "string", "enum": ["Works", "Works-with-fixes", "Does-not-work"]},
+    "evidence_urls": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": "string", "description": "Free text; carries every UNVERIFIED flag from runtimes.md and known issues."}
+  }
+}

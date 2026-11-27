@@ -1,0 +1,70 @@
+{
+  "id": "rt-claude-code",
+  "environment": "Claude Code (CLI and IDE extensions)",
+  "tier": "1",
+  "skill_discovery_dirs": [
+    ".claude/skills/<name>/",
+    "~/.claude/skills/<name>/",
+    "<plugin>/skills/<name>/"
+  ],
+  "install_target": "claude",
+  "tools": [
+    {
+      "name": "Bash",
+      "kind": "shell"
+    },
+    {
+      "name": "Read",
+      "kind": "file_read"
+    },
+    {
+      "name": "Write",
+      "kind": "file_write"
+    },
+    {
+      "name": "Edit",
+      "kind": "file_write"
+    },
+    {
+      "name": "Glob",
+      "kind": "other"
+    },
+    {
+      "name": "Grep",
+      "kind": "other"
+    },
+    {
+      "name": "WebFetch",
+      "kind": "web"
+    },
+    {
+      "name": "WebSearch",
+      "kind": "web"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "<project>",
+      "~"
+    ],
+    "has_python3": true,
+    "has_network": true
+  },
+  "expected_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent"
+  ],
+  "expected_first_action": "Bash: python3 <SKILL_DIR>/scripts/env_probe.py",
+  "blockers": [
+    "ffmpeg, Pillow and google-genai must be installed by the user (env_probe.py reports them)",
+    "Application Default Credentials and an explicit --project are required for --execute"
+  ],
+  "verdict": "Works",
+  "evidence_urls": [
+    "https://agentskills.io/specification",
+    "https://code.claude.com/docs/en/skills"
+  ],
+  "notes": "Honours name, description, allowed-tools, license, compatibility (<= 500 chars) and metadata; name must equal the directory. No allowed-tools key is shipped because it pre-approves matching commands while the skill is active. v2.0.0 verdict was Works-with-fixes (Step 1 matched only the literal run_command)."
+}

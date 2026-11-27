@@ -1,0 +1,4 @@
+# Runtime dependencies of the scene-machine scripts (pinned; see README.md).
+pillow==13.0.0
+google-genai==3.6.1
+google-auth==2.62.2

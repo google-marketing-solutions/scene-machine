@@ -1,0 +1,60 @@
+{
+  "id": "rt-cursor",
+  "environment": "Cursor",
+  "tier": "2",
+  "skill_discovery_dirs": [
+    ".cursor/skills/<name>/",
+    "~/.cursor/skills/<name>/",
+    ".agents/skills/",
+    ".claude/skills/",
+    ".codex/skills/"
+  ],
+  "install_target": "cursor",
+  "tools": [
+    {
+      "name": "run_terminal_cmd",
+      "kind": "shell",
+      "notes": "UNVERIFIED exact name"
+    },
+    {
+      "name": "edit_file",
+      "kind": "file_write"
+    },
+    {
+      "name": "read_file",
+      "kind": "file_read"
+    },
+    {
+      "name": "codebase_search",
+      "kind": "other"
+    },
+    {
+      "name": "web_search",
+      "kind": "web"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "<project>",
+      "~"
+    ],
+    "has_python3": true,
+    "has_network": true
+  },
+  "expected_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent"
+  ],
+  "expected_first_action": "run_terminal_cmd: python3 <SKILL_DIR>/scripts/env_probe.py",
+  "blockers": [
+    "ffmpeg, Pillow and google-genai must be installed by the user (env_probe.py reports them)",
+    "Application Default Credentials and an explicit --project are required for --execute"
+  ],
+  "verdict": "Works",
+  "evidence_urls": [
+    "https://cursor.com/docs/context/skills"
+  ],
+  "notes": "UNVERIFIED: exact shell tool name (run_terminal_cmd). Cursor also reads .agents/skills, .claude/skills and .codex/skills. v2.0.0 verdict was Works-with-fixes."
+}

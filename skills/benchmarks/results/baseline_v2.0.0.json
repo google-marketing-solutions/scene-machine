@@ -1,0 +1,370 @@
+{
+  "version": "2.0.0",
+  "captured_at": "2026-11-20T16:48:21Z",
+  "tree": "pristine e-mailed scene-machine.zip (sha256 SKILL.md 8153a28efa6e9ab8926c5d4a62e5737e888d77f58e2717544cfac6f89db91933)",
+  "environment": {
+    "ffmpeg": "ffmpeg version 9.0.2-1 Copyright (c) 2000-2026 the FFmpeg developers",
+    "python": "3.13.15",
+    "host_note": "2 vCPU Linux host; numbers are indicative"
+  },
+  "render_cases": {
+    "malformed": {
+      "exit": 1,
+      "wall_seconds": 0.13,
+      "files": [],
+      "outputs": {},
+      "stderr_last_line": "json.decoder.JSONDecodeError: Expecting property name enclosed in double quotes: line 1 column 3 (char 2)"
+    },
+    "sb_1x1": {
+      "exit": 1,
+      "wall_seconds": 0.12,
+      "files": [],
+      "outputs": {},
+      "stderr_last_line": "ValueError: Unsupported aspectRatio '1:1'. Use '16:9' or '9:16'."
+    },
+    "sb_3x6_16x9": {
+      "exit": 0,
+      "wall_seconds": 5.7,
+      "files": [
+        "final_video_16x9.mp4",
+        "storyboard.json",
+        "storyboard.md"
+      ],
+      "outputs": {
+        "final_video_16x9.mp4": {
+          "duration": 18.0,
+          "video": {
+            "codec_name": "h264",
+            "width": 1280,
+            "height": 720,
+            "r_frame_rate": "24/1",
+            "pix_fmt": "yuv420p"
+          },
+          "audio": {
+            "codec_name": "aac",
+            "sample_rate": "48000",
+            "channels": 2
+          },
+          "integrated_lufs": -14.1,
+          "loudnorm_input_i": -14.32,
+          "true_peak_dbtp": -8.7,
+          "yavg_t2": "125.026",
+          "yavg_endcard": "49.8753"
+        }
+      },
+      "stderr_last_line": ""
+    },
+    "sb_5x6_16x9": {
+      "exit": 0,
+      "wall_seconds": 8.85,
+      "files": [
+        "final_video_16x9.mp4",
+        "storyboard.json",
+        "storyboard.md"
+      ],
+      "outputs": {
+        "final_video_16x9.mp4": {
+          "duration": 30.0,
+          "video": {
+            "codec_name": "h264",
+            "width": 1280,
+            "height": 720,
+            "r_frame_rate": "24/1",
+            "pix_fmt": "yuv420p"
+          },
+          "audio": {
+            "codec_name": "aac",
+            "sample_rate": "48000",
+            "channels": 2
+          },
+          "integrated_lufs": -14.4,
+          "loudnorm_input_i": -14.59,
+          "true_peak_dbtp": -8.7,
+          "yavg_t2": "125.026",
+          "yavg_endcard": "58.5923"
+        }
+      },
+      "stderr_last_line": ""
+    },
+    "sb_5x6_9x16_square": {
+      "exit": 0,
+      "wall_seconds": 9.73,
+      "files": [
+        "final_video_1x1.mp4",
+        "final_video_9x16.mp4",
+        "storyboard.json",
+        "storyboard.md"
+      ],
+      "outputs": {
+        "final_video_1x1.mp4": {
+          "duration": 30.0,
+          "video": {
+            "codec_name": "h264",
+            "width": 720,
+            "height": 720,
+            "r_frame_rate": "24/1",
+            "pix_fmt": "yuv420p"
+          },
+          "audio": {
+            "codec_name": "aac",
+            "sample_rate": "48000",
+            "channels": 2
+          },
+          "integrated_lufs": -14.4,
+          "loudnorm_input_i": -14.59,
+          "true_peak_dbtp": -8.7,
+          "yavg_t2": "86.3889",
+          "yavg_endcard": "63.9495"
+        },
+        "final_video_9x16.mp4": {
+          "duration": 30.0,
+          "video": {
+            "codec_name": "h264",
+            "width": 720,
+            "height": 1280,
+            "r_frame_rate": "24/1",
+            "pix_fmt": "yuv420p"
+          },
+          "audio": {
+            "codec_name": "aac",
+            "sample_rate": "48000",
+            "channels": 2
+          },
+          "integrated_lufs": -14.4,
+          "loudnorm_input_i": -14.59,
+          "true_peak_dbtp": -8.7,
+          "yavg_t2": "64.8407",
+          "yavg_endcard": "51.716"
+        }
+      },
+      "stderr_last_line": ""
+    },
+    "sb_bad_aspect": {
+      "exit": 1,
+      "wall_seconds": 0.1,
+      "files": [],
+      "outputs": {},
+      "stderr_last_line": "ValueError: Unsupported aspectRatio '4:3'. Use '16:9' or '9:16'."
+    },
+    "sb_embedded_audio": {
+      "exit": 0,
+      "wall_seconds": 9.85,
+      "files": [
+        "final_video_16x9.mp4",
+        "storyboard.json",
+        "storyboard.md"
+      ],
+      "outputs": {
+        "final_video_16x9.mp4": {
+          "duration": 30.0,
+          "video": {
+            "codec_name": "h264",
+            "width": 1280,
+            "height": 720,
+            "r_frame_rate": "24/1",
+            "pix_fmt": "yuv420p"
+          },
+          "audio": {
+            "codec_name": "aac",
+            "sample_rate": "48000",
+            "channels": 2
+          },
+          "integrated_lufs": -14.1,
+          "loudnorm_input_i": -14.2,
+          "true_peak_dbtp": -12.6,
+          "yavg_t2": "125.026",
+          "yavg_endcard": "89.5331"
+        }
+      },
+      "stderr_last_line": ""
+    },
+    "sb_missing_clip": {
+      "exit": 1,
+      "wall_seconds": 3.13,
+      "files": [],
+      "outputs": {},
+      "stderr_last_line": "FileNotFoundError: Missing video clip for shotIndex=4: /tmp/bench/fixtures/does_not_exist.mp4"
+    },
+    "sb_music_only": {
+      "exit": 0,
+      "wall_seconds": 8.79,
+      "files": [
+        "final_video_16x9.mp4",
+        "storyboard.json",
+        "storyboard.md"
+      ],
+      "outputs": {
+        "final_video_16x9.mp4": {
+          "duration": 30.0,
+          "video": {
+            "codec_name": "h264",
+            "width": 1280,
+            "height": 720,
+            "r_frame_rate": "24/1",
+            "pix_fmt": "yuv420p"
+          },
+          "audio": {
+            "codec_name": "aac",
+            "sample_rate": "48000",
+            "channels": 2
+          },
+          "integrated_lufs": -14.0,
+          "loudnorm_input_i": -14.13,
+          "true_peak_dbtp": -12.7,
+          "yavg_t2": "125.026",
+          "yavg_endcard": "58.5923"
+        }
+      },
+      "stderr_last_line": ""
+    },
+    "sb_no_audio": {
+      "exit": 0,
+      "wall_seconds": 7.99,
+      "files": [
+        "final_video_16x9.mp4",
+        "storyboard.json",
+        "storyboard.md"
+      ],
+      "outputs": {
+        "final_video_16x9.mp4": {
+          "duration": 30.0,
+          "video": {
+            "codec_name": "h264",
+            "width": 1280,
+            "height": 720,
+            "r_frame_rate": "24/1",
+            "pix_fmt": "yuv420p"
+          },
+          "audio": {
+            "codec_name": "aac",
+            "sample_rate": "48000",
+            "channels": 2
+          },
+          "integrated_lufs": -70.0,
+          "loudnorm_input_i": null,
+          "true_peak_dbtp": null,
+          "yavg_t2": "125.026",
+          "yavg_endcard": "58.5923"
+        }
+      },
+      "stderr_last_line": ""
+    },
+    "sb_one_shot": {
+      "exit": 1,
+      "wall_seconds": 0.09,
+      "files": [],
+      "outputs": {},
+      "stderr_last_line": "ValueError: storyboard.json must contain at least 2 shots."
+    },
+    "sb_short_clip": {
+      "exit": 0,
+      "wall_seconds": 8.68,
+      "files": [
+        "final_video_16x9.mp4",
+        "storyboard.json",
+        "storyboard.md"
+      ],
+      "outputs": {
+        "final_video_16x9.mp4": {
+          "duration": 30.0,
+          "video": {
+            "codec_name": "h264",
+            "width": 1280,
+            "height": 720,
+            "r_frame_rate": "24/1",
+            "pix_fmt": "yuv420p"
+          },
+          "audio": {
+            "codec_name": "aac",
+            "sample_rate": "48000",
+            "channels": 2
+          },
+          "integrated_lufs": -14.4,
+          "loudnorm_input_i": -14.59,
+          "true_peak_dbtp": -8.7,
+          "yavg_t2": "125.026",
+          "yavg_endcard": "58.5923"
+        }
+      },
+      "stderr_last_line": ""
+    },
+    "sb_uri_clips": {
+      "exit": 0,
+      "wall_seconds": 9.08,
+      "files": [
+        "final_video_16x9.mp4",
+        "storyboard.json",
+        "storyboard.md"
+      ],
+      "outputs": {
+        "final_video_16x9.mp4": {
+          "duration": 30.0,
+          "video": {
+            "codec_name": "h264",
+            "width": 1280,
+            "height": 720,
+            "r_frame_rate": "24/1",
+            "pix_fmt": "yuv420p"
+          },
+          "audio": {
+            "codec_name": "aac",
+            "sample_rate": "48000",
+            "channels": 2
+          },
+          "integrated_lufs": -14.4,
+          "loudnorm_input_i": -14.59,
+          "true_peak_dbtp": -8.7,
+          "yavg_t2": "125.026",
+          "yavg_endcard": "58.5923"
+        }
+      },
+      "stderr_last_line": ""
+    },
+    "sb_vo_only": {
+      "exit": 0,
+      "wall_seconds": 8.59,
+      "files": [
+        "final_video_16x9.mp4",
+        "storyboard.json",
+        "storyboard.md"
+      ],
+      "outputs": {
+        "final_video_16x9.mp4": {
+          "duration": 30.0,
+          "video": {
+            "codec_name": "h264",
+            "width": 1280,
+            "height": 720,
+            "r_frame_rate": "24/1",
+            "pix_fmt": "yuv420p"
+          },
+          "audio": {
+            "codec_name": "aac",
+            "sample_rate": "48000",
+            "channels": 2
+          },
+          "integrated_lufs": -14.0,
+          "loudnorm_input_i": -14.02,
+          "true_peak_dbtp": -9.3,
+          "yavg_t2": "125.026",
+          "yavg_endcard": "58.5923"
+        }
+      },
+      "stderr_last_line": ""
+    }
+  },
+  "generator_contract": {
+    "passed": 7,
+    "failed": 0,
+    "seconds": 74.92
+  },
+  "lint": {
+    "fail": 2,
+    "pass": 13,
+    "warn": 0,
+    "fail_codes": [
+      "PK-01",
+      "PD-01"
+    ]
+  }
+}

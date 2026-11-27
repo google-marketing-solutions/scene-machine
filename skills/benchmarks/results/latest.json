@@ -1,0 +1,88 @@
+{
+  "version": "2.1.0",
+  "captured_at": "2026-11-23T10:11:09Z",
+  "baseline": {
+    "version": "2.0.0",
+    "captured_at": "2026-11-20T16:48:21Z"
+  },
+  "environment": {
+    "ffmpeg": "ffmpeg version 9.0.2-1 Copyright (c) 2000-2026 the FFmpeg developers",
+    "python": "3.13.15",
+    "platform": "Linux-x86_64",
+    "wall_factor": 2.0
+  },
+  "gates": {
+    "duration_tolerance_s": 0.05,
+    "lufs_target": -14.0,
+    "lufs_tolerance": 1.0,
+    "true_peak_max_dbtp": -1.0
+  },
+  "render_cases": {
+    "sb_5x6_16x9": {
+      "exit": 0,
+      "wall_seconds": 10.59,
+      "outputs": {
+        "final_video_16x9.mp4": {
+          "duration": 30.0,
+          "video_stream_duration": 30.0,
+          "audio_stream_duration": 30.0,
+          "frames": 720,
+          "resolution": "1280x720",
+          "r_frame_rate": "24/1",
+          "integrated_lufs": -13.8,
+          "true_peak_dbtp": -7.9,
+          "loudnorm_input_i": -13.99
+        }
+      },
+      "stderr_last_line": ""
+    },
+    "sb_3x6_16x9": {
+      "exit": 0,
+      "wall_seconds": 7.39,
+      "outputs": {
+        "final_video_16x9.mp4": {
+          "duration": 18.0,
+          "video_stream_duration": 18.0,
+          "audio_stream_duration": 18.0,
+          "frames": 432,
+          "resolution": "1280x720",
+          "r_frame_rate": "24/1",
+          "integrated_lufs": -14.1,
+          "true_peak_dbtp": -8.6,
+          "loudnorm_input_i": -14.34
+        }
+      },
+      "stderr_last_line": ""
+    },
+    "sb_5x6_9x16_square": {
+      "exit": 0,
+      "wall_seconds": 11.66,
+      "outputs": {
+        "final_video_9x16.mp4": {
+          "duration": 30.0,
+          "video_stream_duration": 30.0,
+          "audio_stream_duration": 30.0,
+          "frames": 720,
+          "resolution": "720x1280",
+          "r_frame_rate": "24/1",
+          "integrated_lufs": -13.8,
+          "true_peak_dbtp": -7.9,
+          "loudnorm_input_i": -13.99
+        },
+        "final_video_1x1.mp4": {
+          "duration": 30.0,
+          "video_stream_duration": 30.0,
+          "audio_stream_duration": 30.0,
+          "frames": 720,
+          "resolution": "720x720",
+          "r_frame_rate": "24/1",
+          "integrated_lufs": -13.8,
+          "true_peak_dbtp": -7.9,
+          "loudnorm_input_i": -13.99
+        }
+      },
+      "stderr_last_line": ""
+    }
+  },
+  "failures": []
+}
