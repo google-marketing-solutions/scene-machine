@@ -1,0 +1,67 @@
+{
+  "brandName": "NordicGlow",
+  "campaignTitle": "Radiant Renewal Bumper (18 s, 3 x 6 s)",
+  "language": "en-US",
+  "aspectRatio": "16:9",
+  "exportSquareCrop": false,
+  "totalDurationSeconds": 18,
+  "brandPalette": {
+    "backgroundHex": "#0F172A",
+    "primaryAccentHex": "#38BDF8",
+    "secondaryAccentHex": "#F59E0B",
+    "textLightHex": "#F8FAFC"
+  },
+  "endcardSpec": {
+    "enabled": true,
+    "durationSec": 3,
+    "headline": "Reveal Your Natural Radiance",
+    "subheadline": "NordicGlow Radiant Renewal Serum",
+    "ctaText": "Discover More",
+    "ctaUrl": "nordicglow.example"
+  },
+  "audioSpec": {
+    "voiceoverScript": "Cold mornings leave skin feeling tired and tight. Meet NordicGlow Radiant Renewal Serum, made with wild Arctic cloudberries and pure hyaluronic acid. One drop delivers deep, lasting hydration and a luminous, balanced glow in twenty-four hours. Dermatologically tested and gentle enough for every morning. Reveal your natural radiance today, only with NordicGlow.",
+    "musicPrompt": "Modern Scandinavian electronic ambient pop commercial soundtrack, warm synth arpeggios, crisp minimal percussion, uplifting harmonic build at 10 seconds, clean gentle resolution at 16 seconds, 112 BPM, instrumental.",
+    "musicDuckVolume": 0.28,
+    "targetLufs": -14,
+    "fadeOutSeconds": 1.5
+  },
+  "shots": [
+    {
+      "shotIndex": 1,
+      "abcdStage": "Attract",
+      "durationSeconds": 6,
+      "visualPrompt": "Studio product photography of an amber glass dropper bottle on minimalist travertine stone against a soft slate (#0F172A) backdrop, warm amber (#F59E0B) caustics and soft ice-blue (#38BDF8) rim light. Clean commercial cinema frame with no overlaid UI text, buttons, subtitles, or watermarks.",
+      "motionPrompt": "[VISUAL ANCHOR LOCK] Frosted amber glass serum bottle with metallic dropper cap on a travertine stone pedestal remains stationary and undistorted. [CAMERA TRAJECTORY] Smooth Orbital Pan 15 degrees right around the bottle. [LIGHTING & MICRO-PHYSICS] Golden sunlight caustics ripple subtly across the travertine surface.",
+      "voiceoverSegment": "Cold mornings leave skin feeling tired and tight. Meet NordicGlow Radiant Renewal Serum, made with wild Arctic cloudberries and pure hyaluronic acid.",
+      "typoOverlay": {
+        "headline": "NordicGlow Serum",
+        "subtext": "Botanical Arctic Cloudberry Complex"
+      }
+    },
+    {
+      "shotIndex": 2,
+      "abcdStage": "Connect",
+      "durationSeconds": 6,
+      "visualPrompt": "Editorial natural-light portrait of a smiling woman in a Scandinavian sunlit bathroom applying two golden serum drops to her cheek, warm morning light, soft slate and linen tones. Clean commercial cinema frame with no overlaid UI text, buttons, subtitles, or watermarks.",
+      "motionPrompt": "[VISUAL ANCHOR LOCK] Woman in a cream knit sweater in a sunlit minimalist bathroom keeps consistent facial features, hair, and wardrobe. [CAMERA TRAJECTORY] 2.5D Lateral Parallax Glide tracking gently at eye level. [LIGHTING & MICRO-PHYSICS] Soft morning window light illuminates dewy skin as she smiles naturally.",
+      "voiceoverSegment": "One drop delivers deep, lasting hydration and a luminous, balanced glow in twenty-four hours. Dermatologically tested and gentle enough for every morning.",
+      "typoOverlay": {
+        "headline": "Deep, Lasting Hydration",
+        "subtext": "Dermatologically tested moisture barrier support"
+      }
+    },
+    {
+      "shotIndex": 3,
+      "abcdStage": "Direct",
+      "durationSeconds": 6,
+      "visualPrompt": "Hero composition echoing the opening lighting: amber serum bottle beside fresh Arctic cloudberries on dark slate (#0F172A) placed on the left third, generous clean negative space on the right two-thirds lit by golden dawn rim light and ice-blue (#38BDF8) accents. Clean commercial cinema frame with no overlaid UI text, buttons, subtitles, or watermarks.",
+      "motionPrompt": "[VISUAL ANCHOR LOCK] Amber serum bottle and cloudberries on the left third of the dark slate table remain sharp and fixed. [CAMERA TRAJECTORY] Stable Locked Hero Frame with a subtle micro push-in. [LIGHTING & MICRO-PHYSICS] Soft golden morning rim light and gentle floating bokeh particles in the negative space.",
+      "voiceoverSegment": "Reveal your natural radiance today, only with NordicGlow.",
+      "typoOverlay": {
+        "headline": "Your Glow, Every Morning",
+        "subtext": "NordicGlow Radiant Renewal Serum"
+      }
+    }
+  ]
+}

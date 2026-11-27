@@ -1,0 +1,60 @@
+{
+  "id": "rt-cline",
+  "environment": "Cline (VS Code extension)",
+  "tier": "3",
+  "skill_discovery_dirs": [
+    ".clinerules/skills/<name>/ or .cline/skills/<name>/ (UNVERIFIED which, varies by version)"
+  ],
+  "install_target": "agents",
+  "tools": [
+    {
+      "name": "execute_command",
+      "kind": "shell"
+    },
+    {
+      "name": "write_to_file",
+      "kind": "file_write"
+    },
+    {
+      "name": "replace_in_file",
+      "kind": "file_write"
+    },
+    {
+      "name": "read_file",
+      "kind": "file_read"
+    },
+    {
+      "name": "browser_action",
+      "kind": "other"
+    },
+    {
+      "name": "use_mcp_tool",
+      "kind": "other"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "<project>",
+      "~"
+    ],
+    "has_python3": true,
+    "has_network": true
+  },
+  "expected_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent"
+  ],
+  "expected_first_action": "execute_command: python3 <SKILL_DIR>/scripts/env_probe.py",
+  "blockers": [
+    "ffmpeg, Pillow and google-genai must be installed by the user (env_probe.py reports them)",
+    "Application Default Credentials and an explicit --project are required for --execute",
+    "skill directory differs between versions"
+  ],
+  "verdict": "Works-with-fixes",
+  "evidence_urls": [
+    "https://docs.cline.bot/"
+  ],
+  "notes": "UNVERIFIED: skill discovery directory per version; no official document was checked for the tool names (search summary only)."
+}

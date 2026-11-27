@@ -1,0 +1,67 @@
+{
+  "id": "rt-antigravity-ide",
+  "environment": "Google Antigravity IDE (agent manager, agy CLI)",
+  "tier": "1",
+  "skill_discovery_dirs": [
+    "<workspace>/.agent/skills/<name>/",
+    "<workspace>/.agents/skills/<name>/",
+    "~/.gemini/antigravity/skills/<name>/",
+    "~/.agents/skills/<name>/"
+  ],
+  "install_target": "antigravity",
+  "tools": [
+    {
+      "name": "run_command",
+      "kind": "shell",
+      "notes": "UNVERIFIED by an external document"
+    },
+    {
+      "name": "write_to_file",
+      "kind": "file_write",
+      "notes": "UNVERIFIED externally"
+    },
+    {
+      "name": "replace_file_content",
+      "kind": "file_write",
+      "notes": "UNVERIFIED externally"
+    },
+    {
+      "name": "view_file",
+      "kind": "file_read"
+    },
+    {
+      "name": "browser_subagent",
+      "kind": "other"
+    },
+    {
+      "name": "search_web",
+      "kind": "web"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "<project>",
+      "~"
+    ],
+    "has_python3": true,
+    "has_network": true
+  },
+  "expected_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent"
+  ],
+  "expected_first_action": "run_command: python3 <SKILL_DIR>/scripts/env_probe.py",
+  "blockers": [
+    "ffmpeg, Pillow and google-genai must be installed by the user (env_probe.py reports them)",
+    "Application Default Credentials and an explicit --project are required for --execute",
+    "no built-in image/video tool callable by the IDE agent: Path C, never Path B"
+  ],
+  "verdict": "Works",
+  "evidence_urls": [
+    "https://antigravity.google/docs/skills",
+    "https://codelabs.developers.google.com/getting-started-with-antigravity-skills"
+  ],
+  "notes": "UNVERIFIED: shell tool name run_command and the file tool names are not verified by a public document. Known issues at the time of writing: the global skills directory is not always picked up and ~/.agents/skills is not picked up by the CLI, therefore the workspace .agent/skills/ directory is the primary install target (install.sh writes .agent/skills and .agents/skills with --project-dir). The IDE's artifact/browser image generation is not a tool the skill can call."
+}

@@ -1,0 +1,6 @@
+# Development and CI dependencies (tests, lint, benchmarks).
+-r requirements.txt
+pytest==9.2.0
+pyyaml==6.0.3
+jsonschema==4.26.0
+ruff==0.17.5

@@ -1,0 +1,52 @@
+{
+  "id": "rt-openhands",
+  "environment": "OpenHands",
+  "tier": "3",
+  "skill_discovery_dirs": [
+    ".agents/skills/<name>/",
+    ".openhands/skills/<name>/"
+  ],
+  "install_target": "agents",
+  "tools": [
+    {
+      "name": "execute_bash",
+      "kind": "shell"
+    },
+    {
+      "name": "str_replace_editor",
+      "kind": "file_write"
+    },
+    {
+      "name": "browser",
+      "kind": "other"
+    },
+    {
+      "name": "web_read",
+      "kind": "web"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "/workspace"
+    ],
+    "has_python3": true,
+    "has_network": true
+  },
+  "expected_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent"
+  ],
+  "expected_first_action": "execute_bash: python3 <SKILL_DIR>/scripts/env_probe.py",
+  "blockers": [
+    "ffmpeg, Pillow and google-genai must be installed by the user (env_probe.py reports them)",
+    "Application Default Credentials and an explicit --project are required for --execute",
+    "sandbox image may lack ffmpeg"
+  ],
+  "verdict": "Works-with-fixes",
+  "evidence_urls": [
+    "https://docs.all-hands.dev/"
+  ],
+  "notes": "The only Tier 3 tool whose sandbox has a /workspace root: v2.0.0 silently mirrored deliverables there; 2.1.0 mirrors only with --mirror-dir or SCENE_MACHINE_MIRROR_DIR. Path B would apply only if a deployment adds image and video generation tools."
+}

@@ -1,0 +1,56 @@
+{
+  "id": "rt-windsurf",
+  "environment": "Windsurf (Cascade)",
+  "tier": "2",
+  "skill_discovery_dirs": [
+    ".windsurf/skills/<name>/",
+    "~/.codeium/windsurf/skills/<name>/"
+  ],
+  "install_target": "windsurf",
+  "tools": [
+    {
+      "name": "run_command",
+      "kind": "shell"
+    },
+    {
+      "name": "write_to_file",
+      "kind": "file_write"
+    },
+    {
+      "name": "replace_file_content",
+      "kind": "file_write"
+    },
+    {
+      "name": "view_file",
+      "kind": "file_read"
+    },
+    {
+      "name": "search_web",
+      "kind": "web"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "<project>",
+      "~"
+    ],
+    "has_python3": true,
+    "has_network": true
+  },
+  "expected_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent"
+  ],
+  "expected_first_action": "run_command: python3 <SKILL_DIR>/scripts/env_probe.py",
+  "blockers": [
+    "ffmpeg, Pillow and google-genai must be installed by the user (env_probe.py reports them)",
+    "Application Default Credentials and an explicit --project are required for --execute"
+  ],
+  "verdict": "Works",
+  "evidence_urls": [
+    "https://docs.windsurf.com/windsurf/cascade/skills"
+  ],
+  "notes": "Windsurf examples also show allowed-tools and version keys in the frontmatter; both are ignored by the shipped skill."
+}

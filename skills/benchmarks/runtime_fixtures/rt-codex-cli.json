@@ -1,0 +1,56 @@
+{
+  "id": "rt-codex-cli",
+  "environment": "OpenAI Codex CLI / IDE extension (local)",
+  "tier": "1",
+  "skill_discovery_dirs": [
+    "$CWD/.agents/skills/ and parent directories",
+    "$REPO_ROOT/.agents/skills/",
+    "~/.agents/skills/ or $CODEX_HOME/skills/",
+    "/etc/codex/skills/"
+  ],
+  "install_target": "codex",
+  "tools": [
+    {
+      "name": "shell",
+      "kind": "shell",
+      "notes": "sandboxed; approval modes"
+    },
+    {
+      "name": "apply_patch",
+      "kind": "file_write"
+    },
+    {
+      "name": "update_plan",
+      "kind": "other"
+    },
+    {
+      "name": "view_image",
+      "kind": "file_read"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "<project>",
+      "~"
+    ],
+    "has_python3": true,
+    "has_network": true
+  },
+  "expected_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent"
+  ],
+  "expected_first_action": "shell: python3 <SKILL_DIR>/scripts/env_probe.py",
+  "blockers": [
+    "ffmpeg, Pillow and google-genai must be installed by the user (env_probe.py reports them)",
+    "Application Default Credentials and an explicit --project are required for --execute",
+    "shell approval mode may prompt before the probe runs"
+  ],
+  "verdict": "Works",
+  "evidence_urls": [
+    "https://developers.openai.com/codex/skills"
+  ],
+  "notes": "Description budget is strict at discovery (keep well under 1024 characters). v2.0.0 verdict was Works-with-fixes."
+}

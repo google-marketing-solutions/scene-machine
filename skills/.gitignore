@@ -1,0 +1,8 @@
+dist/
+.pytest-tmp/
+__pycache__/
+*.pyc
+.venv/
+.scene_machine/
+.DS_Store
+.ruff_cache/

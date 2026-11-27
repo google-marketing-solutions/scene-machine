@@ -1,0 +1,54 @@
+{
+  "id": "rt-kiro",
+  "environment": "Kiro (AWS)",
+  "tier": "3",
+  "skill_discovery_dirs": [
+    ".kiro/skills/<name>/",
+    "~/.kiro/skills/<name>/"
+  ],
+  "install_target": "agents",
+  "tools": [
+    {
+      "name": "executeBash",
+      "kind": "shell",
+      "notes": "UNVERIFIED"
+    },
+    {
+      "name": "fsWrite",
+      "kind": "file_write",
+      "notes": "UNVERIFIED"
+    },
+    {
+      "name": "fsRead",
+      "kind": "file_read"
+    },
+    {
+      "name": "strReplace",
+      "kind": "file_write"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "<project>",
+      "~"
+    ],
+    "has_python3": true,
+    "has_network": true
+  },
+  "expected_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent"
+  ],
+  "expected_first_action": "executeBash: python3 <SKILL_DIR>/scripts/env_probe.py",
+  "blockers": [
+    "ffmpeg, Pillow and google-genai must be installed by the user (env_probe.py reports them)",
+    "Application Default Credentials and an explicit --project are required for --execute"
+  ],
+  "verdict": "Works-with-fixes",
+  "evidence_urls": [
+    "https://kiro.dev/docs/"
+  ],
+  "notes": "UNVERIFIED: shell tool name executeBash and file tool name fsWrite; skills must live in a subfolder of .kiro/skills."
+}

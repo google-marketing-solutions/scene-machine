@@ -1,0 +1,51 @@
+{
+  "id": "rt-codex-cloud-no-network",
+  "environment": "OpenAI Codex cloud (ephemeral container, network disabled by default)",
+  "tier": "1",
+  "skill_discovery_dirs": [
+    "<repo>/.agents/skills/<name>/ (committed to the repository)"
+  ],
+  "install_target": "codex",
+  "tools": [
+    {
+      "name": "shell",
+      "kind": "shell"
+    },
+    {
+      "name": "apply_patch",
+      "kind": "file_write"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "/workspace/<repo>",
+      "/tmp"
+    ],
+    "has_python3": true,
+    "has_network": false,
+    "has_ffmpeg": false,
+    "has_pillow": false,
+    "has_google_genai": false,
+    "has_gcloud_adc": false
+  },
+  "expected_path": "NONE",
+  "expected_capability_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent",
+    "network-absent",
+    "adc-absent"
+  ],
+  "expected_first_action": "shell: write storyboard.json and run the generator in dry-run (no network needed); then state that no video can be rendered here",
+  "blockers": [
+    "egress disabled by default: pip and Vertex AI are unreachable",
+    "no Application Default Credentials",
+    "becomes Path C only when the environment enables network and provides a service account"
+  ],
+  "verdict": "Works",
+  "evidence_urls": [
+    "https://developers.openai.com/codex/cloud"
+  ],
+  "notes": "Plan-only by design: the skill must deliver the storyboard and the dry-run plan and say that no video was rendered. UNVERIFIED: whether ffmpeg is present in the default image."
+}

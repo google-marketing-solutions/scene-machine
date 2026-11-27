@@ -1,0 +1,272 @@
+{
+  "version": "2026-11-27",
+  "last_verified": "2026-11-27",
+  "models": [
+    {
+      "id": "gemini-3.1-flash-image",
+      "kind": "image",
+      "api": "generate_content_image",
+      "status": "active",
+      "locations": ["global", "us", "eu"],
+      "default": true,
+      "default_location": "global",
+      "aspect_ratios": ["16:9", "9:16", "1:1"],
+      "retire_not_before": "2027-05-28",
+      "unit_cost_note": "per image",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "gemini-nano-banana-2.1",
+      "kind": "image",
+      "api": "generate_content_image",
+      "status": "active",
+      "locations": ["global"],
+      "default_location": "global",
+      "aspect_ratios": ["16:9", "9:16", "1:1"],
+      "unit_cost_note": "per image",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "gemini-3.1-flash-lite-image",
+      "kind": "image",
+      "api": "generate_content_image",
+      "status": "active",
+      "locations": ["global"],
+      "default_location": "global",
+      "aspect_ratios": ["16:9", "9:16", "1:1"],
+      "retire_not_before": "2027-06-28",
+      "unit_cost_note": "per image",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "gemini-3-pro-image",
+      "kind": "image",
+      "api": "generate_content_image",
+      "status": "active",
+      "locations": ["global"],
+      "default_location": "global",
+      "aspect_ratios": ["16:9", "9:16", "1:1"],
+      "retire_not_before": "2027-05-28",
+      "unit_cost_note": "per image",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "gemini-2.5-flash-image",
+      "kind": "image",
+      "api": "generate_content_image",
+      "status": "active",
+      "locations": ["global", "us", "eu"],
+      "default_location": "global",
+      "aspect_ratios": ["16:9", "9:16", "1:1"],
+      "retire_not_before": "2027-03-15",
+      "replacement": "gemini-3.1-flash-lite-image",
+      "notes": "scheduled to retire 2027-03-15; prefer gemini-3.1-flash-lite-image or gemini-3.1-flash-image",
+      "unit_cost_note": "per image",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "imagen-4.0-generate-001",
+      "kind": "image",
+      "api": "generate_images",
+      "status": "retired",
+      "retired_on": "2026-06-30",
+      "replacement": "gemini-3.1-flash-image"
+    },
+    {
+      "id": "imagen-4.0-ultra-generate-001",
+      "kind": "image",
+      "api": "generate_images",
+      "status": "retired",
+      "retired_on": "2026-06-30",
+      "replacement": "gemini-3.1-flash-image"
+    },
+    {
+      "id": "imagen-3.0-generate-002",
+      "kind": "image",
+      "api": "generate_images",
+      "status": "retired",
+      "retired_on": "2026-08-17",
+      "replacement": "gemini-3.1-flash-image",
+      "notes": "deprecated 2026-03-24; shutdown extended from 2026-06-30 to 2026-08-17"
+    },
+    {
+      "id": "imagen-3.0-generate-001",
+      "kind": "image",
+      "api": "generate_images",
+      "status": "retired",
+      "retired_on": "2026-06-30",
+      "replacement": "gemini-3.1-flash-image"
+    },
+    {
+      "id": "veo-3.1-fast-generate-001",
+      "kind": "video",
+      "api": "generate_videos",
+      "status": "active",
+      "locations": ["us-central1", "global"],
+      "default": true,
+      "default_location": "us-central1",
+      "aspect_ratios": ["16:9", "9:16"],
+      "durations": [4, 6, 8],
+      "retire_not_before": "2027-05-04",
+      "successor": "gemini-omni-1.2-flash",
+      "unit_cost_note": "per second of video; audio off by default",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "veo-3.1-generate-001",
+      "kind": "video",
+      "api": "generate_videos",
+      "status": "active",
+      "locations": ["us-central1", "global"],
+      "default_location": "us-central1",
+      "aspect_ratios": ["16:9", "9:16"],
+      "durations": [4, 6, 8],
+      "retire_not_before": "2027-05-04",
+      "successor": "gemini-omni-1.2-flash",
+      "unit_cost_note": "per second of video; audio off by default",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "veo-3.1-lite-generate-001",
+      "kind": "video",
+      "api": "generate_videos",
+      "status": "preview",
+      "locations": ["us-central1", "global"],
+      "default_location": "us-central1",
+      "aspect_ratios": ["16:9", "9:16"],
+      "durations": [4, 6, 8],
+      "unit_cost_note": "per second of video; audio off by default",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "gemini-omni-1.2-flash",
+      "kind": "video",
+      "api": "interactions",
+      "status": "successor",
+      "locations": ["global"],
+      "retire_not_before": "2027-11-05",
+      "notes": "documented Veo 3.1 successor on the Interactions API (requires GCS URI delivery); adapter not implemented"
+    },
+    {
+      "id": "gemini-omni-1.1-flash-preview",
+      "kind": "video",
+      "api": "interactions",
+      "status": "successor",
+      "locations": ["global"],
+      "replacement": "gemini-omni-1.2-flash",
+      "notes": "deprecated Gemini Omni preview on the Interactions API (migrate to gemini-omni-1.2-flash); adapter not implemented"
+    },
+    {
+      "id": "gemini-omni-flash-preview",
+      "kind": "video",
+      "api": "interactions",
+      "status": "successor",
+      "locations": ["global"],
+      "replacement": "gemini-omni-1.2-flash",
+      "notes": "deprecated Gemini Omni preview on the Interactions API (migrate to gemini-omni-1.2-flash); adapter not implemented"
+    },
+    {
+      "id": "veo-3.0-generate-001",
+      "kind": "video",
+      "api": "generate_videos",
+      "status": "retired",
+      "retired_on": "2026-06-30",
+      "replacement": "veo-3.1-generate-001"
+    },
+    {
+      "id": "veo-3.0-fast-generate-001",
+      "kind": "video",
+      "api": "generate_videos",
+      "status": "retired",
+      "retired_on": "2026-06-30",
+      "replacement": "veo-3.1-fast-generate-001"
+    },
+    {
+      "id": "veo-2.0-generate-001",
+      "kind": "video",
+      "api": "generate_videos",
+      "status": "retired",
+      "retired_on": "2026-06-30",
+      "replacement": "veo-3.1-generate-001"
+    },
+    {
+      "id": "gemini-2.5-flash-tts",
+      "kind": "tts",
+      "api": "generate_content_audio",
+      "status": "active",
+      "locations": ["global"],
+      "default": true,
+      "default_location": "global",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "gemini-3.8-flash-tts",
+      "kind": "tts",
+      "api": "generate_content_audio",
+      "status": "active",
+      "locations": ["global", "us", "eu"],
+      "default_location": "global",
+      "notes": "flagship 3.8 TTS; unary requests return WAV bytes directly",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "gemini-3.8-flash-lite-tts",
+      "kind": "tts",
+      "api": "generate_content_audio",
+      "status": "active",
+      "locations": ["global", "us", "eu"],
+      "default_location": "global",
+      "notes": "recommended upgrade for gemini-3.1-flash-tts-preview; unary requests return WAV bytes directly",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "gemini-3.1-flash-tts-preview",
+      "kind": "tts",
+      "api": "generate_content_audio",
+      "status": "preview",
+      "locations": ["global"],
+      "default_location": "global",
+      "replacement": "gemini-3.8-flash-lite-tts",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "gemini-2.5-flash-preview-tts",
+      "kind": "tts",
+      "api": "generate_content_audio",
+      "status": "retired",
+      "replacement": "gemini-2.5-flash-tts",
+      "notes": "absent from the current Gemini-TTS model list"
+    },
+    {
+      "id": "lyria-002",
+      "kind": "music",
+      "api": "predict_rest",
+      "status": "active",
+      "locations": ["global", "us-central1"],
+      "default": true,
+      "default_location": "global",
+      "max_clip_seconds": 32.8,
+      "prompt_language": "en-US",
+      "notes": "model card lists global; API reference sample uses us-central1 - keep both selectable",
+      "last_verified": "2026-11-27"
+    },
+    {
+      "id": "lyria-3-pro-preview",
+      "kind": "music",
+      "api": "interactions",
+      "status": "successor",
+      "locations": ["global"],
+      "max_clip_seconds": 184,
+      "notes": "Lyria 3 preview on the Interactions API (audio/mp3 song output up to 184 s); adapter not implemented"
+    },
+    {
+      "id": "lyria-3-clip-preview",
+      "kind": "music",
+      "api": "interactions",
+      "status": "successor",
+      "locations": ["global"],
+      "max_clip_seconds": 30,
+      "notes": "Lyria 3 preview on the Interactions API (30 s audio/mp3 clip output); adapter not implemented"
+    }
+  ]
+}

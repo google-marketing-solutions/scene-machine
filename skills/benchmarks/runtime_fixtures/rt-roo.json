@@ -1,0 +1,52 @@
+{
+  "id": "rt-roo",
+  "environment": "Roo Code",
+  "tier": "3",
+  "skill_discovery_dirs": [
+    ".roo/skills/<name>/",
+    "~/.roo/skills/<name>/"
+  ],
+  "install_target": "agents",
+  "tools": [
+    {
+      "name": "execute_command",
+      "kind": "shell"
+    },
+    {
+      "name": "write_to_file",
+      "kind": "file_write"
+    },
+    {
+      "name": "apply_diff",
+      "kind": "file_write"
+    },
+    {
+      "name": "read_file",
+      "kind": "file_read"
+    }
+  ],
+  "filesystem": {
+    "writable_roots": [
+      "<project>",
+      "~"
+    ],
+    "has_python3": true,
+    "has_network": true
+  },
+  "expected_path": "C",
+  "expected_detection_signals": [
+    "shell-tool-present",
+    "media-tools-absent",
+    "agent-transfer-absent"
+  ],
+  "expected_first_action": "execute_command: python3 <SKILL_DIR>/scripts/env_probe.py",
+  "blockers": [
+    "ffmpeg, Pillow and google-genai must be installed by the user (env_probe.py reports them)",
+    "Application Default Credentials and an explicit --project are required for --execute"
+  ],
+  "verdict": "Works-with-fixes",
+  "evidence_urls": [
+    "https://docs.roocode.com/"
+  ],
+  "notes": "UNVERIFIED: discovery directories and tool names come from a search summary, not from a checked official page."
+}
