@@ -136,7 +136,7 @@ Turn-1 steps:
 
 ## Section C - Shell runtime with Vertex AI (dry-run first)
 
-Prerequisites: Python 3.10+, ffmpeg and ffprobe, Pillow, google-genai,
+Prerequisites: Python 3.11+, ffmpeg and ffprobe, Pillow, google-genai,
 application default credentials and a Google Cloud project with the Vertex
 AI API enabled. Both scripts exit 0 ok, 2 usage, 3 missing input,
 4 dependency missing, 5 invalid storyboard, 6 verification failed,

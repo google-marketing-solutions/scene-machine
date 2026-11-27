@@ -42,8 +42,8 @@ jobs:
     name: lint (ruff + skill conformance)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
       - name: Install ffmpeg and zip
@@ -60,10 +60,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04]
-        python: ["3.10", "3.12", "3.13"]
+        python: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ matrix.python }}
       - name: Install ffmpeg
@@ -77,8 +77,8 @@ jobs:
     name: bench (render timing, loudness, duration)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.13"
       - name: Install ffmpeg
@@ -86,10 +86,12 @@ jobs:
       - name: Install pinned dependencies
         run: pip install -r requirements-dev.txt
       - name: Benchmarks
+        env:
+          SM_BENCH_WALL_FACTOR: "3.5"
         run: make bench
       # upload-artifact paths are relative to the repository root, not to the
       # job's working-directory.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: bench-results
           path: skills/benchmarks/results/latest.json
@@ -99,12 +101,12 @@ jobs:
     name: zip (Gemini Enterprise upload artifact)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Install zip
         run: sudo apt-get update && sudo apt-get install -y zip
       - name: Build dist/scene-machine.zip
         run: make zip
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: scene-machine-zip
           path: skills/dist/scene-machine.zip

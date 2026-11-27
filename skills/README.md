@@ -51,7 +51,7 @@ development tooling.
 
 ## Prerequisites
 
-- Python >= 3.10 (developed and tested with 3.13; CI runs 3.10, 3.12 and 3.13).
+- Python >= 3.11 (developed and tested with 3.13; CI runs 3.11, 3.12 and 3.13).
 - ffmpeg and ffprobe >= 6 recommended (developed against 9.0.2; CI also runs
   the 4.4 and 6.1 builds shipped by Ubuntu 22.04 and 24.04). Debian/Ubuntu:
   `sudo apt-get install -y ffmpeg`; macOS: `brew install ffmpeg`.
