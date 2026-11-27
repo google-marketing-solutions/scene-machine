@@ -40,6 +40,7 @@ from conftest import (
   find_error,
   find_warnings,
   json_lines,
+  load_script,
   parse_summary,
   run_py,
 )
@@ -588,6 +589,17 @@ def test_normalize_image_bad_hex_exit_2(media_dir: Path, tmp_path: Path) -> None
   )
   assert proc.returncode == 2, proc.stderr
   assert "bg-hex" in proc.stderr or "hex" in proc.stderr.lower()
+
+
+def test_one_line_collapses_whitespace_and_truncates() -> None:
+  mod = load_script(ASSEMBLER)
+  assert mod.one_line("  hello\n\tworld\r\nagain  ") == "hello world again"
+  long_msg = "x" * 700
+  capped = mod.one_line(long_msg)
+  assert len(capped) == 600 and capped.endswith("...")
+  assert mod.one_line("abcdef", limit=5) == "ab..."
+  assert mod.one_line("abcdef", limit=2) == "ab"
+  assert mod.one_line("abcdef", limit=0) == ""
 
 
 def test_no_pycache_left_by_renders() -> None:

@@ -110,26 +110,32 @@ generative AI pricing page:
 ## Model availability, regions and lifecycle
 
 Model ids, API families, locations and lifecycle status live in
-`scene-machine/scripts/model_registry.json` (`last_verified` 2026-11-20).
+`scene-machine/scripts/model_registry.json` (`last_verified` 2026-11-27).
 `python3 scene-machine/scripts/generate_ad_spot_vertex.py --list-models` prints
 the table.
 
 | Kind | Default model | Location | Notes |
 | :--- | :--- | :--- | :--- |
-| image | `gemini-3.1-flash-image` | `--location` (default `us-central1`; `global` also listed) | keyframes via `generate_content` with an image response modality |
-| video | `veo-3.1-fast-generate-001` | `--location` (default `us-central1`) | 16:9 or 9:16, 4/6/8 s clips, audio off by default; `veo-3.1-generate-001` selectable |
-| tts | `gemini-2.5-flash-tts` | `global` | voice `--voice` (default `Kore`), language from the storyboard; `gemini-3.1-flash-tts-preview` selectable |
+| image | `gemini-3.1-flash-image` | `global` by default (`us`, `eu` also listed; override with `--location`) | keyframes via `generate_content` (`IMAGE` modality); also selectable: `gemini-nano-banana-2.1`, `gemini-3.1-flash-lite-image`, `gemini-3-pro-image`, `gemini-2.5-flash-image` (retiring 2027-03-15) |
+| video | `veo-3.1-fast-generate-001` | `us-central1` by default (`global` also listed; override with `--location`) | 16:9 or 9:16, 4/6/8 s clips, audio off by default; also selectable: `veo-3.1-generate-001`, `veo-3.1-lite-generate-001` (preview) |
+| tts | `gemini-2.5-flash-tts` | `global` (`us`, `eu` also listed on 3.8 models) | voice `--voice` (default `Kore`), language from the storyboard; also selectable: `gemini-3.8-flash-tts`, `gemini-3.8-flash-lite-tts`, `gemini-3.1-flash-tts-preview` |
 | music | `lyria-002` | `--music-location` (default `global`; `us-central1` selectable) | public docs disagree on the location (model card: `global`; API sample: `us-central1`), so both are selectable; English prompts only |
 
 - Retired ids are rejected before any call with the replacement named:
-  `imagen-3.0-generate-002` -> `gemini-3.1-flash-image`,
+  Imagen 3/4 (`imagen-3.0-generate-001`, `imagen-3.0-generate-002`,
+  `imagen-4.0-generate-001`, `imagen-4.0-ultra-generate-001`) ->
+  `gemini-3.1-flash-image`, Veo 2/3.0 (`veo-2.0-generate-001`,
+  `veo-3.0-generate-001`, `veo-3.0-fast-generate-001`) -> Veo 3.1, and
   `gemini-2.5-flash-preview-tts` -> `gemini-2.5-flash-tts`.
-- The documented Veo 3.1 successor `gemini-omni-1.2-flash` is recorded in the
-  registry with `status: successor` and `api: tbd`; it has a different API
-  shape and no adapter yet, so it is not selectable.
-- Availability per region and the lifecycle dates were checked against the
-  public model pages on 2026-11-20 and could not be exercised live here (no
-  project). Re-verify the registry before each release and update
+- Interactions API media models (`gemini-omni-1.2-flash`, deprecated previews
+  `gemini-omni-1.1-flash-preview` and `gemini-omni-flash-preview`, plus
+  `lyria-3-pro-preview` and `lyria-3-clip-preview`) are recorded in the
+  registry with `status: successor` and `api: interactions`; they use a
+  different API shape (GCS URI video delivery for Omni; MP3 song output for
+  Lyria 3) and have no adapter yet, so they are not selectable.
+- Availability per region and the lifecycle dates were verified against the
+  public Google Cloud model catalog on 2026-11-27 and exercised live on
+  Vertex AI. Re-verify the registry before each release and update
   `last_verified` (the lint fails when it is older than 180 days).
 
 ## Authentication
@@ -270,7 +276,7 @@ Abbreviated dry-run output for the 5-scene example:
     project: - (source: none)
     plan (one row per call kind):
     kind | model | location | count | unit_cost_note
-    image | gemini-3.1-flash-image | us-central1 | 5 | per image
+    image | gemini-3.1-flash-image | global | 5 | per image
     video | veo-3.1-fast-generate-001 | us-central1 | 5 | per second of video; audio off by default
     tts | gemini-2.5-flash-tts | global | 1 | per text token and second of output audio
     music | lyria-002 | global | 1 | per generated clip
@@ -294,7 +300,7 @@ with `"rendered": false`.
 | `--dry-run` | on | validate, print the plan, import no SDK, make no call |
 | `--execute` | off | perform the paid calls; needs an explicit project |
 | `--project ID` | `GOOGLE_CLOUD_PROJECT` | project to bill; the gcloud default is shown as a hint only |
-| `--location REGION` | `us-central1` | Vertex AI region for the image and video models |
+| `--location LOC` | per-model default (`global` image/TTS, `us-central1` Veo) | Vertex AI location override for image and video models (and TTS when supported) |
 | `--music-location LOC` | `global` | Lyria endpoint location (`global` or a region such as `us-central1`) |
 | `--image-model ID` | `gemini-3.1-flash-image` | registry id with status `active` or `preview` |
 | `--video-model ID` | `veo-3.1-fast-generate-001` | same |

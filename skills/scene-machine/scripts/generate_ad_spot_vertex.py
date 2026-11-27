@@ -502,17 +502,33 @@ def validate_storyboard(
   return validation, warnings
 
 
+def _default_model_location(entry: dict[str, Any]) -> str:
+  listed = list(entry.get("locations") or [])
+  if entry.get("default_location"):
+    return str(entry["default_location"])
+  if "us-central1" in listed or not listed:
+    return "us-central1"
+  return str(listed[0])
+
+
 def resolve_locations(
   args: argparse.Namespace, models: dict[str, dict[str, Any]]
 ) -> dict[str, str]:
-  """image/video: --location; tts: --location if listed else the model's home; music: --music-location."""
+  """Resolves per-kind locations, respecting an explicit --location override when given."""
+  if args.location is None:
+    return {
+      "image": _default_model_location(models["image"]),
+      "video": _default_model_location(models["video"]),
+      "tts": _default_model_location(models["tts"]),
+      "music": args.music_location,
+    }
   locations = {"image": args.location, "video": args.location, "music": args.music_location}
   tts_entry = models["tts"]
   tts_locations = list(tts_entry.get("locations") or [])
   if args.location in tts_locations or not tts_locations:
     locations["tts"] = args.location
   else:
-    locations["tts"] = str(tts_entry.get("default_location") or tts_locations[0])
+    locations["tts"] = _default_model_location(tts_entry)
   return locations
 
 
@@ -964,7 +980,12 @@ def build_parser() -> argparse.ArgumentParser:
     ),
   )
   parser.add_argument(
-    "--location", default="us-central1", help="Vertex AI region for image and video models."
+    "--location",
+    default=None,
+    help=(
+      "Vertex AI location override for image and video models (and TTS when supported); "
+      "defaults to each model's default_location in model_registry.json."
+    ),
   )
   parser.add_argument(
     "--music-location",

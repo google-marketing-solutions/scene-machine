@@ -126,9 +126,14 @@ class AssemblyError(RuntimeError):
     return payload
 
 
-def one_line(text: Any) -> str:
-  """Collapses whitespace so a message always fits on a single line."""
-  return " ".join(str(text).split())
+def one_line(text: Any, limit: int = 600) -> str:
+  """Collapses whitespace (removing line breaks) and truncates to `limit` chars."""
+  flat = " ".join(str(text).split())
+  if limit <= 0:
+    return ""
+  if len(flat) <= limit:
+    return flat
+  return (flat[: limit - 3] + "...") if limit > 3 else flat[:limit]
 
 
 def emit_stderr_json(payload: dict[str, Any]) -> None:

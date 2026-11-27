@@ -181,9 +181,7 @@ def test_dry_run_is_default_and_needs_no_sdk(
   for kind, model in DEFAULTS.items():
     assert by_kind[kind]["model"] == model, by_kind[kind]
     assert by_kind[kind]["unit_cost_note"], kind
-  assert (
-    by_kind["image"]["location"] == "us-central1" and by_kind["video"]["location"] == "us-central1"
-  )
+  assert by_kind["image"]["location"] == "global" and by_kind["video"]["location"] == "us-central1"
   assert by_kind["tts"]["location"] == "global" and by_kind["music"]["location"] == "global"
   table = out[: out.rfind("\n{")] if "\n{" in out else out
   for token in ("image", "video", "tts", "music", DEFAULTS["video"], "us-central1"):
@@ -293,9 +291,13 @@ def test_execute_without_sdk_exits_4(
   "flag, value, replacement",
   [
     ("--image-model", "imagen-3.0-generate-002", "gemini-3.1-flash-image"),
+    ("--image-model", "imagen-4.0-generate-001", "gemini-3.1-flash-image"),
+    ("--video-model", "veo-3.0-generate-001", "veo-3.1-generate-001"),
     ("--tts-model", "gemini-2.5-flash-preview-tts", "gemini-2.5-flash-tts"),
     ("--image-model", "no-such-model-123", None),
     ("--video-model", "gemini-omni-1.2-flash", None),
+    ("--video-model", "gemini-omni-1.1-flash-preview", None),
+    ("--music-model", "lyria-3-clip-preview", None),
   ],
 )
 def test_unknown_or_retired_models_exit_2(
@@ -326,21 +328,80 @@ def test_list_models_prints_registry(capfd: pytest.CaptureFixture[str]) -> None:
   assert rc == 0
   for model in (
     *DEFAULTS.values(),
+    "gemini-nano-banana-2.1",
+    "gemini-3.1-flash-lite-image",
+    "gemini-3-pro-image",
+    "gemini-2.5-flash-image",
     "imagen-3.0-generate-002",
-    "gemini-2.5-flash-preview-tts",
     "veo-3.1-generate-001",
+    "veo-3.1-lite-generate-001",
+    "gemini-3.8-flash-tts",
+    "gemini-3.8-flash-lite-tts",
+    "gemini-2.5-flash-preview-tts",
+    "lyria-3-pro-preview",
+    "lyria-3-clip-preview",
   ):
     assert model in out, model
   for token in (
     "retired",
     "active",
+    "preview",
+    "successor",
     "default",
     "last_verified",
     "replacement",
     "generate_videos",
     "predict_rest",
+    "interactions",
   ):
     assert token in out, token
+
+
+def test_selectable_new_models_and_location_override(
+  tmp_path: Path, capfd: pytest.CaptureFixture[str]
+) -> None:
+  sb = write_sb(tmp_path)
+  rc, out, err = run_gen(
+    capfd,
+    [
+      "--storyboard",
+      str(sb),
+      "--image-model",
+      "gemini-nano-banana-2.1",
+      "--video-model",
+      "veo-3.1-lite-generate-001",
+      "--tts-model",
+      "gemini-3.8-flash-tts",
+      "--output-dir",
+      str(tmp_path / "out"),
+    ],
+  )
+  assert rc == 0 and err.strip() == "", (out, err)
+  by_kind = {row["kind"]: row for row in dry_json(out)["plan"]}
+  assert by_kind["image"]["model"] == "gemini-nano-banana-2.1"
+  assert by_kind["image"]["location"] == "global"
+  assert by_kind["video"]["model"] == "veo-3.1-lite-generate-001"
+  assert by_kind["video"]["location"] == "us-central1"
+  assert by_kind["tts"]["model"] == "gemini-3.8-flash-tts"
+  assert by_kind["tts"]["location"] == "global"
+
+  rc2, out2, err2 = run_gen(
+    capfd,
+    [
+      "--storyboard",
+      str(sb),
+      "--location",
+      "europe-west4",
+      "--output-dir",
+      str(tmp_path / "out2"),
+    ],
+  )
+  assert rc2 == 0
+  by_kind2 = {row["kind"]: row for row in dry_json(out2)["plan"]}
+  assert by_kind2["image"]["location"] == "europe-west4"
+  assert by_kind2["video"]["location"] == "europe-west4"
+  assert by_kind2["tts"]["location"] == "global"
+  assert "location_unverified" in err2
 
 
 # ---------------------------------------------------------------------------
@@ -446,7 +507,7 @@ def test_end_to_end_with_fakes_5_scenes(
   )
   for call in fake_sdk.of("image"):
     assert call["api"] == "generate_content_image" and call["model"] == DEFAULTS["image"]
-    assert call["aspect_ratio"] == "16:9" and call["location"] == "us-central1"
+    assert call["aspect_ratio"] == "16:9" and call["location"] == "global"
   for call in fake_sdk.of("video"):
     assert call["model"] == DEFAULTS["video"] and call["location"] == "us-central1"
     assert call["duration_seconds"] == 6 and call["aspect_ratio"] == "16:9"

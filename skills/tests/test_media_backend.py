@@ -215,7 +215,26 @@ def test_registry_entries_have_api_and_dates(registry: dict[str, Any]) -> None:
       assert (today - verified).days < 180, f"{entry['id']} last_verified {verified} is stale"
     if entry["status"] == "retired":
       assert entry.get("replacement"), entry["id"]
+  all_ids = {m["id"] for m in registry["models"]}
+  assert {
+    "gemini-nano-banana-2.1",
+    "gemini-3.1-flash-lite-image",
+    "gemini-3-pro-image",
+    "gemini-2.5-flash-image",
+    "veo-3.1-lite-generate-001",
+    "gemini-omni-1.1-flash-preview",
+    "gemini-omni-flash-preview",
+    "gemini-3.8-flash-tts",
+    "gemini-3.8-flash-lite-tts",
+    "lyria-3-pro-preview",
+    "lyria-3-clip-preview",
+  } <= all_ids
   retired = {m["id"] for m in registry["models"] if m["status"] == "retired"}
-  assert {"imagen-3.0-generate-002", "gemini-2.5-flash-preview-tts"} <= retired
+  assert {
+    "imagen-4.0-generate-001",
+    "imagen-3.0-generate-002",
+    "veo-3.0-generate-001",
+    "gemini-2.5-flash-preview-tts",
+  } <= retired
   music = next(m for m in registry["models"] if m["id"] == "lyria-002")
   assert music["api"] == "predict_rest" and "global" in music["locations"]

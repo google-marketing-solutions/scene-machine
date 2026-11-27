@@ -37,15 +37,19 @@ benchmarks/results/COMPARISON.md.
 ### Added
 
 - Model registry and adapters (M1): `scene-machine/scripts/model_registry.json`
-  with an `api` discriminator, per-model locations, `status`
-  (`active`, `preview`, `retired`, `successor`) and `last_verified`
-  (2026-11-20); `media_backend.py` with one adapter per API family
-  (Gemini image generation via `generate_content` plus `ImageConfig`, Veo
-  `generate_videos` with `duration_seconds` taken from the storyboard and
-  audio generation off by default, Gemini TTS with `language_code`, Lyria 2
-  via REST on the host that matches the location); one client per location;
-  `--list-models`; the Veo successor `gemini-omni-1.2-flash` is recorded with
-  `api: tbd`.
+  with an `api` discriminator, per-model locations and `default_location`,
+  `status` (`active`, `preview`, `retired`, `successor`) and `last_verified`
+  (2026-11-27) covering Gemini Image (`gemini-3.1-flash-image`,
+  `gemini-nano-banana-2.1`, `gemini-3.1-flash-lite-image`,
+  `gemini-3-pro-image`, `gemini-2.5-flash-image`), Veo 3.1
+  (`veo-3.1-fast-generate-001`, `veo-3.1-generate-001`,
+  `veo-3.1-lite-generate-001`), Gemini TTS (`gemini-2.5-flash-tts`,
+  `gemini-3.8-flash-tts`, `gemini-3.8-flash-lite-tts`,
+  `gemini-3.1-flash-tts-preview`), Lyria 2 (`lyria-002`), retired Imagen 3/4
+  and Veo 2/3.0 ids, and Interactions API entries (`gemini-omni-1.2-flash`,
+  Omni previews, `lyria-3-pro-preview`, `lyria-3-clip-preview`) recorded with
+  `api: interactions`; `media_backend.py` with one adapter per API family and
+  one client per location; `--list-models`.
 - Dry-run plan and explicit execution (M2): prerequisite block (ffmpeg,
   ffprobe, Pillow, google-genai importable, ADC file, gcloud project hint),
   storyboard validation before any call, plan table with per-kind call counts,

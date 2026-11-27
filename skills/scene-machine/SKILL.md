@@ -171,7 +171,7 @@ AI API enabled. Both scripts exit 0 ok, 2 usage, 3 missing input,
    python3 "<SKILL_DIR>/scripts/generate_ad_spot_vertex.py" \
      --storyboard "$WORK/storyboard.json" --execute --project <id>
    ```
-   Options: `--location` (default `us-central1`), `--music-location`
+   Options: `--location` (per-model default), `--music-location`
    (default `global`), `--voice` (default `Kore`), `--max-workers` (3),
    `--poll-interval` (10 s), `--poll-timeout` (900 s), `--veo-audio`,
    `--veo-resolution`, `--image-model/--video-model/--tts-model/--music-model`,
